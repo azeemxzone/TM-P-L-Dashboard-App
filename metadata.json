@@ -1,0 +1,6 @@
+{
+  "name": "Tabbymart Stage 1 - P&L Core Master",
+  "description": "Tabbymart internal master data manager: Settings, Cost Master with effective dates, SKU Mappings, and authorized Google sign-in access control.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

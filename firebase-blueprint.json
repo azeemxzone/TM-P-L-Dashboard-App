@@ -1,0 +1,194 @@
+{
+  "entities": {
+    "AllowedUsers": {
+      "title": "AllowedUsers",
+      "description": "Authorized emails permitted to enter the application with roles (admin or viewer)",
+      "type": "object",
+      "properties": {
+        "emails": {
+          "type": "array",
+          "description": "List of authorized email addresses"
+        },
+        "admins": {
+          "type": "array",
+          "description": "List of admin email addresses"
+        },
+        "roles": {
+          "type": "object",
+          "description": "Mapping from email to role (admin or viewer)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Email of user who made the update"
+        }
+      },
+      "required": ["emails"]
+    },
+    "SettingConfig": {
+      "title": "SettingConfig",
+      "description": "Application packing charge, inbound freight, and marketplace customer-return percentages",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Document type identifier 'config'"
+        },
+        "packing_per_dispatched_unit": {
+          "type": "number",
+          "description": "Packing charge per dispatched unit in INR (default 6)"
+        },
+        "inbound_freight_per_purchased_unit": {
+          "type": "number",
+          "description": "Inbound freight per purchased unit in INR (default 5)"
+        },
+        "flipkart_not_sellable_pct": {
+          "type": "number",
+          "description": "Customer-return not-sellable percentage for Flipkart (default 5%)"
+        },
+        "amazon_not_sellable_pct": {
+          "type": "number",
+          "description": "Customer-return not-sellable percentage for Amazon (default 5%)"
+        },
+        "meesho_not_sellable_pct": {
+          "type": "number",
+          "description": "Customer-return not-sellable percentage for Meesho (default 5%)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of last update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "User email who updated the settings"
+        }
+      },
+      "required": ["packing_per_dispatched_unit", "inbound_freight_per_purchased_unit", "flipkart_not_sellable_pct", "amazon_not_sellable_pct", "meesho_not_sellable_pct"]
+    },
+    "SettingAudit": {
+      "title": "SettingAudit",
+      "description": "Audit log record for changes made to application settings",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Document type identifier 'audit'"
+        },
+        "setting_key": {
+          "type": "string",
+          "description": "Name or key of the setting modified"
+        },
+        "old_value": {
+          "type": "string",
+          "description": "Old value before change"
+        },
+        "new_value": {
+          "type": "string",
+          "description": "New value after change"
+        },
+        "user_email": {
+          "type": "string",
+          "description": "Email of user who made the change"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "ISO timestamp of the change"
+        }
+      },
+      "required": ["setting_key", "old_value", "new_value", "user_email", "timestamp"]
+    },
+    "CostMasterItem": {
+      "title": "CostMasterItem",
+      "description": "Cost master record with sku_code, sku_name, weight_grams, mfg_cost, active, and effective_from",
+      "type": "object",
+      "properties": {
+        "sku_code": {
+          "type": "string",
+          "description": "Unique SKU code identifier",
+          "maxLength": 100
+        },
+        "sku_name": {
+          "type": "string",
+          "description": "Product display name",
+          "maxLength": 500
+        },
+        "weight_grams": {
+          "type": "number",
+          "description": "Product weight in grams"
+        },
+        "mfg_cost": {
+          "type": "number",
+          "description": "Manufacturing or base procurement cost in INR"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Active status of SKU (soft delete when false)"
+        },
+        "effective_from": {
+          "type": "string",
+          "description": "Effective date string (YYYY-MM-DD)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "User who created this cost record"
+        }
+      },
+      "required": ["sku_code", "sku_name", "weight_grams", "mfg_cost", "active", "effective_from"]
+    },
+    "SkuVariantItem": {
+      "title": "SkuVariantItem",
+      "description": "Mapping from variant SKU to master SKU code (replaces marketplace mapping)",
+      "type": "object",
+      "properties": {
+        "variant_sku": {
+          "type": "string",
+          "description": "Unique variant SKU code across marketplaces",
+          "maxLength": 200
+        },
+        "master_sku": {
+          "type": "string",
+          "description": "Canonical SKU code in cost master",
+          "maxLength": 100
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Active flag for the variant mapping"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "User who created this mapping"
+        }
+      },
+      "required": ["variant_sku", "master_sku", "active"]
+    }
+  },
+  "firestore": {
+    "/allowedUsers/{docId}": {
+      "schema": "AllowedUsers",
+      "description": "List of authorized user emails and roles (admin or viewer)"
+    },
+    "/settings/{docId}": {
+      "schema": "SettingConfig",
+      "description": "Application settings configuration and create-only audit log entries"
+    },
+    "/cost_master/{itemId}": {
+      "schema": "CostMasterItem",
+      "description": "Effective-dated cost master rows with weight_grams, mfg_cost, and active status"
+    },
+    "/sku_variants/{variantId}": {
+      "schema": "SkuVariantItem",
+      "description": "Mappings from variant SKUs to canonical master SKU codes"
+    }
+  }
+}
