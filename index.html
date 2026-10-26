@@ -1,19 +1,35 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tabbymart Stage 1 - P&amp;L Core Master</title>
-    <meta name="description" content="Tabbymart internal master data manager: Settings, Cost Master with effective dates, SKU Mappings, and authorized Google sign-in access control." />
+    <meta name="description" content="Tabbymart internal master data manager: Settings, Cost Master with effective dates, and authorized Google sign-in access control." />
     <meta property="og:title" content="Tabbymart Stage 1 - P&amp;L Core Master" />
-    <meta property="og:description" content="Tabbymart internal master data manager: Settings, Cost Master with effective dates, SKU Mappings, and authorized Google sign-in access control." />
+    <meta property="og:description" content="Tabbymart internal master data manager: Settings, Cost Master with effective dates, and authorized Google sign-in access control." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        try {
+          var theme = localStorage.getItem('tabbymart_theme');
+          if (theme === 'light') {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+          } else {
+            document.documentElement.classList.add('dark');
+            document.documentElement.classList.remove('light');
+          }
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-slate-900 text-slate-100 antialiased font-sans">
+  <body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased font-sans transition-colors duration-150">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -2,11 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   calculateStandardCost,
   getCostAsOf,
-  resolveMasterSku,
-  validateUniqueVariant,
   formatINR,
+  computeWeightedAverage,
+  getAvgCostAsOf,
+  validatePurchaseRow,
+  isDuplicatePurchase,
 } from './costCalculator';
-import { CostMasterItem } from '../types';
+import { CostMasterItem, StockEvent, PurchaseRow } from '../types';
 
 describe('calculateStandardCost', () => {
   it('calculates standard landed cost with default inbound freight (5 INR)', () => {
@@ -114,41 +116,6 @@ describe('getCostAsOf', () => {
   });
 });
 
-describe('resolveMasterSku', () => {
-  const sampleVariants = [
-    { variant_sku: 'TM-CA-001-BLK', master_sku: 'TM-CA-001', active: true },
-    { variant_sku: 'TM-CA-001-RD', master_sku: 'TM-CA-001', active: true },
-    { variant_sku: 'TM-KH-002', master_sku: 'TM-KH-001', active: true },
-    { variant_sku: 'INACTIVE-VAR', master_sku: 'TM-PC-001', active: false },
-  ];
-  const masterSkus = new Set(['TM-CA-001', 'TM-KH-001', 'TM-PC-001', 'TM-ST-001']);
-
-  it('resolves variant hit to its master_sku', () => {
-    expect(resolveMasterSku('TM-CA-001-BLK', sampleVariants, masterSkus)).toBe('TM-CA-001');
-    expect(resolveMasterSku('TM-KH-002', sampleVariants, masterSkus)).toBe('TM-KH-001');
-  });
-
-  it('resolves master-code hit implicitly to itself', () => {
-    // master_sku code implicitly maps to itself
-    expect(resolveMasterSku('TM-CA-001', sampleVariants, masterSkus)).toBe('TM-CA-001');
-    expect(resolveMasterSku('TM-ST-001', sampleVariants, masterSkus)).toBe('TM-ST-001');
-  });
-
-  it('returns UNMAPPED for unknown SKU codes', () => {
-    expect(resolveMasterSku('RANDOM-UNKNOWN-SKU', sampleVariants, masterSkus)).toBe('UNMAPPED');
-    expect(resolveMasterSku('', sampleVariants, masterSkus)).toBe('UNMAPPED');
-  });
-
-  it('rejects duplicate variant_sku with clear error message', () => {
-    const errorMsg = validateUniqueVariant('TM-CA-001-BLK', sampleVariants);
-    expect(errorMsg).toContain('already exists');
-
-    // Case-sensitive exact check
-    const validResult = validateUniqueVariant('TM-CA-001-NEW', sampleVariants);
-    expect(validResult).toBeNull();
-  });
-});
-
 describe('formatINR', () => {
   it('formats currency with INR symbol, commas, and 2 decimal places', () => {
     const formatted = formatINR(150);
@@ -166,3 +133,294 @@ describe('formatINR', () => {
     expect(formatINR(undefined)).toMatch(/₹\s*0\.00/);
   });
 });
+
+describe('computeWeightedAverage', () => {
+  it('calculates weighted average: opening 50 @ 33 landed + purchase 50 @ 45 landed, no issues -> avg 39.00, qty 100', () => {
+    const events: StockEvent[] = [
+      { type: 'opening', date: '2026-04-01', qty: 50, landed_rate: 33 },
+      { type: 'purchase', date: '2026-04-15', qty: 50, landed_rate: 45 },
+    ];
+    const result = computeWeightedAverage(events);
+    expect(result.avg).toBe(39.0);
+    expect(result.avg_landed_cost).toBe(39.0);
+    expect(result.qty).toBe(100);
+    expect(result.on_hand_qty).toBe(100);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it('calculates moving weighted average with issue: opening 50 @ 33, issue 30, purchase 50 @ 45 -> qty 70, avg 41.57', () => {
+    const events: StockEvent[] = [
+      { type: 'opening', date: '2026-04-01', qty: 50, landed_rate: 33 },
+      { type: 'issue', date: '2026-04-10', qty: 30 },
+      { type: 'purchase', date: '2026-04-15', qty: 50, landed_rate: 45 },
+    ];
+    const result = computeWeightedAverage(events);
+    expect(result.qty).toBe(70);
+    expect(result.on_hand_qty).toBe(70);
+    expect(result.avg).toBe(41.57);
+    expect(result.avg_landed_cost).toBe(41.57);
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it('excludes void rows from calculations', () => {
+    const events: StockEvent[] = [
+      { type: 'opening', date: '2026-04-01', qty: 50, landed_rate: 33 },
+      { type: 'purchase', date: '2026-04-08', qty: 100, landed_rate: 100, is_void: true },
+      { type: 'purchase', date: '2026-04-10', qty: 80, landed_rate: 80, void: true },
+      { type: 'purchase', date: '2026-04-15', qty: 50, landed_rate: 45 },
+    ];
+    const result = computeWeightedAverage(events);
+    // Only opening (50 @ 33) and purchase (50 @ 45) should count
+    expect(result.avg).toBe(39.0);
+    expect(result.qty).toBe(100);
+  });
+
+  it('floors on_hand at 0 with warning when issues exceed available stock', () => {
+    const events: StockEvent[] = [
+      { type: 'opening', date: '2026-04-01', qty: 20, landed_rate: 33 },
+      { type: 'issue', date: '2026-04-05', qty: 35 },
+    ];
+    const result = computeWeightedAverage(events);
+    expect(result.on_hand_qty).toBe(0);
+    expect(result.qty).toBe(0);
+    expect(result.avg_landed_cost).toBe(33); // avg unchanged
+    expect(result.warnings.length).toBeGreaterThan(0);
+    expect(result.warnings[0]).toMatch(/underflow/i);
+  });
+});
+
+describe('getAvgCostAsOf', () => {
+  const stockEvents: StockEvent[] = [
+    {
+      type: 'purchase',
+      date: '2026-04-05',
+      sku_code: 'TM-PC-001',
+      qty: 50,
+      landed_rate: 33,
+      mfg_rate: 28,
+    },
+    {
+      type: 'purchase',
+      date: '2026-04-20',
+      sku_code: 'TM-PC-001',
+      qty: 100,
+      landed_rate: 999,
+      is_void: true, // void row should be ignored
+    },
+    {
+      type: 'purchase',
+      date: '2026-05-05',
+      sku_code: 'TM-PC-001',
+      qty: 50,
+      landed_rate: 45,
+      mfg_rate: 40,
+    },
+    {
+      type: 'purchase',
+      date: '2026-04-10',
+      sku_code: 'TM-CA-001',
+      qty: 40,
+      landed_rate: 120,
+      mfg_rate: 115,
+    },
+  ];
+
+  it('as-of date between two purchases returns the earlier average', () => {
+    // Between 2026-04-05 and 2026-05-05 -> returns first purchase only
+    const result = getAvgCostAsOf('TM-PC-001', '2026-04-25', stockEvents);
+    expect(result).not.toBeNull();
+    expect(result?.avg_landed_cost).toBe(33);
+    expect(result?.avg_mfg_cost).toBe(28);
+    expect(result?.on_hand_qty).toBe(50);
+  });
+
+  it('as-of date on or after second purchase returns the combined average', () => {
+    const result = getAvgCostAsOf('TM-PC-001', '2026-05-10', stockEvents);
+    expect(result).not.toBeNull();
+    expect(result?.avg_landed_cost).toBe(39.0);
+    expect(result?.avg_mfg_cost).toBe(34.0); // (50*28 + 50*40)/100 = 3400/100 = 34
+    expect(result?.on_hand_qty).toBe(100);
+  });
+
+  it('returns null if date is prior to any events or SKU has no events', () => {
+    // Before first event
+    expect(getAvgCostAsOf('TM-PC-001', '2026-04-01', stockEvents)).toBeNull();
+    // Non-existent SKU
+    expect(getAvgCostAsOf('TM-UNKNOWN', '2026-05-10', stockEvents)).toBeNull();
+  });
+
+  it('excludes void rows and returns null if all events are void', () => {
+    const voidOnly: StockEvent[] = [
+      {
+        type: 'purchase',
+        date: '2026-04-05',
+        sku_code: 'TM-VOID',
+        qty: 10,
+        landed_rate: 50,
+        is_void: true,
+      },
+    ];
+    expect(getAvgCostAsOf('TM-VOID', '2026-05-01', voidOnly)).toBeNull();
+  });
+});
+
+describe('validatePurchaseRow and isDuplicatePurchase', () => {
+  const knownSkus = ['TM-PC-001', 'TM-CA-001'];
+
+  it('validates a correct purchase row', () => {
+    const validRow: Partial<PurchaseRow> = {
+      date: '2026-04-15',
+      sku_code: 'TM-PC-001',
+      qty: 50,
+      mfg_rate: 145,
+      bill_no: 'BILL-101',
+    };
+    const res = validatePurchaseRow(validRow, knownSkus);
+    expect(res.valid).toBe(true);
+    expect(res.errors).toHaveLength(0);
+  });
+
+  it('rejects row with missing or invalid date, non-positive qty, non-positive rate, missing bill_no, or unknown sku', () => {
+    // Empty row
+    const emptyRes = validatePurchaseRow({}, knownSkus);
+    expect(emptyRes.valid).toBe(false);
+    expect(emptyRes.errors.length).toBeGreaterThanOrEqual(4);
+
+    // Invalid date
+    const badDate = validatePurchaseRow(
+      { date: 'not-a-date', sku_code: 'TM-PC-001', qty: 10, mfg_rate: 100, bill_no: 'B1' },
+      knownSkus
+    );
+    expect(badDate.valid).toBe(false);
+    expect(badDate.errors.some((e) => e.toLowerCase().includes('date'))).toBe(true);
+
+    // Non-positive qty (0 or negative)
+    const zeroQty = validatePurchaseRow(
+      { date: '2026-04-15', sku_code: 'TM-PC-001', qty: 0, mfg_rate: 100, bill_no: 'B1' },
+      knownSkus
+    );
+    expect(zeroQty.valid).toBe(false);
+    expect(zeroQty.errors.some((e) => e.toLowerCase().includes('quantity'))).toBe(true);
+
+    // Non-positive mfg_rate
+    const zeroRate = validatePurchaseRow(
+      { date: '2026-04-15', sku_code: 'TM-PC-001', qty: 10, mfg_rate: -5, bill_no: 'B1' },
+      knownSkus
+    );
+    expect(zeroRate.valid).toBe(false);
+    expect(zeroRate.errors.some((e) => e.toLowerCase().includes('rate'))).toBe(true);
+
+    // Missing bill_no
+    const noBill = validatePurchaseRow(
+      { date: '2026-04-15', sku_code: 'TM-PC-001', qty: 10, mfg_rate: 100, bill_no: '' },
+      knownSkus
+    );
+    expect(noBill.valid).toBe(false);
+    expect(noBill.errors.some((e) => e.toLowerCase().includes('bill'))).toBe(true);
+
+    // Unknown SKU code
+    const unknownSku = validatePurchaseRow(
+      { date: '2026-04-15', sku_code: 'UNKNOWN-SKU', qty: 10, mfg_rate: 100, bill_no: 'B1' },
+      knownSkus
+    );
+    expect(unknownSku.valid).toBe(false);
+    expect(unknownSku.errors.some((e) => e.toLowerCase().includes('master sku'))).toBe(true);
+  });
+
+  it('detects duplicate purchases matching on date + sku_code + qty + mfg_rate + bill_no', () => {
+    const existingRows: Partial<PurchaseRow>[] = [
+      {
+        date: '2026-04-15',
+        sku_code: 'TM-PC-001',
+        qty: 50,
+        mfg_rate: 145,
+        bill_no: 'BILL-001',
+      },
+    ];
+
+    // Exact match
+    expect(
+      isDuplicatePurchase(
+        {
+          date: '2026-04-15',
+          sku_code: 'TM-PC-001',
+          qty: 50,
+          mfg_rate: 145,
+          bill_no: 'BILL-001',
+        },
+        existingRows
+      )
+    ).toBe(true);
+
+    // Different bill_no -> not duplicate
+    expect(
+      isDuplicatePurchase(
+        {
+          date: '2026-04-15',
+          sku_code: 'TM-PC-001',
+          qty: 50,
+          mfg_rate: 145,
+          bill_no: 'BILL-002',
+        },
+        existingRows
+      )
+    ).toBe(false);
+
+    // Different date -> not duplicate
+    expect(
+      isDuplicatePurchase(
+        {
+          date: '2026-04-16',
+          sku_code: 'TM-PC-001',
+          qty: 50,
+          mfg_rate: 145,
+          bill_no: 'BILL-001',
+        },
+        existingRows
+      )
+    ).toBe(false);
+
+    // Different qty -> not duplicate
+    expect(
+      isDuplicatePurchase(
+        {
+          date: '2026-04-15',
+          sku_code: 'TM-PC-001',
+          qty: 60,
+          mfg_rate: 145,
+          bill_no: 'BILL-001',
+        },
+        existingRows
+      )
+    ).toBe(false);
+
+    // Different mfg_rate -> not duplicate
+    expect(
+      isDuplicatePurchase(
+        {
+          date: '2026-04-15',
+          sku_code: 'TM-PC-001',
+          qty: 50,
+          mfg_rate: 155,
+          bill_no: 'BILL-001',
+        },
+        existingRows
+      )
+    ).toBe(false);
+
+    // Different sku_code -> not duplicate
+    expect(
+      isDuplicatePurchase(
+        {
+          date: '2026-04-15',
+          sku_code: 'TM-CA-001',
+          qty: 50,
+          mfg_rate: 145,
+          bill_no: 'BILL-001',
+        },
+        existingRows
+      )
+    ).toBe(false);
+  });
+});
+

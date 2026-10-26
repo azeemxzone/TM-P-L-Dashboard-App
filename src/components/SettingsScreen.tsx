@@ -202,23 +202,23 @@ export const SettingsScreen: React.FC = () => {
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-16">
       {/* Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2.5">
-            <Settings className="w-6 h-6 text-indigo-400" />
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2.5">
+            <Settings className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
             Cost Parameters &amp; Policy
           </h2>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
             Configure unit packing charges, inbound freight landed cost, marketplace customer-return provisions, and review the audit log.
           </p>
         </div>
         <div className="flex items-center gap-2">
           {isAdmin ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
               Admin Mode (Editable)
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
               <Lock className="w-3 h-3" />
               Viewer Mode (Read-Only)
             </span>
@@ -227,14 +227,14 @@ export const SettingsScreen: React.FC = () => {
       </div>
 
       {saveSuccess && (
-        <div className="p-4 bg-emerald-950/60 border border-emerald-800 rounded-xl flex items-center gap-3 text-emerald-200 text-sm">
-          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+        <div className="p-4 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center gap-3 text-emerald-800 dark:text-emerald-200 text-sm">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
           <span>Settings saved successfully and logged to the audit history.</span>
         </div>
       )}
 
       {saveError && (
-        <div className="p-4 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-sm">
+        <div className="p-4 bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 rounded-xl text-red-800 dark:text-red-200 text-sm">
           {saveError}
         </div>
       )}
@@ -244,21 +244,21 @@ export const SettingsScreen: React.FC = () => {
         <div className="lg:col-span-5 space-y-6">
           <form
             onSubmit={handleSaveSettings}
-            className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-6 shadow-sm"
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-6 shadow-sm"
           >
-            <h3 className="text-base font-semibold text-white border-b border-slate-800 pb-3 flex items-center justify-between">
+            <h3 className="text-base font-semibold text-slate-900 dark:text-white border-b border-slate-200 dark:border-slate-800 pb-3 flex items-center justify-between">
               <span>Unit Cost Parameters</span>
               {!isAdmin && <span className="text-xs text-slate-500 font-normal">Read-Only</span>}
             </h3>
 
             {/* 1. Packing per dispatched unit */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Package className="w-3.5 h-3.5 text-indigo-400" />
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Package className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                 Packing per Dispatched Unit (INR)
               </label>
               <div className="relative">
-                <span className="absolute left-3 top-2.5 text-slate-400 text-sm font-medium">₹</span>
+                <span className="absolute left-3 top-2.5 text-slate-500 dark:text-slate-400 text-sm font-medium">₹</span>
                 <input
                   type="number"
                   step="0.01"
@@ -272,7 +272,7 @@ export const SettingsScreen: React.FC = () => {
                       packing_per_dispatched_unit: parseFloat(e.target.value) || 0,
                     })
                   }
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg pl-8 pr-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
               <p className="text-xs text-slate-500">
@@ -282,12 +282,12 @@ export const SettingsScreen: React.FC = () => {
 
             {/* 2. Inbound freight per purchased unit */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Truck className="w-3.5 h-3.5 text-emerald-400" />
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                <Truck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 Inbound Freight per Purchased Unit (INR)
               </label>
               <div className="relative">
-                <span className="absolute left-3 top-2.5 text-slate-400 text-sm font-medium">₹</span>
+                <span className="absolute left-3 top-2.5 text-slate-500 dark:text-slate-400 text-sm font-medium">₹</span>
                 <input
                   type="number"
                   step="0.01"
@@ -301,7 +301,7 @@ export const SettingsScreen: React.FC = () => {
                       inbound_freight_per_purchased_unit: parseFloat(e.target.value) || 0,
                     })
                   }
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg pl-8 pr-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                 />
               </div>
               <p className="text-xs text-slate-500">
@@ -310,8 +310,8 @@ export const SettingsScreen: React.FC = () => {
             </div>
 
             {/* 3. Customer Return Not-Sellable % per marketplace */}
-            <div className="space-y-3 pt-2 border-t border-slate-800">
-              <label className="block text-xs font-medium text-slate-300 uppercase tracking-wider">
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                 Customer-Return Not-Sellable % per Marketplace
               </label>
               <p className="text-xs text-slate-500">
@@ -321,8 +321,8 @@ export const SettingsScreen: React.FC = () => {
               {/* Flipkart */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-300 font-medium">Flipkart</span>
-                  <span className="text-indigo-400 font-mono">{settings.flipkart_not_sellable_pct}%</span>
+                  <span className="text-slate-700 dark:text-slate-300 font-medium">Flipkart</span>
+                  <span className="text-indigo-600 dark:text-indigo-400 font-mono">{settings.flipkart_not_sellable_pct}%</span>
                 </div>
                 <div className="relative">
                   <input
@@ -339,17 +339,17 @@ export const SettingsScreen: React.FC = () => {
                         flipkart_not_sellable_pct: parseFloat(e.target.value) || 0,
                       })
                     }
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                   />
-                  <span className="absolute right-3 top-2.5 text-slate-500 text-xs">%</span>
+                  <span className="absolute right-3 top-2.5 text-slate-400 text-xs">%</span>
                 </div>
               </div>
 
               {/* Amazon */}
               <div className="space-y-1 pt-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-300 font-medium">Amazon</span>
-                  <span className="text-amber-400 font-mono">{settings.amazon_not_sellable_pct}%</span>
+                  <span className="text-slate-700 dark:text-slate-300 font-medium">Amazon</span>
+                  <span className="text-amber-600 dark:text-amber-400 font-mono">{settings.amazon_not_sellable_pct}%</span>
                 </div>
                 <div className="relative">
                   <input
@@ -366,17 +366,17 @@ export const SettingsScreen: React.FC = () => {
                         amazon_not_sellable_pct: parseFloat(e.target.value) || 0,
                       })
                     }
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                   />
-                  <span className="absolute right-3 top-2.5 text-slate-500 text-xs">%</span>
+                  <span className="absolute right-3 top-2.5 text-slate-400 text-xs">%</span>
                 </div>
               </div>
 
               {/* Meesho */}
               <div className="space-y-1 pt-1">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-300 font-medium">Meesho</span>
-                  <span className="text-pink-400 font-mono">{settings.meesho_not_sellable_pct}%</span>
+                  <span className="text-slate-700 dark:text-slate-300 font-medium">Meesho</span>
+                  <span className="text-pink-600 dark:text-pink-400 font-mono">{settings.meesho_not_sellable_pct}%</span>
                 </div>
                 <div className="relative">
                   <input
@@ -393,9 +393,9 @@ export const SettingsScreen: React.FC = () => {
                         meesho_not_sellable_pct: parseFloat(e.target.value) || 0,
                       })
                     }
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                   />
-                  <span className="absolute right-3 top-2.5 text-slate-500 text-xs">%</span>
+                  <span className="absolute right-3 top-2.5 text-slate-400 text-xs">%</span>
                 </div>
               </div>
             </div>
@@ -414,7 +414,7 @@ export const SettingsScreen: React.FC = () => {
                 <span>{saving ? 'Saving...' : 'Save Settings & Audit'}</span>
               </button>
             ) : (
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-center text-xs text-slate-500 flex items-center justify-center gap-1.5">
+              <div className="p-3 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-center text-xs text-slate-500 flex items-center justify-center gap-1.5">
                 <Lock className="w-3.5 h-3.5" />
                 <span>Editing disabled for Viewer role</span>
               </div>
@@ -424,26 +424,26 @@ export const SettingsScreen: React.FC = () => {
 
         {/* Audit Log Column */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm flex flex-col h-full">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-sm flex flex-col h-full">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 mb-4">
               <div className="flex items-center gap-2">
-                <History className="w-5 h-5 text-indigo-400" />
-                <h3 className="text-base font-semibold text-white">Settings Audit Log</h3>
+                <History className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white">Settings Audit Log</h3>
               </div>
-              <span className="text-xs font-medium text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full">
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full">
                 {auditLogs.length} {auditLogs.length === 1 ? 'event' : 'events'} recorded
               </span>
             </div>
 
-            <p className="text-xs text-slate-400 mb-4">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mb-4">
               Immutable audit history: records date, user, old value, and new value for every parameter change.
             </p>
 
             {auditLogs.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center border border-dashed border-slate-800 rounded-lg">
-                <History className="w-8 h-8 text-slate-600 mb-2" />
-                <p className="text-sm text-slate-400">No settings changes recorded yet</p>
-                <p className="text-xs text-slate-500 mt-1">
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-lg">
+                <History className="w-8 h-8 text-slate-400 dark:text-slate-600 mb-2" />
+                <p className="text-sm text-slate-600 dark:text-slate-400">No settings changes recorded yet</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
                   Adjust any parameter on the left to record your first audit log entry.
                 </p>
               </div>
@@ -451,7 +451,7 @@ export const SettingsScreen: React.FC = () => {
               <div className="overflow-x-auto flex-1">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-800 text-slate-400">
+                    <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400">
                       <th className="py-2.5 px-3 font-semibold">Date &amp; Time</th>
                       <th className="py-2.5 px-3 font-semibold">Setting</th>
                       <th className="py-2.5 px-3 font-semibold">Old Value</th>
@@ -459,10 +459,10 @@ export const SettingsScreen: React.FC = () => {
                       <th className="py-2.5 px-3 font-semibold">User</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                     {auditLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="py-2.5 px-3 text-slate-400 font-mono whitespace-nowrap">
+                      <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                        <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400 font-mono whitespace-nowrap">
                           {new Date(log.timestamp).toLocaleString('en-IN', {
                             day: '2-digit',
                             month: 'short',
@@ -472,16 +472,16 @@ export const SettingsScreen: React.FC = () => {
                             second: '2-digit',
                           })}
                         </td>
-                        <td className="py-2.5 px-3 font-medium text-slate-200 whitespace-nowrap">
+                        <td className="py-2.5 px-3 font-medium text-slate-800 dark:text-slate-200 whitespace-nowrap">
                           {log.setting_key}
                         </td>
-                        <td className="py-2.5 px-3 text-red-400 line-through font-mono">
+                        <td className="py-2.5 px-3 text-red-600 dark:text-red-400 line-through font-mono">
                           {log.old_value}
                         </td>
-                        <td className="py-2.5 px-3 text-emerald-400 font-mono font-medium">
+                        <td className="py-2.5 px-3 text-emerald-600 dark:text-emerald-400 font-mono font-medium">
                           {log.new_value}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-400 font-mono truncate max-w-[140px]" title={log.user_email}>
+                        <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400 font-mono truncate max-w-[140px]" title={log.user_email}>
                           {log.user_email}
                         </td>
                       </tr>

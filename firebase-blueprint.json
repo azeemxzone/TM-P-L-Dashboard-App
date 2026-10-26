@@ -7,15 +7,15 @@
       "properties": {
         "emails": {
           "type": "array",
-          "description": "List of authorized email addresses"
+          "description": "List of authorized email addresses in lowercase"
         },
         "admins": {
           "type": "array",
-          "description": "List of admin email addresses"
+          "description": "List of admin email addresses in lowercase"
         },
         "roles": {
           "type": "object",
-          "description": "Mapping from email to role (admin or viewer)"
+          "description": "Mapping from lowercase email to role (admin or viewer)"
         },
         "updatedAt": {
           "type": "string",
@@ -142,24 +142,30 @@
       },
       "required": ["sku_code", "sku_name", "weight_grams", "mfg_cost", "active", "effective_from"]
     },
-    "SkuVariantItem": {
-      "title": "SkuVariantItem",
-      "description": "Mapping from variant SKU to master SKU code (replaces marketplace mapping)",
+    "OpeningStockItem": {
+      "title": "OpeningStockItem",
+      "description": "Per SKU baseline opening stock quantity and manufacturing rate as of 2026-04-01",
       "type": "object",
       "properties": {
-        "variant_sku": {
+        "sku_code": {
           "type": "string",
-          "description": "Unique variant SKU code across marketplaces",
-          "maxLength": 200
+          "description": "Unique master SKU code"
         },
-        "master_sku": {
+        "qty": {
+          "type": "number",
+          "description": "Opening quantity on hand"
+        },
+        "mfg_rate": {
+          "type": "number",
+          "description": "Manufacturing or base unit rate in INR"
+        },
+        "landed_rate": {
+          "type": "number",
+          "description": "Computed standard landed rate (mfg_rate + inbound_freight)"
+        },
+        "effective_from": {
           "type": "string",
-          "description": "Canonical SKU code in cost master",
-          "maxLength": 100
-        },
-        "active": {
-          "type": "boolean",
-          "description": "Active flag for the variant mapping"
+          "description": "Effective date of opening stock baseline (default 2026-04-01)"
         },
         "createdAt": {
           "type": "string",
@@ -167,10 +173,98 @@
         },
         "createdBy": {
           "type": "string",
-          "description": "User who created this mapping"
+          "description": "Email of user who created this opening stock row"
         }
       },
-      "required": ["variant_sku", "master_sku", "active"]
+      "required": ["sku_code", "qty", "mfg_rate", "effective_from"]
+    },
+    "PurchaseItem": {
+      "title": "PurchaseItem",
+      "description": "Procurement purchase inward record with landed rate, bill number, supplier, and void flag",
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "Purchase / invoice date (YYYY-MM-DD)"
+        },
+        "sku_code": {
+          "type": "string",
+          "description": "Master SKU code"
+        },
+        "qty": {
+          "type": "number",
+          "description": "Purchased quantity"
+        },
+        "mfg_rate": {
+          "type": "number",
+          "description": "Unit manufacturing or purchase rate in INR"
+        },
+        "landed_rate": {
+          "type": "number",
+          "description": "Unit landed rate (mfg_rate + inbound_freight at time of entry)"
+        },
+        "bill_no": {
+          "type": "string",
+          "description": "Supplier invoice or bill number"
+        },
+        "supplier": {
+          "type": "string",
+          "description": "Supplier or vendor name"
+        },
+        "upload_id": {
+          "type": "string",
+          "description": "Reference ID to purchase_uploads batch or 'manual'"
+        },
+        "void": {
+          "type": "boolean",
+          "description": "Soft void flag: rows are never deleted, void rows excluded from cost averages"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Email of user who recorded this purchase"
+        }
+      },
+      "required": ["date", "sku_code", "qty", "mfg_rate", "landed_rate", "bill_no", "upload_id", "void"]
+    },
+    "PurchaseUpload": {
+      "title": "PurchaseUpload",
+      "description": "Audit record of purchase spreadsheet file uploads",
+      "type": "object",
+      "properties": {
+        "file_name": {
+          "type": "string",
+          "description": "Original name of the uploaded file"
+        },
+        "uploaded_at": {
+          "type": "string",
+          "description": "ISO timestamp of upload"
+        },
+        "user": {
+          "type": "string",
+          "description": "User email who performed the upload"
+        },
+        "accepted_count": {
+          "type": "number",
+          "description": "Count of valid purchase rows imported"
+        },
+        "rejected_count": {
+          "type": "number",
+          "description": "Count of invalid rows rejected"
+        },
+        "skipped_duplicates_count": {
+          "type": "number",
+          "description": "Count of duplicate rows skipped"
+        },
+        "total_rows": {
+          "type": "number",
+          "description": "Total rows processed in file"
+        }
+      },
+      "required": ["file_name", "uploaded_at", "user", "accepted_count", "rejected_count", "skipped_duplicates_count"]
     }
   },
   "firestore": {
@@ -186,9 +280,18 @@
       "schema": "CostMasterItem",
       "description": "Effective-dated cost master rows with weight_grams, mfg_cost, and active status"
     },
-    "/sku_variants/{variantId}": {
-      "schema": "SkuVariantItem",
-      "description": "Mappings from variant SKUs to canonical master SKU codes"
+    "/opening_stock/{docId}": {
+      "schema": "OpeningStockItem",
+      "description": "Per-SKU create-only opening stock records with effective_from"
+    },
+    "/purchases/{docId}": {
+      "schema": "PurchaseItem",
+      "description": "Purchase line items with landed_rate, upload_id, and admin void status"
+    },
+    "/purchase_uploads/{docId}": {
+      "schema": "PurchaseUpload",
+      "description": "Audit log of purchase spreadsheet file uploads with accepted, rejected, and skipped counts"
     }
   }
 }
+

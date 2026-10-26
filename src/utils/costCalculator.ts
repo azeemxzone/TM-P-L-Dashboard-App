@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CostMasterItem, SkuVariantItem } from '../types';
+import { CostMasterItem } from '../types';
 
 /**
  * Calculates standard landed cost:
@@ -69,78 +69,6 @@ export function getCostAsOf(
 }
 
 /**
- * Resolves a SKU identifier to its master SKU code:
- * 1. Exact match on variant_sku (case-sensitive, trimmed).
- * 2. Else if it matches a known master SKU code, it implicitly maps to itself.
- * 3. Else returns "UNMAPPED".
- *
- * @param sku The input SKU to resolve
- * @param variants List of registered SKU variant mappings
- * @param masterSkus Set or array of valid master SKU codes
- */
-export function resolveMasterSku(
-  sku: string,
-  variants: { variant_sku: string; master_sku: string; active?: boolean }[],
-  masterSkus?: Set<string> | string[]
-): string {
-  if (!sku || typeof sku !== 'string') {
-    return 'UNMAPPED';
-  }
-
-  const trimmedSku = sku.trim();
-  if (!trimmedSku) {
-    return 'UNMAPPED';
-  }
-
-  // 1. Exact match on variant_sku
-  const variantMatch = variants.find(
-    (v) => v.variant_sku.trim() === trimmedSku && v.active !== false
-  );
-  if (variantMatch) {
-    return variantMatch.master_sku.trim();
-  }
-
-  // 2. Exact match on master SKU (implicitly maps to itself)
-  if (masterSkus) {
-    const isMaster =
-      masterSkus instanceof Set
-        ? masterSkus.has(trimmedSku)
-        : masterSkus.some((m) => m.trim() === trimmedSku);
-
-    if (isMaster) {
-      return trimmedSku;
-    }
-  }
-
-  return 'UNMAPPED';
-}
-
-/**
- * Validates that variant_sku is unique (case-sensitive, trimmed).
- * Returns an error string if a duplicate exists, or null if valid.
- */
-export function validateUniqueVariant(
-  variantSku: string,
-  existingVariants: { variant_sku: string; id?: string }[],
-  currentId?: string
-): string | null {
-  const trimmed = variantSku.trim();
-  if (!trimmed) {
-    return 'Variant SKU cannot be empty.';
-  }
-
-  const isDuplicate = existingVariants.some(
-    (item) => item.variant_sku.trim() === trimmed && (!currentId || item.id !== currentId)
-  );
-
-  if (isDuplicate) {
-    return `Variant SKU "${trimmed}" already exists. Duplicate variant SKUs are not allowed.`;
-  }
-
-  return null;
-}
-
-/**
  * Formats an amount into standard Indian Rupee notation (en-IN) with 2 decimals.
  * e.g. 150 => "₹150.00"
  */
@@ -155,3 +83,6 @@ export function formatINR(value: number | null | undefined): string {
     maximumFractionDigits: 2,
   }).format(Number(value));
 }
+
+export * from './inventoryCalculator';
+

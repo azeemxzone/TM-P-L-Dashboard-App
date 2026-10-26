@@ -144,16 +144,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     } catch (err) {
-      console.error('Failed to verify or seed allowedUsers:', err);
+      // If offline or initializing, onSnapshot will pick up the doc when connection is established
+      console.warn('Initial seeding waiting for online connection:', err instanceof Error ? err.message : err);
     }
   };
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
       setAuthError(null);
 
       if (!firebaseUser) {
+        setUser(null);
         setIsAuthorized(false);
         setIsAdmin(false);
         setIsViewer(false);
@@ -162,6 +163,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(false);
         return;
       }
+
+      // Check if user's token can be refreshed; if securetoken API is disabled, handle gracefully
+      try {
+        await firebaseUser.getIdToken();
+      } catch (tokenErr) {
+        const errStr = tokenErr instanceof Error ? tokenErr.message : String(tokenErr);
+        if (errStr.includes('token-service-api') || errStr.includes('securetoken.googleapis.com')) {
+          console.warn('Token Service API disabled on project 116053236246');
+          setAuthError(
+            'Google Cloud Token Service API is disabled in project continual-medium-b61jg (116053236246). Enable it at https://console.developers.google.com/apis/api/securetoken.googleapis.com/overview?project=116053236246 then sign in again.'
+          );
+          try {
+            await signOut(auth);
+          } catch {
+            // Ignore signout error
+          }
+          setUser(null);
+          setIsAuthorized(false);
+          setIsAdmin(false);
+          setIsViewer(false);
+          setUserRole(null);
+          setAllowedDoc(null);
+          setLoading(false);
+          return;
+        }
+      }
+
+      setUser(firebaseUser);
 
       const email = firebaseUser.email?.toLowerCase().trim() || '';
       const isOwner = email === SEED_EMAIL.toLowerCase();
@@ -239,11 +268,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithGoogle = async () => {
     try {
       setAuthError(null);
-      await signInWithPopup(auth, googleAuthProvider);
+      const cred = await signInWithPopup(auth, googleAuthProvider);
+      await cred.user.getIdToken();
     } catch (err: unknown) {
       console.error('Google sign in error:', err);
       const msg = err instanceof Error ? err.message : 'Sign in failed';
-      setAuthError(msg);
+      if (msg.includes('token-service-api') || msg.includes('securetoken.googleapis.com')) {
+        setAuthError(
+          'Google Cloud Token Service API is disabled in project continual-medium-b61jg (116053236246). Enable it at https://console.developers.google.com/apis/api/securetoken.googleapis.com/overview?project=116053236246 then sign in again.'
+        );
+      } else {
+        setAuthError(msg);
+      }
       throw err;
     }
   };

@@ -12,8 +12,9 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Normalized lowercase user email
     function userEmail() {
-      return request.auth.token.email;
+      return request.auth.token.email.lower();
     }
 
     function isBootstrapAdmin() {
@@ -46,10 +47,10 @@ service cloud.firestore {
     }
 
     // Allowed Users collection
-    // Viewers and signed-in users can read their authorization status.
-    // Only admins can write. Non-members cannot self-register.
+    // Read only if isAllowedUser() or the bootstrap admin.
+    // Write only by admins.
     match /allowedUsers/{docId} {
-      allow read: if isSignedIn();
+      allow read: if isAllowedUser();
       allow write: if isAdmin() && (
         isBootstrapAdmin() ||
         (resource != null && userEmail() in resource.data.emails)
@@ -70,25 +71,47 @@ service cloud.firestore {
     }
 
     // Cost Master collection
-    // Read: Allowed users (viewers and admins)
-    // Write: Admin only (viewers are read-only)
+    // Create allowed for admins.
+    // Update allowed only if the only changed field is `active`.
+    // Delete is denied.
     match /cost_master/{itemId} {
       allow read: if isAllowedUser();
-      allow write: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active']);
+      allow delete: if false;
     }
 
-    // SKU Variants collection (replaces marketplace mapping)
+    // Opening Stock collection
+    // Create-only with effective_from. Latest row per SKU applies.
     // Read: Allowed users (viewers and admins)
-    // Write: Admin only (viewers are read-only)
-    match /sku_variants/{variantId} {
+    // Write: Admin only, create-only (no update, no delete)
+    match /opening_stock/{docId} {
       allow read: if isAllowedUser();
-      allow write: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
     }
 
-    // Backward compatibility for legacy sku_mappings path
-    match /sku_mappings/{mappingId} {
+    // Purchases collection
+    // Read: Allowed users
+    // Create: Admin only
+    // Update: Admin only, and ONLY if the only changed field is `void`
+    // Delete: denied (rows are never deleted: admin can mark void)
+    match /purchases/{docId} {
       allow read: if isAllowedUser();
-      allow write: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['void']);
+      allow delete: if false;
+    }
+
+    // Purchase Uploads log collection
+    // Read: Allowed users
+    // Create: Admin only (create-only audit log)
+    // Update, Delete: denied
+    match /purchase_uploads/{docId} {
+      allow read: if isAllowedUser();
+      allow create: if isAdmin();
+      allow update, delete: if false;
     }
   }
 }
+
