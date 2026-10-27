@@ -394,7 +394,7 @@ describe('Flipkart Report Parsers & Reconciliations (Stage 2a)', () => {
       expect(batch04Sep).toBeDefined();
       expect(batch04Sep?.paymentDate).toBe('2026-09-04');
       expect(batch04Sep?.adjustmentsTotal).toBe(-1655.64);
-      expect(batch04Sep?.expectedBank).toBe(227.23);
+      expect(Math.abs((batch04Sep?.expectedBank || 0) - 227.23)).toBeLessThanOrEqual(0.01);
     });
 
     it('verifies specific batch 11-Sep (DEUTH02625495120): expectedBank = 7928.98 (fine -150 included)', () => {

@@ -41,8 +41,8 @@ export function cleanNeftId(neftId: any): string {
   let s = String(neftId).trim();
   // Strip leading quotes
   s = s.replace(/^["']+|["']+$/g, '').trim();
-  // Strip prefix NFT, XUTR with any following hyphens, slashes, or whitespace
-  s = s.replace(/^(NFT|XUTR)[-/\s]*/i, '').trim();
+  // Strip prefix NFT, XUTR (or combined NFT-/XUTR/) with any following hyphens, slashes, or whitespace
+  s = s.replace(/^((NFT|XUTR)[-/\s]*)+/i, '').trim();
   // Strip any remaining leading slashes or hyphens
   s = s.replace(/^[-/\s]+/, '').trim();
   // Strip trailing 'X' if preceded by alphanumeric

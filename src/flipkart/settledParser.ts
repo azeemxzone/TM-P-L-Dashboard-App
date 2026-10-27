@@ -151,7 +151,7 @@ function parseSettledOrdersSheet(sheet: XLSX.WorkSheet): FlipkartSettledOrderRow
   const parseNum = (val: any): number => {
     if (val == null || val === '') return 0;
     const n = Number(val);
-    return isNaN(n) ? 0 : Math.round(n * 100) / 100;
+    return isNaN(n) ? 0 : n;
   };
 
   for (let r = dataStartIdx; r < rawRows.length; r++) {
@@ -229,13 +229,13 @@ function parseAdjustmentSheet(sheetName: string, sheet: XLSX.WorkSheet): Flipkar
 
   if (!rawRows || rawRows.length < 2) return [];
 
-  // Look for header row in top 3 rows
+  // Look for header row in top 3 rows (column headers containing NEFT ID / UTR or settlement value)
   let headerRowIdx = 0;
   for (let r = 0; r < Math.min(rawRows.length, 3); r++) {
     const row = rawRows[r];
     if (Array.isArray(row)) {
       const texts = row.map(cleanHeaderCell);
-      if (texts.some((t) => t.includes('settlement') || t.includes('amount') || t.includes('value'))) {
+      if (texts.some((t) => t.includes('neft') || t.includes('utr') || t.includes('settlementvalue'))) {
         headerRowIdx = r;
         break;
       }
