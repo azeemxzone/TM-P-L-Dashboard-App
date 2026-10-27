@@ -1,10 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { collection, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { CostMasterItem, AppSettings } from '../types';
 import { calculateStandardCost, formatINR } from '../utils/costCalculator';
-import { parseCSV, exportToCSV } from '../utils/csvParser';
+import {
+  parseCSV,
+  exportToCSV,
+  exportCostMasterToCSV,
+  planCostMasterImport,
+  getCostMasterDocId,
+  parseTableFile,
+} from '../utils/csvParser';
 import { DEFAULT_SKU_MASTER_V2_CSV } from '../data/defaultData';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrors';
 import {
@@ -54,6 +61,7 @@ export const CostMasterScreen: React.FC = () => {
   });
 
   const [importing, setImporting] = useState(false);
+  const isImportingRef = useRef(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // 1. Listen to settings/config to get current inbound_freight
@@ -170,8 +178,18 @@ export const CostMasterScreen: React.FC = () => {
       const weightNum = parseFloat(newItem.weight_grams) || 0;
       const effFrom = newItem.effective_from || new Date().toISOString().split('T')[0];
 
-      const docId = `sku_${newItem.sku_code.trim()}_${effFrom.replace(/-/g, '')}_${Date.now()}`;
+      const docId = getCostMasterDocId(newItem.sku_code, effFrom);
       const docRef = doc(db, 'cost_master', docId);
+
+      // Verify if document already exists
+      const existingDoc = await getDoc(docRef).catch(() => null);
+      if ((existingDoc && existingDoc.exists()) || items.some((it) => it.id === docId)) {
+        setStatusMessage({
+          text: `A cost record for ${newItem.sku_code.trim()} as of ${effFrom} already exists.`,
+          type: 'error',
+        });
+        return;
+      }
 
       await setDoc(docRef, {
         sku_code: newItem.sku_code.trim(),
@@ -222,7 +240,7 @@ export const CostMasterScreen: React.FC = () => {
       const newWeight = parseFloat(editForm.weight_grams) || 0;
 
       // Policy: Changing costs creates a new effective-dated row; history is never overwritten.
-      const newDocId = `sku_${editingItem.sku_code}_${editForm.effective_from.replace(/-/g, '')}_${Date.now()}`;
+      const newDocId = getCostMasterDocId(editingItem.sku_code, editForm.effective_from);
       const newDocRef = doc(db, 'cost_master', newDocId);
 
       await setDoc(newDocRef, {
@@ -277,68 +295,44 @@ export const CostMasterScreen: React.FC = () => {
     }
   };
 
-  // CSV Import
-  const handleImportCSVData = async (csvContent: string, sourceName: string) => {
-    if (!isAdmin) return;
+  // CSV / Table Import (Idempotent: deterministic ID ${sku_code}_${effective_from}, skip existing)
+  const handleImportCSVData = async (input: string | string[][], sourceName: string) => {
+    // Guard against React StrictMode running the import twice or double clicks
+    if (isImportingRef.current || !isAdmin) return;
+    isImportingRef.current = true;
     setImporting(true);
     setStatusMessage(null);
+
     try {
-      const rows = parseCSV(csvContent);
-      if (rows.length < 2) {
-        throw new Error('CSV is empty or missing data rows.');
-      }
+      // 1. Gather all existing doc IDs to ensure idempotency
+      const existingDocIds = new Set(items.map((it) => it.id));
 
-      const headers = rows[0].map((h) => h.toLowerCase().trim());
-      const skuCodeIdx = headers.indexOf('sku_code');
-      const skuNameIdx = headers.indexOf('sku_name');
-      const weightIdx = headers.indexOf('weight_grams');
-      const mfgCostIdx = headers.indexOf('mfg_cost');
-      const origCostIdx = headers.indexOf('original_cost');
-      const activeIdx = headers.indexOf('active');
-      const effFromIdx = headers.indexOf('effective_from');
+      // 2. Plan the import: calculates deterministic docId ${sku_code}_${effective_from} and skips existing
+      const plan = planCostMasterImport(input, existingDocIds);
 
-      const costIdx = mfgCostIdx !== -1 ? mfgCostIdx : origCostIdx;
+      // 3. Persist new rows to Firestore
+      for (const row of plan.toAdd) {
+        const docRef = doc(db, 'cost_master', row.docId);
+        // Secondary safety check in case items was not fully up to date
+        const docSnap = await getDoc(docRef).catch(() => null);
+        if (docSnap && docSnap.exists()) {
+          continue;
+        }
 
-      if (skuCodeIdx === -1 || costIdx === -1) {
-        throw new Error('CSV must contain sku_code and mfg_cost headers.');
-      }
-
-      let count = 0;
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i];
-        const skuCode = row[skuCodeIdx]?.trim();
-        if (!skuCode) continue;
-
-        const skuName = skuNameIdx !== -1 && row[skuNameIdx] ? row[skuNameIdx].trim() : skuCode;
-        const weight = weightIdx !== -1 && row[weightIdx] ? parseFloat(row[weightIdx]) || 100 : 100;
-        const mfgCost = parseFloat(row[costIdx]) || 0;
-        const active = activeIdx !== -1 ? row[activeIdx]?.toLowerCase().trim() !== 'false' : true;
-        const effFrom =
-          effFromIdx !== -1 && row[effFromIdx] && row[effFromIdx].trim() !== ''
-            ? row[effFromIdx].trim()
-            : '2026-04-01';
-
-        const docId = `sku_${skuCode}_${effFrom.replace(/-/g, '')}_${Date.now()}_${count}`;
-        const docRef = doc(db, 'cost_master', docId);
-
-        await setDoc(
-          docRef,
-          {
-            sku_code: skuCode,
-            sku_name: skuName,
-            weight_grams: weight,
-            mfg_cost: mfgCost,
-            active,
-            effective_from: effFrom,
-            createdAt: new Date().toISOString(),
-            createdBy: user?.email || 'csv-import',
-          }
-        );
-        count++;
+        await setDoc(docRef, {
+          sku_code: row.sku_code,
+          sku_name: row.sku_name,
+          weight_grams: row.weight_grams,
+          mfg_cost: row.mfg_cost,
+          active: row.active,
+          effective_from: row.effective_from,
+          createdAt: new Date().toISOString(),
+          createdBy: user?.email || 'csv-import',
+        });
       }
 
       setStatusMessage({
-        text: `Successfully imported ${count} SKUs from ${sourceName}!`,
+        text: `${plan.addedCount} added, ${plan.alreadyExistedCount} already existed`,
         type: 'success',
       });
       setTimeout(() => setStatusMessage(null), 4000);
@@ -349,46 +343,47 @@ export const CostMasterScreen: React.FC = () => {
         type: 'error',
       });
     } finally {
+      isImportingRef.current = false;
       setImporting(false);
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!isAdmin) return;
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isAdmin || importing || isImportingRef.current) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const content = event.target?.result as string;
-      if (content) {
-        handleImportCSVData(content, file.name);
+    try {
+      const tableData = await parseTableFile(file);
+      if (tableData && tableData.length > 0) {
+        await handleImportCSVData(tableData, file.name);
+      } else {
+        setStatusMessage({ text: 'Uploaded file is empty or missing data rows.', type: 'error' });
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+    } catch (err: unknown) {
+      console.error('Failed to read file:', err);
+      setStatusMessage({
+        text: err instanceof Error ? err.message : 'Failed to parse file.',
+        type: 'error',
+      });
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleExportCSV = () => {
-    const headers = ['sku_code', 'sku_name', 'weight_grams', 'mfg_cost', 'standard_cost', 'active', 'effective_from'];
-    const rows = items.map((item) => [
-      item.sku_code,
-      item.sku_name,
-      item.weight_grams,
-      item.mfg_cost,
-      calculateStandardCost(item.mfg_cost, inboundFreight),
-      item.active ? 'true' : 'false',
-      item.effective_from,
-    ]);
-    const csvStr = exportToCSV(headers, rows);
+    // Export one row per stored document
+    const csvStr = exportCostMasterToCSV(items, inboundFreight);
     const blob = new Blob([csvStr], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `sku_master_v2_${new Date().toISOString().split('T')[0]}.csv`);
+    const dateStr = new Date().toISOString().split('T')[0];
+    link.setAttribute('download', `sku_master_${dateStr}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -413,17 +408,21 @@ export const CostMasterScreen: React.FC = () => {
               <button
                 onClick={() => handleImportCSVData(DEFAULT_SKU_MASTER_V2_CSV, 'sku_master_v2.csv')}
                 disabled={importing}
-                className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-700 cursor-pointer shadow-xs disabled:opacity-50"
+                className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-700 cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Import the 34 bundled SKUs from sku_master_v2.csv"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                Load Sample sku_master_v2.csv (34 SKUs)
+                {importing ? 'Importing...' : 'Load Sample sku_master_v2.csv (34 SKUs)'}
               </button>
 
-              <label className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-700 cursor-pointer shadow-xs">
+              <label
+                className={`px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-700 shadow-xs ${
+                  importing ? 'opacity-50 cursor-not-allowed pointer-events-none' : 'cursor-pointer'
+                }`}
+              >
                 <Upload className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                 Upload CSV
-                <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
+                <input type="file" accept=".csv,.xlsx,.xls" onChange={handleFileUpload} disabled={importing} className="hidden" />
               </label>
 
               <button

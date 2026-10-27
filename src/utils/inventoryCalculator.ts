@@ -254,11 +254,7 @@ export function validatePurchaseRow(
     errors.push('Manufacturing rate must be greater than 0');
   }
 
-  // 5. Bill No
-  const billNo = String(row.bill_no || '').trim();
-  if (!billNo) {
-    errors.push('Bill number is required');
-  }
+  // 5. Bill No (optional - empty or omitted is valid)
 
   // 6. Known SKU check
   if (sku && knownSkus) {

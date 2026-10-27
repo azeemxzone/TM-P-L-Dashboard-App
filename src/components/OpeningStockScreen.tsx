@@ -1,10 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { collection, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { OpeningStockItem, CostMasterItem, AppSettings } from '../types';
 import { formatINR } from '../utils/costCalculator';
-import { parseTableFile, extractOpeningStockRowsFromTable, exportToCSV } from '../utils/csvParser';
+import {
+  parseTableFile,
+  extractOpeningStockRowsFromTable,
+  exportToCSV,
+  getOpeningStockDocId,
+  planOpeningStockImport,
+} from '../utils/csvParser';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrors';
 import {
   Boxes,
@@ -47,11 +53,12 @@ export const OpeningStockScreen: React.FC = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPreview, setImportPreview] = useState<{
-    validRows: { sku_code: string; qty: number; mfg_rate: number }[];
-    rejectedRows: { sku_code: string; qty: number; mfg_rate: number; reason: string; rowNum: number }[];
+    validRows: { sku_code: string; qty: number; mfg_rate: number; effective_from: string }[];
+    rejectedRows: { sku_code: string; qty: number; mfg_rate: number; effective_from?: string; reason: string; rowNum: number }[];
   } | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const isImportingRef = useRef(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
   // 1. Fetch settings/config
@@ -271,14 +278,25 @@ export const OpeningStockScreen: React.FC = () => {
 
     setSubmitting(true);
     try {
+      const effFrom = formData.effective_from || '2026-04-01';
+      const docId = getOpeningStockDocId(sku, effFrom);
+      const docRef = doc(db, 'opening_stock', docId);
+
+      // Check if document already exists
+      const existingDoc = await getDoc(docRef).catch(() => null);
+      if ((existingDoc && existingDoc.exists()) || openingItems.some((o) => o.id === docId)) {
+        setFormError(`An opening stock record for ${sku} as of ${effFrom} already exists.`);
+        setSubmitting(false);
+        return;
+      }
+
       const landedRate = Math.round((mfgRate + inboundFreight) * 100) / 100;
-      const docRef = doc(collection(db, 'opening_stock'));
       await setDoc(docRef, {
         sku_code: sku,
         qty,
         mfg_rate: mfgRate,
         landed_rate: landedRate,
-        effective_from: formData.effective_from || '2026-04-01',
+        effective_from: effFrom,
         createdAt: new Date().toISOString(),
         createdBy: user?.email || 'admin',
       });
@@ -314,7 +332,7 @@ export const OpeningStockScreen: React.FC = () => {
         return;
       }
 
-      const validRows: { sku_code: string; qty: number; mfg_rate: number }[] = [];
+      const validRows: { sku_code: string; qty: number; mfg_rate: number; effective_from: string }[] = [];
       const rejectedRows: { sku_code: string; qty: number; mfg_rate: number; reason: string; rowNum: number }[] = [];
 
       parsed.rows.forEach((row, index) => {
@@ -345,6 +363,7 @@ export const OpeningStockScreen: React.FC = () => {
           sku_code: skuUpper,
           qty: row.qty,
           mfg_rate: row.mfg_rate,
+          effective_from: row.effective_from || '2026-04-01',
         });
       });
 
@@ -354,33 +373,41 @@ export const OpeningStockScreen: React.FC = () => {
     }
   };
 
-  // Commit Import
+  // Commit Import (Idempotent: deterministic ID ${sku_code}_${effective_from}, skip existing)
   const handleCommitImport = async () => {
-    if (!isAdmin || !importPreview || importPreview.validRows.length === 0) return;
+    // Guard against React StrictMode running the import twice or double clicks
+    if (isImportingRef.current || !isAdmin || !importPreview || importPreview.validRows.length === 0) return;
+    isImportingRef.current = true;
     setImporting(true);
     setImportError(null);
 
     try {
       const now = new Date().toISOString();
-      let importedCount = 0;
+      const existingDocIds = new Set(openingItems.map((o) => o.id));
+      const plan = planOpeningStockImport(importPreview.validRows, existingDocIds, '2026-04-01');
 
-      for (const row of importPreview.validRows) {
-        const docRef = doc(collection(db, 'opening_stock'));
+      for (const row of plan.toAdd) {
+        const docRef = doc(db, 'opening_stock', row.docId);
+        // Secondary safety check in case items was not fully up to date
+        const docSnap = await getDoc(docRef).catch(() => null);
+        if (docSnap && docSnap.exists()) {
+          continue;
+        }
+
         const landedRate = Math.round((row.mfg_rate + inboundFreight) * 100) / 100;
         await setDoc(docRef, {
           sku_code: row.sku_code,
           qty: row.qty,
           mfg_rate: row.mfg_rate,
           landed_rate: landedRate,
-          effective_from: '2026-04-01',
+          effective_from: row.effective_from,
           createdAt: now,
           createdBy: user?.email || 'admin',
         });
-        importedCount++;
       }
 
       setStatusMessage({
-        text: `Successfully imported ${importedCount} opening stock items. ${importPreview.rejectedRows.length} unknown/invalid rows were rejected.`,
+        text: `${plan.addedCount} added, ${plan.alreadyExistedCount} already existed`,
         type: 'success',
       });
       setShowImportModal(false);
@@ -390,6 +417,7 @@ export const OpeningStockScreen: React.FC = () => {
       handleFirestoreError(err, OperationType.CREATE, 'opening_stock');
       setImportError('Failed to import opening stock batch.');
     } finally {
+      isImportingRef.current = false;
       setImporting(false);
     }
   };
@@ -470,12 +498,16 @@ export const OpeningStockScreen: React.FC = () => {
             <>
               <button
                 onClick={() => {
+                  if (importing) return;
                   setImportPreview(null);
                   setImportError(null);
                   setImportFile(null);
                   setShowImportModal(true);
                 }}
-                className="px-3 py-2 text-xs font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                disabled={importing}
+                className={`px-3 py-2 text-xs font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition flex items-center gap-1.5 shadow-xs ${
+                  importing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                }`}
               >
                 <Upload className="w-3.5 h-3.5 text-indigo-500" />
                 Import CSV
@@ -952,8 +984,8 @@ export const OpeningStockScreen: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleCommitImport}
-                  disabled={importing || !importPreview || importPreview.validRows.length === 0}
-                  className="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition disabled:opacity-50 cursor-pointer shadow-xs shadow-indigo-600/30"
+                  disabled={importing || isImportingRef.current || !importPreview || importPreview.validRows.length === 0}
+                  className="px-4 py-2 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-xs shadow-indigo-600/30"
                 >
                   {importing
                     ? 'Importing...'

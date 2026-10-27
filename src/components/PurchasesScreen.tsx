@@ -253,9 +253,10 @@ export const PurchasesScreen: React.FC = () => {
     const newVoidStatus = !purchase.void;
     const actionName = newVoidStatus ? 'mark as void' : 'reinstate';
 
+    const billLabel = purchase.bill_no ? `Bill #${purchase.bill_no}` : 'purchase';
     const confirmMsg = newVoidStatus
-      ? `Are you sure you want to mark Bill #${purchase.bill_no} (${purchase.sku_code}) as VOID? It will be excluded from moving average cost calculations.`
-      : `Reinstate Bill #${purchase.bill_no} (${purchase.sku_code}) into active inventory and cost calculations?`;
+      ? `Are you sure you want to mark ${billLabel} (${purchase.sku_code}) as VOID? It will be excluded from moving average cost calculations.`
+      : `Reinstate ${billLabel} (${purchase.sku_code}) into active inventory and cost calculations?`;
 
     if (!window.confirm(confirmMsg)) return;
 
@@ -263,7 +264,7 @@ export const PurchasesScreen: React.FC = () => {
       const docRef = doc(db, 'purchases', purchase.id);
       await updateDoc(docRef, { void: newVoidStatus });
       setStatusMessage({
-        text: `Purchase for ${purchase.sku_code} (Bill: ${purchase.bill_no}) was ${newVoidStatus ? 'marked VOID' : 'reinstated'}.`,
+        text: `Purchase for ${purchase.sku_code}${purchase.bill_no ? ` (Bill: ${purchase.bill_no})` : ''} was ${newVoidStatus ? 'marked VOID' : 'reinstated'}.`,
         type: newVoidStatus ? 'warning' : 'success',
       });
     } catch (err) {
@@ -295,8 +296,9 @@ export const PurchasesScreen: React.FC = () => {
 
     // Check for duplicate
     if (isDuplicatePurchase(rowToValidate, purchases)) {
+      const billDesc = rowToValidate.bill_no ? `, and Bill #${rowToValidate.bill_no}` : '';
       setManualError(
-        `Duplicate purchase detected! A record with date ${rowToValidate.date}, SKU ${rowToValidate.sku_code}, qty ${rowToValidate.qty}, rate ₹${rowToValidate.mfg_rate}, and Bill #${rowToValidate.bill_no} already exists.`
+        `Duplicate purchase detected! A record with date ${rowToValidate.date}, SKU ${rowToValidate.sku_code}, qty ${rowToValidate.qty}, rate ₹${rowToValidate.mfg_rate}${billDesc} already exists.`
       );
       return;
     }
@@ -319,8 +321,9 @@ export const PurchasesScreen: React.FC = () => {
         createdBy: user?.email || 'admin',
       });
 
+      const billSuffix = rowToValidate.bill_no ? ` on Bill #${rowToValidate.bill_no}` : '';
       setStatusMessage({
-        text: `Purchase recorded: ${rowToValidate.qty} units of ${rowToValidate.sku_code} on Bill #${rowToValidate.bill_no} @ ₹${rowToValidate.mfg_rate} (landed: ₹${landedRate}).`,
+        text: `Purchase recorded: ${rowToValidate.qty} units of ${rowToValidate.sku_code}${billSuffix} @ ₹${rowToValidate.mfg_rate} (landed: ₹${landedRate}).`,
         type: 'success',
       });
       setShowAddModal(false);
@@ -354,7 +357,7 @@ export const PurchasesScreen: React.FC = () => {
       const parsed = extractPurchaseRowsFromTable(tableData);
 
       if (!parsed.isValidContent) {
-        setUploadError(parsed.error || 'Invalid file format: required headers (date, sku_code, qty, mfg_rate, bill_no) missing.');
+        setUploadError(parsed.error || 'Invalid file format: required headers (date, sku_code, qty, mfg_rate) missing.');
         return;
       }
 
@@ -378,7 +381,7 @@ export const PurchasesScreen: React.FC = () => {
         if (isDuplicatePurchase(row, purchases)) {
           duplicateRows.push({
             row,
-            reason: `Duplicate of existing purchase in database (Date: ${row.date}, Bill: ${row.bill_no}, Qty: ${row.qty})`,
+            reason: `Duplicate of existing purchase in database (Date: ${row.date}, Bill: ${row.bill_no || '(none)'}, Qty: ${row.qty})`,
             rowNum,
           });
           return;
@@ -387,7 +390,7 @@ export const PurchasesScreen: React.FC = () => {
         if (isDuplicatePurchase(row, batchSeen)) {
           duplicateRows.push({
             row,
-            reason: `Duplicate row within the same file (Date: ${row.date}, Bill: ${row.bill_no}, Qty: ${row.qty})`,
+            reason: `Duplicate row within the same file (Date: ${row.date}, Bill: ${row.bill_no || '(none)'}, Qty: ${row.qty})`,
             rowNum,
           });
           return;
@@ -935,7 +938,7 @@ export const PurchasesScreen: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Bill / Invoice # <span className="text-red-500">*</span>
+                    Bill / Invoice # <span className="text-slate-400 font-normal">(optional)</span>
                   </label>
                   <input
                     type="text"
@@ -943,7 +946,6 @@ export const PurchasesScreen: React.FC = () => {
                     value={manualForm.bill_no}
                     onChange={(e) => setManualForm({ ...manualForm, bill_no: e.target.value })}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    required
                   />
                 </div>
               </div>
@@ -1066,7 +1068,7 @@ export const PurchasesScreen: React.FC = () => {
                 <div>
                   <h2 className="text-base font-bold text-slate-900 dark:text-white">Upload Purchases File (CSV or XLSX)</h2>
                   <p className="text-[11px] text-slate-500">
-                    Content validation: date, sku_code, qty, mfg_rate, bill_no, supplier
+                    Content validation: date, sku_code, qty, mfg_rate (required); bill_no, supplier (optional)
                   </p>
                 </div>
               </div>
@@ -1093,7 +1095,7 @@ export const PurchasesScreen: React.FC = () => {
                   {uploadFile ? uploadFile.name : 'Choose CSV or XLSX spreadsheet to validate content'}
                 </p>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  Expected columns: date, sku_code, qty, mfg_rate, bill_no, supplier (content verified by columns, not filename)
+                  Required columns: date, sku_code, qty, mfg_rate (bill_no and supplier optional; verified by columns, not filename)
                 </p>
                 <div className="mt-3 flex items-center justify-center gap-3">
                   <label className="px-3.5 py-1.5 text-xs font-semibold bg-indigo-600 text-white rounded-lg cursor-pointer hover:bg-indigo-700 shadow-xs">
