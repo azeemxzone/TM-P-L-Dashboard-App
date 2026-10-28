@@ -323,9 +323,9 @@ function parseSettledSummarySheet(sheet: XLSX.WorkSheet): FlipkartSettledSummary
     // Check cells for duration strings
     const fullRowText = row.map((c) => String(c || '').trim()).join(' ');
 
-    // Match payment duration dates: e.g. "01-Sep-2026 - 30-Sep-2026" or "01-Sep-2026 to 30-Sep-2026"
+    // Match payment duration dates: e.g. "2026-09-01 - 2026-09-30" or "01-Sep-2026 - 30-Sep-2026"
     const durationMatch = fullRowText.match(
-      /(\d{1,2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})\s*(?:-|to)\s*(\d{1,2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})/i
+      /(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})\s*(?:-|to)\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})/i
     );
     if (durationMatch) {
       if (!paymentDurationStart) paymentDurationStart = parseDate(durationMatch[1]);

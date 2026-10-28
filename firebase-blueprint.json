@@ -265,6 +265,136 @@
         }
       },
       "required": ["file_name", "uploaded_at", "user", "accepted_count", "rejected_count", "skipped_duplicates_count"]
+    },
+    "SkuAlias": {
+      "title": "SkuAlias",
+      "description": "Marketplace SKU alias mapped to internal master SKU code",
+      "type": "object",
+      "properties": {
+        "alias": {
+          "type": "string",
+          "description": "Cleaned marketplace SKU alias (doc ID)"
+        },
+        "master_sku": {
+          "type": "string",
+          "description": "Matched master SKU code from cost_master"
+        },
+        "source": {
+          "type": "string",
+          "description": "Mapping source, e.g. bundled_v2 or manual"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp of creation"
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "Email of user who created the alias"
+        }
+      },
+      "required": ["alias", "master_sku", "source"]
+    },
+    "FkOrderItem": {
+      "title": "FkOrderItem",
+      "description": "Flipkart parsed order item record",
+      "type": "object",
+      "properties": {
+        "orderItemId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "orderDate": { "type": "string" },
+        "status": { "type": "string" },
+        "sku": { "type": "string" },
+        "qty": { "type": "number" },
+        "upload_id": { "type": "string" }
+      },
+      "required": ["orderItemId", "orderDate", "sku", "qty", "status", "upload_id"]
+    },
+    "FkReturn": {
+      "title": "FkReturn",
+      "description": "Flipkart parsed return record",
+      "type": "object",
+      "properties": {
+        "returnId": { "type": "string" },
+        "orderItemId": { "type": "string" },
+        "returnType": { "type": "string" },
+        "returnStatus": { "type": "string" },
+        "sku": { "type": "string" },
+        "qty": { "type": "number" },
+        "upload_id": { "type": "string" }
+      },
+      "required": ["returnId", "orderItemId", "returnType", "returnStatus", "sku", "qty", "upload_id"]
+    },
+    "FkSettlementRow": {
+      "title": "FkSettlementRow",
+      "description": "Flipkart parsed settled order row with fee breakdowns",
+      "type": "object",
+      "properties": {
+        "neftId": { "type": "string" },
+        "orderItemId": { "type": "string" },
+        "bankSettlement": { "type": "number" },
+        "saleAmount": { "type": "number" },
+        "marketplaceFee": { "type": "number" },
+        "sellerSku": { "type": "string" },
+        "qty": { "type": "number" },
+        "upload_id": { "type": "string" }
+      },
+      "required": ["neftId", "orderItemId", "bankSettlement", "sellerSku", "qty", "upload_id"]
+    },
+    "FkAdjustment": {
+      "title": "FkAdjustment",
+      "description": "Flipkart adjustment record from Ads, Fines, Storage, etc.",
+      "type": "object",
+      "properties": {
+        "sheet": { "type": "string" },
+        "neftId": { "type": "string" },
+        "amount": { "type": "number" },
+        "upload_id": { "type": "string" }
+      },
+      "required": ["sheet", "neftId", "amount", "upload_id"]
+    },
+    "FkBatch": {
+      "title": "FkBatch",
+      "description": "Flipkart payout batch grouped by NEFT ID",
+      "type": "object",
+      "properties": {
+        "neftId": { "type": "string" },
+        "paymentDate": { "type": "string" },
+        "orderRowsCount": { "type": "number" },
+        "orderRowsTotal": { "type": "number" },
+        "adjustmentsTotal": { "type": "number" },
+        "expectedBankAmount": { "type": "number" },
+        "upload_id": { "type": "string" }
+      },
+      "required": ["neftId", "paymentDate", "orderRowsCount", "orderRowsTotal", "expectedBankAmount", "upload_id"]
+    },
+    "FkReportSummary": {
+      "title": "FkReportSummary",
+      "description": "Summary metadata of Flipkart settled report period",
+      "type": "object",
+      "properties": {
+        "periodStart": { "type": "string" },
+        "periodEnd": { "type": "string" },
+        "ordersTotal": { "type": "number" },
+        "adjustmentsTotal": { "type": "number" },
+        "netBankSettlement": { "type": "number" },
+        "upload_id": { "type": "string" }
+      },
+      "required": ["periodStart", "periodEnd", "netBankSettlement", "upload_id"]
+    },
+    "FkUpload": {
+      "title": "FkUpload",
+      "description": "Audit record of Flipkart report uploads",
+      "type": "object",
+      "properties": {
+        "report_type": { "type": "string" },
+        "month": { "type": "string" },
+        "file_name": { "type": "string" },
+        "file_hash": { "type": "string" },
+        "uploaded_at": { "type": "string" },
+        "user": { "type": "string" },
+        "record_counts": { "type": "object" }
+      },
+      "required": ["report_type", "month", "file_name", "file_hash", "uploaded_at", "user", "record_counts"]
     }
   },
   "firestore": {
@@ -291,6 +421,38 @@
     "/purchase_uploads/{docId}": {
       "schema": "PurchaseUpload",
       "description": "Audit log of purchase spreadsheet file uploads with accepted, rejected, and skipped counts"
+    },
+    "/sku_aliases/{docId}": {
+      "schema": "SkuAlias",
+      "description": "Marketplace SKU aliases mapped to internal master SKU codes"
+    },
+    "/fk_order_items/{docId}": {
+      "schema": "FkOrderItem",
+      "description": "Flipkart order items with status and quantities"
+    },
+    "/fk_returns/{docId}": {
+      "schema": "FkReturn",
+      "description": "Flipkart returns with return types and tracking IDs"
+    },
+    "/fk_settlement_rows/{docId}": {
+      "schema": "FkSettlementRow",
+      "description": "Flipkart settled order items with financial breakdowns"
+    },
+    "/fk_adjustments/{docId}": {
+      "schema": "FkAdjustment",
+      "description": "Flipkart adjustments across Ads, Fines, Storage, etc."
+    },
+    "/fk_batches/{docId}": {
+      "schema": "FkBatch",
+      "description": "Flipkart payout batch reconciliation by NEFT ID"
+    },
+    "/fk_report_summaries/{docId}": {
+      "schema": "FkReportSummary",
+      "description": "Flipkart settled report summary metadata"
+    },
+    "/fk_uploads/{docId}": {
+      "schema": "FkUpload",
+      "description": "Create-only audit log of Flipkart file uploads"
     }
   }
 }

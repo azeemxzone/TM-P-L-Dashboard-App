@@ -12,6 +12,7 @@ import { CostMasterScreen } from './components/CostMasterScreen';
 import { OpeningStockScreen } from './components/OpeningStockScreen';
 import { PurchasesScreen } from './components/PurchasesScreen';
 import { AverageCostScreen } from './components/AverageCostScreen';
+import { UploadCentreScreen } from './components/UploadCentreScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { UsersScreen } from './components/UsersScreen';
 import {
@@ -24,9 +25,10 @@ import {
   Boxes,
   ShoppingCart,
   TrendingUp,
+  UploadCloud,
 } from 'lucide-react';
 
-type Tab = 'cost_master' | 'opening_stock' | 'purchases' | 'average_cost' | 'settings' | 'users';
+type Tab = 'cost_master' | 'opening_stock' | 'purchases' | 'average_cost' | 'upload_centre' | 'settings' | 'users';
 
 const AppContent: React.FC = () => {
   const { user, loading, isAuthorized, isAdmin, logout } = useAuth();
@@ -65,10 +67,10 @@ const AppContent: React.FC = () => {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-900 dark:text-white text-base tracking-tight">Tabbymart</span>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                  Stage 1.3b
+                  Stage 2b
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">Inventory &amp; Moving Average Cost</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Inventory &amp; Marketplace Ingestion</p>
             </div>
           </div>
 
@@ -120,6 +122,18 @@ const AppContent: React.FC = () => {
             >
               <TrendingUp className="w-3.5 h-3.5" />
               Average Cost
+            </button>
+
+            <button
+              onClick={() => setActiveTab('upload_centre')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'upload_centre'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
+              }`}
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              Upload Centre
             </button>
 
             <button
@@ -223,6 +237,15 @@ const AppContent: React.FC = () => {
             Average Cost
           </button>
           <button
+            onClick={() => setActiveTab('upload_centre')}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
+              activeTab === 'upload_centre' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <UploadCloud className="w-3.5 h-3.5" />
+            Uploads
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
               activeTab === 'settings' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
@@ -251,13 +274,14 @@ const AppContent: React.FC = () => {
         {activeTab === 'opening_stock' && <OpeningStockScreen />}
         {activeTab === 'purchases' && <PurchasesScreen />}
         {activeTab === 'average_cost' && <AverageCostScreen />}
+        {activeTab === 'upload_centre' && <UploadCentreScreen />}
         {activeTab === 'settings' && <SettingsScreen />}
         {activeTab === 'users' && isAdmin && <UsersScreen />}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950 py-4 text-center text-xs text-slate-500 dark:text-slate-400 transition-colors">
-        <p>Tabbymart Internal P&amp;L App • Stage 1.3b Inventory &amp; Moving Average Cost</p>
+        <p>Tabbymart Internal P&amp;L App • Stage 2b Upload Centre &amp; Flipkart Reports</p>
       </footer>
     </div>
   );

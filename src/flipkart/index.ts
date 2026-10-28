@@ -4,3 +4,4 @@ export * from './detector';
 export * from './ordersParser';
 export * from './returnsParser';
 export * from './settledParser';
+export * from './storage';

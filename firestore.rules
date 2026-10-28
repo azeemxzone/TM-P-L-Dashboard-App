@@ -112,6 +112,86 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update, delete: if false;
     }
+
+    // SKU Aliases collection (Stage 2b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /sku_aliases/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Flipkart Order Items (Stage 2b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /fk_order_items/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Flipkart Returns (Stage 2b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /fk_returns/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Flipkart Settlement Rows (Stage 2b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /fk_settlement_rows/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Flipkart Adjustments (Stage 2b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /fk_adjustments/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Flipkart Batches (Stage 2b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /fk_batches/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Flipkart Report Summaries (Stage 2b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /fk_report_summaries/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Flipkart Uploads audit log (Stage 2b)
+    // Read: Allowed users
+    // Create: Admin only (create-only)
+    // Update, Delete: denied
+    match /fk_uploads/{docId} {
+      allow read: if isAllowedUser();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
   }
 }
 
