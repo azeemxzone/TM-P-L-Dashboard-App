@@ -18,6 +18,7 @@ import {
   isDuplicateUpload,
   computeBufferSha256,
   FkUploadRecord,
+  BATCH_SIZE,
 } from './storage';
 
 describe('Flipkart Storage, Periods, Slot Validation & Uniqueness (Stage 2b)', () => {
@@ -81,32 +82,38 @@ describe('Flipkart Storage, Periods, Slot Validation & Uniqueness (Stage 2b)', (
   });
 
   describe('2. Period Checks', () => {
-    it('Orders file passes for 2026-09 and is rejected for 2026-08', () => {
+    it('Orders vs 2026-08 is blocked', () => {
       const wb = loadWorkbook('7_Orders.xlsx');
       const rows = parseOrders(wb.Sheets[wb.SheetNames[0]]);
-
-      const checkSep = validateOrdersMonth(rows, '2026-09');
-      expect(checkSep.valid).toBe(true);
-      expect(checkSep.detectedMonth).toBe('2026-09');
-
       const checkAug = validateOrdersMonth(rows, '2026-08');
       expect(checkAug.valid).toBe(false);
       expect(checkAug.detectedMonth).toBe('2026-09');
-      expect(checkAug.message).toContain('2026-09');
-      expect(checkAug.message).toContain('2026-08');
+      expect(checkAug.message).toBe('This file covers 2026-09, you selected 2026-08');
     });
 
-    it('Settled file passes for 2026-09 using summary payment duration', () => {
-      const wb = loadWorkbook('2_Settled_Transaction.xlsx');
-      const settled = parseSettled(wb);
-
-      const checkSep = validateSettledMonth(settled.summary, '2026-09');
+    it('Orders vs 2026-09 passes', () => {
+      const wb = loadWorkbook('7_Orders.xlsx');
+      const rows = parseOrders(wb.Sheets[wb.SheetNames[0]]);
+      const checkSep = validateOrdersMonth(rows, '2026-09');
       expect(checkSep.valid).toBe(true);
       expect(checkSep.detectedMonth).toBe('2026-09');
+    });
 
+    it('Settled vs 2026-08 is blocked', () => {
+      const wb = loadWorkbook('2_Settled_Transaction.xlsx');
+      const settled = parseSettled(wb);
       const checkAug = validateSettledMonth(settled.summary, '2026-08');
       expect(checkAug.valid).toBe(false);
       expect(checkAug.detectedMonth).toBe('2026-09');
+      expect(checkAug.message).toBe('This file covers 2026-09, you selected 2026-08');
+    });
+
+    it('Settled vs 2026-09 passes', () => {
+      const wb = loadWorkbook('2_Settled_Transaction.xlsx');
+      const settled = parseSettled(wb);
+      const checkSep = validateSettledMonth(settled.summary, '2026-09');
+      expect(checkSep.valid).toBe(true);
+      expect(checkSep.detectedMonth).toBe('2026-09');
     });
 
     it('Returns file has no month restriction and records min/max requested dates', () => {
@@ -146,39 +153,63 @@ describe('Flipkart Storage, Periods, Slot Validation & Uniqueness (Stage 2b)', (
     });
   });
 
-  describe('4. SHA-256 Duplicate Refusal', () => {
-    it('computes SHA-256 and detects duplicate upload with refusal message', async () => {
+  describe('4. SHA-256 Duplicate Refusal & Status Guard', () => {
+    it('computes SHA-256 and detects duplicate upload only when status is complete', async () => {
       const fakeBuffer = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
       const hash1 = await computeBufferSha256(fakeBuffer);
       const hash2 = await computeBufferSha256(fakeBuffer);
       expect(hash1).toBe(hash2);
       expect(hash1.length).toBe(64);
 
-      const existingUploads: FkUploadRecord[] = [
+      // Incomplete or partial upload must NOT trigger duplicate guard
+      const partialUploads: FkUploadRecord[] = [
         {
           slot: 'orders',
           period: '2026-09',
           originalFileName: 'Orders_Sep.xlsx',
           sha256: hash1,
           user: 'admin@tabbymart.com',
+          status: 'partial',
+          counts: { total: 493 },
+          date: '2026-10-15',
+          uploadedAt: '2026-10-15T10:00:00Z',
+        },
+      ];
+      expect(isDuplicateUpload(hash1, partialUploads).isDuplicate).toBe(false);
+
+      // Complete upload must trigger duplicate guard
+      const completeUploads: FkUploadRecord[] = [
+        {
+          slot: 'orders',
+          period: '2026-09',
+          originalFileName: 'Orders_Sep.xlsx',
+          sha256: hash1,
+          user: 'admin@tabbymart.com',
+          status: 'complete',
           counts: { total: 493 },
           date: '2026-10-15',
           uploadedAt: '2026-10-15T10:00:00Z',
         },
       ];
 
-      const dupCheck = isDuplicateUpload(hash1, existingUploads);
+      const dupCheck = isDuplicateUpload(hash1, completeUploads);
       expect(dupCheck.isDuplicate).toBe(true);
       expect(dupCheck.message).toBe('already imported on 2026-10-15');
 
-      const nonDupCheck = isDuplicateUpload('some_different_hash_value', existingUploads);
+      const nonDupCheck = isDuplicateUpload('some_different_hash_value', completeUploads);
       expect(nonDupCheck.isDuplicate).toBe(false);
     });
   });
 
-  describe('5. SKU Resolution across All 1380 Rows', () => {
+  describe('5. Verified Writes & BATCH_SIZE = 400', () => {
+    it('exports constant BATCH_SIZE strictly equal to 400', () => {
+      expect(BATCH_SIZE).toBe(400);
+    });
+  });
+
+  describe('6. SKU Resolution across All 1380 Rows', () => {
     it('all 1380 SKUs across the 3 real Flipkart sample files resolve with 0 UNMAPPED using seeded aliases', () => {
-      const aliasContent = loadTextFile('sku_aliases_v1.csv');
+      const aliasContent = loadTextFile('sku_aliases_v2.csv');
       const aliasMap = parseAliasCsv(aliasContent);
       expect(aliasMap.size).toBe(67);
 

@@ -91,6 +91,10 @@ export function findSampleFile(targetName: string): { matchedName: string; fullP
           match = entries.find((entry) => matchesNormalized(entry, targetName));
         }
 
+        if (!match && targetName.toLowerCase().includes('sku_aliases')) {
+          match = entries.find((entry) => entry.toLowerCase().includes('sku_aliases') && entry.toLowerCase().endsWith('.csv'));
+        }
+
         if (match) {
           return { matchedName: match, fullPath: path.join(dir, match) };
         }
@@ -151,12 +155,16 @@ export function parseMasterCodes(csvText: string): string[] {
 }
 
 describe('Flipkart Report Parsers & Reconciliations (Stage 2a)', () => {
+  const aliasFileName = findSampleFile('sku_aliases_v2.csv')
+    ? 'sku_aliases_v2.csv'
+    : 'sku_aliases_v1.csv';
+
   const REQUIRED_FILES = [
     '7_Orders.xlsx',
     '2_Settled_Transaction.xlsx',
     '3_Return.xlsx',
     'sku_master_v3.csv',
-    'sku_aliases_v1.csv',
+    aliasFileName,
   ];
 
   beforeAll(() => {
@@ -483,8 +491,8 @@ describe('Flipkart Report Parsers & Reconciliations (Stage 2a)', () => {
   });
 
   describe('7. SKU Master & Alias Resolution', () => {
-    it('parses sku_aliases_v1.csv with exactly 67 alias rows', () => {
-      const aliasContent = loadTextFile('sku_aliases_v1.csv');
+    it(`parses ${aliasFileName} with exactly 67 alias rows`, () => {
+      const aliasContent = loadTextFile(aliasFileName);
       const aliasMap = parseAliasCsv(aliasContent);
       expect(aliasMap.size).toBe(67);
     });
@@ -496,7 +504,7 @@ describe('Flipkart Report Parsers & Reconciliations (Stage 2a)', () => {
     });
 
     it('resolves required specific test mappings', () => {
-      const aliasContent = loadTextFile('sku_aliases_v1.csv');
+      const aliasContent = loadTextFile(aliasFileName);
       const aliasMap = parseAliasCsv(aliasContent);
       const masterContent = loadTextFile('sku_master_v3.csv');
       const masterCodes = parseMasterCodes(masterContent);
@@ -508,7 +516,7 @@ describe('Flipkart Report Parsers & Reconciliations (Stage 2a)', () => {
     });
 
     it('resolves all 1380 SKUs across the 3 Flipkart sample files with 0 UNMAPPED', () => {
-      const aliasContent = loadTextFile('sku_aliases_v1.csv');
+      const aliasContent = loadTextFile(aliasFileName);
       const aliasMap = parseAliasCsv(aliasContent);
       const masterContent = loadTextFile('sku_master_v3.csv');
       const masterCodes = parseMasterCodes(masterContent);

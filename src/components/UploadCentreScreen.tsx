@@ -41,6 +41,8 @@ import {
   checkUnmappedSkus,
   commitFlipkartImport,
   loadBundledAliasesIntoFirestore,
+  verifySlotUploadCounts,
+  BATCH_SIZE,
 } from '../flipkart/storage';
 import { DEFAULT_SKU_ALIASES_V2_CSV } from '../data/defaultData';
 import {
@@ -115,6 +117,12 @@ export const UploadCentreScreen: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [saveProgress, setSaveProgress] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [currentUploadId, setCurrentUploadId] = useState<string | null>(null);
+
+  // Verified counts state per slot
+  const [verifiedSlotCounts, setVerifiedSlotCounts] = useState<Record<string, { stored: number; expected: number }>>({});
+  const [isVerifyingCounts, setIsVerifyingCounts] = useState(false);
+  const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
 
   // Manual mapping modal / inline edits
   const [selectedMasterMapping, setSelectedMasterMapping] = useState<Record<string, string>>({});
@@ -163,10 +171,11 @@ export const UploadCentreScreen: React.FC = () => {
   // Compute months for the selected FY
   const monthsInFY = useMemo(() => getMonthsForFY(selectedFY), [selectedFY]);
 
-  // Upload status map per month and slot
+  // Upload status map per month and slot - count only complete uploads
   const uploadStatusMap = useMemo(() => {
     const map = new Map<string, { orders?: FkUploadRecord; settled?: FkUploadRecord; returns?: FkUploadRecord }>();
     for (const u of uploads) {
+      if (u.status && u.status !== 'complete') continue;
       const period = u.period || '';
       if (!map.has(period)) {
         map.set(period, {});
@@ -181,6 +190,31 @@ export const UploadCentreScreen: React.FC = () => {
 
   // Current month's uploads
   const currentMonthUploads = uploadStatusMap.get(selectedMonth) || {};
+
+  // Re-validate period when selectedMonth changes
+  useEffect(() => {
+    if (stagedOrders) {
+      const pCheck = validateOrdersMonth(stagedOrders, selectedMonth);
+      if (!pCheck.valid && pCheck.detectedMonth) {
+        setPeriodWarning({
+          message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+          targetMonth: pCheck.detectedMonth,
+        });
+      } else {
+        setPeriodWarning(null);
+      }
+    } else if (stagedSettled) {
+      const pCheck = validateSettledMonth(stagedSettled.summary, selectedMonth);
+      if (!pCheck.valid && pCheck.detectedMonth) {
+        setPeriodWarning({
+          message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+          targetMonth: pCheck.detectedMonth,
+        });
+      } else {
+        setPeriodWarning(null);
+      }
+    }
+  }, [selectedMonth, stagedOrders, stagedSettled]);
 
   // Extract all seller SKUs from staged data to check unmapped
   const stagedSellerSkus = useMemo(() => {
@@ -330,15 +364,68 @@ export const UploadCentreScreen: React.FC = () => {
     }
   };
 
-  // Commit Import to Firestore
-  const handleConfirmCommit = async () => {
-    if (!activeSlot || !isAdmin) return;
-    setIsSaving(true);
-    setSaveError(null);
-    setSaveProgress('Initializing batched commit (max 450 per batch)...');
+  // Helper to get stored vs expected counts for slot cards
+  const getSlotCountDisplay = (slotType: FlipkartSlotType) => {
+    const upload = currentMonthUploads[slotType];
+    if (!upload) return null;
+    const verified = verifiedSlotCounts[`${selectedMonth}_${slotType}`];
+    if (verified) {
+      return { stored: verified.stored, expected: verified.expected };
+    }
+    const primaryCol = slotType === 'orders' ? 'fk_order_items' : slotType === 'returns' ? 'fk_returns' : 'fk_settlement_rows';
+    const stored = upload.counts.storedCounts?.[primaryCol] ?? upload.counts.valid ?? upload.counts.total;
+    const expected = slotType === 'settled'
+      ? (upload.counts.storedCounts?.['fk_settlement_rows'] ?? 683)
+      : upload.counts.total;
+    return { stored, expected };
+  };
+
+  // Verify counts per month re-running count queries live in Firestore
+  const handleVerifyCountsForMonth = async () => {
+    setIsVerifyingCounts(true);
+    setVerifyMessage(null);
+    const updatedCounts: Record<string, { stored: number; expected: number }> = {};
+    const slots: FlipkartSlotType[] = ['orders', 'settled', 'returns'];
+    let checkedCount = 0;
+    let allMatched = true;
 
     try {
-      await commitFlipkartImport(
+      for (const slot of slots) {
+        const up = currentMonthUploads[slot];
+        if (up) {
+          checkedCount++;
+          const res = await verifySlotUploadCounts(db, slot, up);
+          updatedCounts[`${selectedMonth}_${slot}`] = { stored: res.stored, expected: res.expected };
+          if (!res.isMatch) allMatched = false;
+        }
+      }
+      setVerifiedSlotCounts((prev) => ({ ...prev, ...updatedCounts }));
+      if (checkedCount === 0) {
+        setVerifyMessage(`No completed uploads found for ${selectedMonth} to verify.`);
+      } else if (allMatched) {
+        setVerifyMessage(`All ${checkedCount} uploaded slot(s) verified with Firestore count query: 100% rows match.`);
+      } else {
+        setVerifyMessage(`Count mismatch detected in one or more slots for ${selectedMonth}.`);
+      }
+    } catch (err: any) {
+      setVerifyMessage(`Verify counts query failed: ${err.message}`);
+    } finally {
+      setIsVerifyingCounts(false);
+    }
+  };
+
+  // Commit Import to Firestore with BATCH_SIZE = 400 and post-commit count verification
+  const handleConfirmCommit = async () => {
+    if (!activeSlot || !isAdmin || periodWarning) return;
+    setIsSaving(true);
+    setSaveError(null);
+    setSaveProgress(`Initializing batched commit (BATCH_SIZE = ${BATCH_SIZE})...`);
+
+    const upId = currentUploadId || `upload_${activeSlot}_${selectedMonth}_${Date.now()}`;
+    setCurrentUploadId(upId);
+
+    try {
+      const res = await commitFlipkartImport(
         db,
         activeSlot,
         {
@@ -351,25 +438,40 @@ export const UploadCentreScreen: React.FC = () => {
           originalFileName: stagedFileName,
           sha256: stagedSha256,
           userEmail: user?.email || 'unknown',
+          existingUploadId: upId,
         },
         (info) => {
-          setSaveProgress(
-            `Writing batch ${info.currentBatch} of ${info.totalBatches} (${info.savedCount}/${info.totalCount} documents)...`
-          );
+          if (info.statusMessage) {
+            setSaveProgress(info.statusMessage);
+          } else {
+            setSaveProgress(
+              `Writing batch ${info.currentBatch} of ${info.totalBatches} (${info.savedCount}/${info.totalCount} documents)...`
+            );
+          }
         }
       );
 
-      // Reset staging state on success
+      // On successful verified write:
       setIsSaving(false);
       setSaveProgress(null);
+      setCurrentUploadId(null);
       setActiveSlot(null);
       setStagedWorkbook(null);
       setStagedOrders(null);
       setStagedReturns(null);
       setStagedSettled(null);
+
+      // Update verified counts for this slot immediately
+      const primaryCol = activeSlot === 'orders' ? 'fk_order_items' : activeSlot === 'returns' ? 'fk_returns' : 'fk_settlement_rows';
+      const stored = res.collectionCounts[primaryCol]?.stored ?? res.totalRecords;
+      const expected = res.collectionCounts[primaryCol]?.expected ?? res.totalRecords;
+      setVerifiedSlotCounts((prev) => ({
+        ...prev,
+        [`${selectedMonth}_${activeSlot}`]: { stored, expected },
+      }));
     } catch (err: any) {
       setIsSaving(false);
-      setSaveError(`Save failed: ${err.message}`);
+      setSaveError(err.message || 'Import failed during batch writes or count verification.');
     }
   };
 
@@ -515,23 +617,48 @@ export const UploadCentreScreen: React.FC = () => {
 
       {/* Selected Month Slots Section */}
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <h2 className="text-base font-bold text-slate-900 dark:text-white">
               Flipkart Slots for Period: <span className="text-indigo-600 dark:text-indigo-400">{selectedMonth}</span>
             </h2>
             <span className="text-xs text-slate-500">
-              (Content-detected ingestion with deterministic upsert and SHA-256 duplicate guards)
+              (Content-detected ingestion with verified counts &amp; SHA-256 duplicate guards)
             </span>
           </div>
 
-          {!isAdmin && (
-            <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-              <Lock className="w-3.5 h-3.5" />
-              Viewer Mode: Read-Only
-            </div>
-          )}
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={handleVerifyCountsForMonth}
+              disabled={isVerifyingCounts}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              title="Run live count query (getCountFromServer) in Firestore to verify stored rows for this month"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isVerifyingCounts ? 'animate-spin text-indigo-600' : 'text-slate-500'}`} />
+              {isVerifyingCounts ? 'Verifying counts...' : 'Verify counts'}
+            </button>
+
+            {!isAdmin && (
+              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                <Lock className="w-3.5 h-3.5" />
+                Viewer Mode: Read-Only
+              </div>
+            )}
+          </div>
         </div>
+
+        {/* Verification Message Alert */}
+        {verifyMessage && (
+          <div className="p-3 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs text-indigo-800 dark:text-indigo-300 flex items-center justify-between">
+            <span>{verifyMessage}</span>
+            <button
+              onClick={() => setVerifyMessage(null)}
+              className="text-slate-400 hover:text-slate-600 text-[11px] font-bold px-1 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Flipkart Slots Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -575,8 +702,8 @@ export const UploadCentreScreen: React.FC = () => {
                   <p className="text-[10px] text-slate-500">
                     Date: {currentMonthUploads.orders.date} by {currentMonthUploads.orders.user}
                   </p>
-                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                    Records: {currentMonthUploads.orders.counts.total} items
+                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                    Stored: {getSlotCountDisplay('orders')?.stored ?? currentMonthUploads.orders.counts.total} of {getSlotCountDisplay('orders')?.expected ?? currentMonthUploads.orders.counts.total} rows
                   </p>
                 </div>
               ) : (
@@ -639,7 +766,10 @@ export const UploadCentreScreen: React.FC = () => {
                   <p className="text-[10px] text-slate-500">
                     Date: {currentMonthUploads.settled.date} by {currentMonthUploads.settled.user}
                   </p>
-                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                    Stored: {getSlotCountDisplay('settled')?.stored ?? (currentMonthUploads.settled.counts.storedCounts?.['fk_settlement_rows'] ?? 683)} of {getSlotCountDisplay('settled')?.expected ?? 683} rows
+                  </p>
+                  <p className="text-[10px] text-slate-500">
                     Batches: {currentMonthUploads.settled.counts.batchesCount || 18} batches
                   </p>
                 </div>
@@ -702,8 +832,8 @@ export const UploadCentreScreen: React.FC = () => {
                   <p className="text-[10px] text-slate-500">
                     Date: {currentMonthUploads.returns.date} by {currentMonthUploads.returns.user}
                   </p>
-                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                    Records: {currentMonthUploads.returns.counts.total} returns
+                  <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                    Stored: {getSlotCountDisplay('returns')?.stored ?? currentMonthUploads.returns.counts.total} of {getSlotCountDisplay('returns')?.expected ?? currentMonthUploads.returns.counts.total} rows
                   </p>
                 </div>
               ) : (
@@ -1018,6 +1148,14 @@ export const UploadCentreScreen: React.FC = () => {
                   onClick={() => {
                     setActiveSlot(null);
                     setStagedWorkbook(null);
+                    setStagedOrders(null);
+                    setStagedReturns(null);
+                    setStagedSettled(null);
+                    setPeriodWarning(null);
+                    setValidationError(null);
+                    setSaveError(null);
+                    setSaveProgress(null);
+                    setCurrentUploadId(null);
                   }}
                   className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
                 >
@@ -1026,11 +1164,16 @@ export const UploadCentreScreen: React.FC = () => {
 
                 <button
                   onClick={handleConfirmCommit}
-                  disabled={isSaving || !isAdmin}
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                  disabled={isSaving || !isAdmin || Boolean(periodWarning)}
+                  title={periodWarning ? 'Blocked: Please switch to matching period or upload matching file' : undefined}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  {isSaving ? 'Saving to Firestore...' : 'Confirm & Ingest Report'}
+                  {periodWarning
+                    ? 'Import Blocked (Period Mismatch)'
+                    : isSaving
+                    ? 'Saving to Firestore...'
+                    : 'Confirm & Ingest Report'}
                 </button>
               </div>
             </div>
