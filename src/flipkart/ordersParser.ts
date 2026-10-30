@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { FlipkartOrderRow } from './types';
-import { cleanSku, cleanItemId, parseDate } from './normalizers';
+import { cleanSku, cleanItemId, parseDate, parseTime } from './normalizers';
 
 /**
  * Parses Flipkart Orders sheet:
@@ -91,7 +91,9 @@ export function parseOrders(sheet: XLSX.WorkSheet): FlipkartOrderRow[] {
     const sku = cleanSku(rawSku);
 
     const orderId = colOrderId >= 0 ? String(row[colOrderId] || '').trim() : '';
-    const orderDate = colOrderDate >= 0 ? parseDate(row[colOrderDate]) : null;
+    const rawOrderDateVal = colOrderDate >= 0 ? row[colOrderDate] : null;
+    const orderDate = parseDate(rawOrderDateVal);
+    const orderTime = parseTime(rawOrderDateVal);
     const status = colStatus >= 0 ? String(row[colStatus] || '').trim().toUpperCase() : '';
     const qtyVal = colQty >= 0 ? Number(row[colQty]) : 1;
     const qty = isNaN(qtyVal) || qtyVal <= 0 ? 1 : qtyVal;
@@ -108,6 +110,7 @@ export function parseOrders(sheet: XLSX.WorkSheet): FlipkartOrderRow[] {
       orderItemId,
       orderId,
       orderDate,
+      orderTime,
       status,
       sku,
       qty,

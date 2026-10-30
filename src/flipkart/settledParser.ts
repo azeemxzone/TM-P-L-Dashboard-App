@@ -381,7 +381,13 @@ function parseSettledSummarySheet(sheet: XLSX.WorkSheet): FlipkartSettledSummary
  * Returns an array of SettlementBatch items with:
  * neftId, paymentDate, orderRowsTotal, adjustmentsTotal, expectedBank, rowCount.
  */
-export function groupByBatch(settled: FlipkartSettledReport): SettlementBatch[] {
+export function groupByBatch(
+  settledOrOrders: FlipkartSettledReport | FlipkartSettledOrderRow[],
+  adjustmentsList?: FlipkartAdjustmentRow[]
+): SettlementBatch[] {
+  const orders = Array.isArray(settledOrOrders) ? settledOrOrders : (settledOrOrders?.orders || []);
+  const adjustments = Array.isArray(settledOrOrders) ? (adjustmentsList || []) : (settledOrOrders?.adjustments || []);
+
   const batchMap = new Map<
     string,
     {
@@ -394,7 +400,7 @@ export function groupByBatch(settled: FlipkartSettledReport): SettlementBatch[] 
   >();
 
   // 1. Accumulate order rows
-  for (const o of settled.orders) {
+  for (const o of orders) {
     const neft = o.neftId || 'UNKNOWN';
     let b = batchMap.get(neft);
     if (!b) {
@@ -415,7 +421,7 @@ export function groupByBatch(settled: FlipkartSettledReport): SettlementBatch[] 
   }
 
   // 2. Accumulate adjustments
-  for (const adj of settled.adjustments) {
+  for (const adj of adjustments) {
     const neft = adj.neftId || 'UNKNOWN';
     let b = batchMap.get(neft);
     if (!b) {

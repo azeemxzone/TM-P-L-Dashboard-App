@@ -9,7 +9,7 @@ import {
   getCountFromServer,
   Firestore,
 } from 'firebase/firestore';
-import { orderMonth } from './normalizers';
+import { orderMonth, cleanItemId, cleanNeftId } from './normalizers';
 import {
   FlipkartOrderRow,
   FlipkartReturnRow,
@@ -19,7 +19,7 @@ import {
 import { groupByBatch } from './settledParser';
 import { resolveMasterSku } from '../utils/skuResolver';
 
-export type FlipkartSlotType = 'orders' | 'settled' | 'returns';
+export type FlipkartSlotType = 'orders' | 'settled' | 'returns' | 'bank_statement';
 
 export interface SkuAliasDoc {
   alias: string;
@@ -63,7 +63,7 @@ export async function computeBufferSha256(data: ArrayBuffer | Uint8Array): Promi
 
 // Deterministic ID builders
 export function getOrderItemDocId(orderItemId: string): string {
-  return String(orderItemId || '').trim();
+  return cleanItemId(orderItemId);
 }
 
 export function getReturnDocId(returnId: string): string {
@@ -71,7 +71,7 @@ export function getReturnDocId(returnId: string): string {
 }
 
 export function getSettlementRowDocId(neftId: string, orderItemId: string): string {
-  return `${String(neftId || '').trim()}_${String(orderItemId || '').trim()}`;
+  return `${cleanNeftId(neftId)}_${cleanItemId(orderItemId)}`;
 }
 
 export function getAdjustmentDocId(sheet: string, neftId: string, n: number): string {
@@ -315,11 +315,13 @@ export async function commitFlipkartImport(
 
   if (slot === 'orders' && data.orders) {
     for (const o of data.orders) {
-      const docId = getOrderItemDocId(o.orderItemId);
+      const cleanedId = cleanItemId(o.orderItemId);
+      const docId = getOrderItemDocId(cleanedId);
       if (!docId) continue;
       const month = o.orderDate ? orderMonth(o.orderDate) : meta.selectedMonth;
       addOp('fk_order_items', docId, {
         ...o,
+        orderItemId: cleanedId,
         orderMonth: month,
         lastUploadId: uploadId,
         updatedAt: nowIso,
@@ -327,10 +329,14 @@ export async function commitFlipkartImport(
     }
   } else if (slot === 'returns' && data.returns) {
     for (const r of data.returns) {
+      const cleanedId = cleanItemId(r.orderItemId);
       const docId = getReturnDocId(r.returnId);
       if (!docId) continue;
       addOp('fk_returns', docId, {
         ...r,
+        orderItemId: cleanedId,
+        returnStatus: String(r.returnStatus || '').trim().toLowerCase(),
+        returnType: String(r.returnType || '').trim().toLowerCase(),
         lastUploadId: uploadId,
         updatedAt: nowIso,
       });
@@ -338,12 +344,17 @@ export async function commitFlipkartImport(
   } else if (slot === 'settled' && data.settled) {
     // 1. Order lines
     for (const o of data.settled.orders) {
-      const docId = getSettlementRowDocId(o.neftId, o.orderItemId);
+      const cleanedId = cleanItemId(o.orderItemId);
+      const cleanedNeft = cleanNeftId(o.neftId);
+      const docId = getSettlementRowDocId(cleanedNeft, cleanedId);
       if (!docId) continue;
+      const oMonth = o.orderDate ? orderMonth(o.orderDate) : null;
       addOp('fk_settlement_rows', docId, {
         ...o,
+        orderItemId: cleanedId,
+        neftId: cleanedNeft,
         paymentMonth: o.paymentDate ? orderMonth(o.paymentDate) : meta.selectedMonth,
-        orderMonth: o.orderDate ? orderMonth(o.orderDate) : null,
+        orderMonth: oMonth,
         lastUploadId: uploadId,
         updatedAt: nowIso,
       });

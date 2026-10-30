@@ -183,7 +183,7 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Flipkart Uploads audit log (Stage 2b)
+    // Flipkart Uploads audit log (Stage 2b & 2c)
     // Read: Allowed users
     // Create: Admin only (create-only)
     // Update, Delete: denied
@@ -191,6 +191,16 @@ service cloud.firestore {
       allow read: if isAllowedUser();
       allow create: if isAdmin();
       allow update, delete: if false;
+    }
+
+    // Bank Statement Credits (Stage 2c)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /bank_credits/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
     }
   }
 }

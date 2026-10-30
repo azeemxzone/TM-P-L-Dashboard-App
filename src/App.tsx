@@ -13,6 +13,8 @@ import { OpeningStockScreen } from './components/OpeningStockScreen';
 import { PurchasesScreen } from './components/PurchasesScreen';
 import { AverageCostScreen } from './components/AverageCostScreen';
 import { UploadCentreScreen } from './components/UploadCentreScreen';
+import { FlipkartReconciliationScreen } from './components/FlipkartReconciliationScreen';
+import { FlipkartTrackingScreen } from './components/FlipkartTrackingScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { UsersScreen } from './components/UsersScreen';
 import {
@@ -26,9 +28,20 @@ import {
   ShoppingCart,
   TrendingUp,
   UploadCloud,
+  Scale,
+  Activity,
 } from 'lucide-react';
 
-type Tab = 'cost_master' | 'opening_stock' | 'purchases' | 'average_cost' | 'upload_centre' | 'settings' | 'users';
+type Tab =
+  | 'cost_master'
+  | 'opening_stock'
+  | 'purchases'
+  | 'average_cost'
+  | 'upload_centre'
+  | 'reconciliation'
+  | 'tracking'
+  | 'settings'
+  | 'users';
 
 const AppContent: React.FC = () => {
   const { user, loading, isAuthorized, isAdmin, logout } = useAuth();
@@ -134,6 +147,30 @@ const AppContent: React.FC = () => {
             >
               <UploadCloud className="w-3.5 h-3.5" />
               Upload Centre
+            </button>
+
+            <button
+              onClick={() => setActiveTab('reconciliation')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'reconciliation'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
+              }`}
+            >
+              <Scale className="w-3.5 h-3.5" />
+              Reconciliation
+            </button>
+
+            <button
+              onClick={() => setActiveTab('tracking')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'tracking'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              Tracking
             </button>
 
             <button
@@ -246,6 +283,24 @@ const AppContent: React.FC = () => {
             Uploads
           </button>
           <button
+            onClick={() => setActiveTab('reconciliation')}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
+              activeTab === 'reconciliation' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <Scale className="w-3.5 h-3.5" />
+            Reconcile
+          </button>
+          <button
+            onClick={() => setActiveTab('tracking')}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
+              activeTab === 'tracking' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+            Tracking
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
               activeTab === 'settings' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
@@ -275,13 +330,15 @@ const AppContent: React.FC = () => {
         {activeTab === 'purchases' && <PurchasesScreen />}
         {activeTab === 'average_cost' && <AverageCostScreen />}
         {activeTab === 'upload_centre' && <UploadCentreScreen />}
+        {activeTab === 'reconciliation' && <FlipkartReconciliationScreen />}
+        {activeTab === 'tracking' && <FlipkartTrackingScreen />}
         {activeTab === 'settings' && <SettingsScreen />}
         {activeTab === 'users' && isAdmin && <UsersScreen />}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950 py-4 text-center text-xs text-slate-500 dark:text-slate-400 transition-colors">
-        <p>Tabbymart Internal P&amp;L App • Stage 2b Upload Centre &amp; Flipkart Reports</p>
+        <p>Tabbymart Internal P&amp;L App • Stage 2c Flipkart Reconciliation &amp; Tracking</p>
       </footer>
     </div>
   );

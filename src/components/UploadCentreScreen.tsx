@@ -51,6 +51,15 @@ import {
   FlipkartSettledReport,
   FlipkartSettledOrderRow,
 } from '../flipkart/types';
+import { REPORT_PATHS } from '../config/reportPaths';
+import {
+  detectBankStatement,
+  parseBankStatement,
+  validateBankStatementMonth,
+} from '../bank/bankParser';
+import { BankStatementReport } from '../bank/types';
+import { commitBankCreditsImport } from '../bank/bankStorage';
+import { clearTrackingSessionCache } from './FlipkartTrackingScreen';
 
 interface FYMonth {
   key: string; // "2026-04"
@@ -108,6 +117,7 @@ export const UploadCentreScreen: React.FC = () => {
   const [stagedOrders, setStagedOrders] = useState<FlipkartOrderRow[] | null>(null);
   const [stagedReturns, setStagedReturns] = useState<FlipkartReturnRow[] | null>(null);
   const [stagedSettled, setStagedSettled] = useState<FlipkartSettledReport | null>(null);
+  const [stagedBankReport, setStagedBankReport] = useState<BankStatementReport | null>(null);
 
   // Validation results
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -173,7 +183,7 @@ export const UploadCentreScreen: React.FC = () => {
 
   // Upload status map per month and slot - count only complete uploads
   const uploadStatusMap = useMemo(() => {
-    const map = new Map<string, { orders?: FkUploadRecord; settled?: FkUploadRecord; returns?: FkUploadRecord }>();
+    const map = new Map<string, { orders?: FkUploadRecord; settled?: FkUploadRecord; returns?: FkUploadRecord; bank_statement?: FkUploadRecord }>();
     for (const u of uploads) {
       if (u.status && u.status !== 'complete') continue;
       const period = u.period || '';
@@ -184,6 +194,7 @@ export const UploadCentreScreen: React.FC = () => {
       if (u.slot === 'orders') entry.orders = u;
       if (u.slot === 'settled') entry.settled = u;
       if (u.slot === 'returns') entry.returns = u;
+      if (u.slot === 'bank_statement') entry.bank_statement = u;
     }
     return map;
   }, [uploads]);
@@ -213,8 +224,18 @@ export const UploadCentreScreen: React.FC = () => {
       } else {
         setPeriodWarning(null);
       }
+    } else if (stagedBankReport) {
+      const pCheck = validateBankStatementMonth(stagedBankReport, selectedMonth);
+      if (!pCheck.valid && pCheck.detectedMonth) {
+        setPeriodWarning({
+          message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+          targetMonth: pCheck.detectedMonth,
+        });
+      } else {
+        setPeriodWarning(null);
+      }
     }
-  }, [selectedMonth, stagedOrders, stagedSettled]);
+  }, [selectedMonth, stagedOrders, stagedSettled, stagedBankReport]);
 
   // Extract all seller SKUs from staged data to check unmapped
   const stagedSellerSkus = useMemo(() => {
@@ -265,13 +286,58 @@ export const UploadCentreScreen: React.FC = () => {
         return;
       }
 
-      // Read Excel Workbook with SheetJS
+      // Read Excel Workbook or CSV with SheetJS
       const wb = XLSX.read(buffer, { type: 'array' });
       setStagedWorkbook(wb);
 
       // Detect report type by CONTENT
+      const isBank = detectBankStatement(wb);
+
+      if (targetSlot === 'bank_statement') {
+        if (!isBank) {
+          const fkDetected = detectFlipkartReport(wb);
+          if (fkDetected === 'returns') {
+            setValidationError('This looks like a Returns report; please use the Returns slot.');
+            return;
+          } else if (fkDetected === 'orders') {
+            setValidationError('This looks like an Orders report; please use the Orders slot.');
+            return;
+          } else if (fkDetected === 'settled') {
+            setValidationError('This looks like a Settled report; please use the Settled slot.');
+            return;
+          }
+          setValidationError(
+            'This file does not match a recognized Bank Statement format (expected headers: Bank Reference, Value Date, Type, Payment Narration, Debit, Credit, Available Balance in rows 1-15).'
+          );
+          return;
+        }
+
+        setStagedDetectedType('bank_statement');
+        const bankReport = parseBankStatement(wb);
+        setStagedBankReport(bankReport);
+        setStagedOrders(null);
+        setStagedReturns(null);
+        setStagedSettled(null);
+
+        const pCheck = validateBankStatementMonth(bankReport, selectedMonth);
+        if (!pCheck.valid && pCheck.detectedMonth) {
+          setPeriodWarning({
+            message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+            targetMonth: pCheck.detectedMonth,
+          });
+        }
+        return;
+      }
+
+      // If targetSlot is one of the Flipkart slots, check if file dropped is actually a Bank Statement:
+      if (isBank) {
+        setValidationError('This looks like a Bank Statement; please use the Bank Statement slot.');
+        return;
+      }
+
       const detected = detectFlipkartReport(wb);
       setStagedDetectedType(detected);
+      setStagedBankReport(null);
 
       // Check wrong slot
       const slotValidation = validateSlotReportMatch(detected, targetSlot);
@@ -372,11 +438,15 @@ export const UploadCentreScreen: React.FC = () => {
     if (verified) {
       return { stored: verified.stored, expected: verified.expected };
     }
+    if (slotType === 'bank_statement') {
+      const stored = upload.rowCount || upload.counts?.total || 0;
+      return { stored, expected: stored };
+    }
     const primaryCol = slotType === 'orders' ? 'fk_order_items' : slotType === 'returns' ? 'fk_returns' : 'fk_settlement_rows';
-    const stored = upload.counts.storedCounts?.[primaryCol] ?? upload.counts.valid ?? upload.counts.total;
+    const stored = upload.counts?.storedCounts?.[primaryCol] ?? upload.counts?.valid ?? upload.counts?.total ?? 0;
     const expected = slotType === 'settled'
-      ? (upload.counts.storedCounts?.['fk_settlement_rows'] ?? 683)
-      : upload.counts.total;
+      ? (upload.counts?.storedCounts?.['fk_settlement_rows'] ?? 683)
+      : (upload.counts?.total ?? 0);
     return { stored, expected };
   };
 
@@ -385,7 +455,7 @@ export const UploadCentreScreen: React.FC = () => {
     setIsVerifyingCounts(true);
     setVerifyMessage(null);
     const updatedCounts: Record<string, { stored: number; expected: number }> = {};
-    const slots: FlipkartSlotType[] = ['orders', 'settled', 'returns'];
+    const slots: FlipkartSlotType[] = ['orders', 'settled', 'returns', 'bank_statement'];
     let checkedCount = 0;
     let allMatched = true;
 
@@ -394,9 +464,18 @@ export const UploadCentreScreen: React.FC = () => {
         const up = currentMonthUploads[slot];
         if (up) {
           checkedCount++;
-          const res = await verifySlotUploadCounts(db, slot, up);
-          updatedCounts[`${selectedMonth}_${slot}`] = { stored: res.stored, expected: res.expected };
-          if (!res.isMatch) allMatched = false;
+          if (slot === 'bank_statement') {
+            const countQ = query(collection(db, 'bank_credits'), where('month', '==', selectedMonth));
+            const countSnap = await getCountFromServer(countQ);
+            const stored = countSnap.data().count;
+            const expected = up.rowCount || up.counts?.total || stored;
+            updatedCounts[`${selectedMonth}_${slot}`] = { stored, expected };
+            if (stored !== expected) allMatched = false;
+          } else {
+            const res = await verifySlotUploadCounts(db, slot, up);
+            updatedCounts[`${selectedMonth}_${slot}`] = { stored: res.stored, expected: res.expected };
+            if (!res.isMatch) allMatched = false;
+          }
         }
       }
       setVerifiedSlotCounts((prev) => ({ ...prev, ...updatedCounts }));
@@ -417,6 +496,54 @@ export const UploadCentreScreen: React.FC = () => {
   // Commit Import to Firestore with BATCH_SIZE = 400 and post-commit count verification
   const handleConfirmCommit = async () => {
     if (!activeSlot || !isAdmin || periodWarning) return;
+
+    if (activeSlot === 'bank_statement') {
+      if (!stagedBankReport) return;
+      setIsSaving(true);
+      setSaveError(null);
+      setSaveProgress(`Committing marketplace credits to bank_credits (BATCH_SIZE = ${BATCH_SIZE})...`);
+
+      const upId = currentUploadId || `upload_bank_${selectedMonth}_${Date.now()}`;
+      setCurrentUploadId(upId);
+
+      try {
+        const res = await commitBankCreditsImport(
+          db,
+          stagedBankReport,
+          upId,
+          stagedFileName,
+          stagedSha256,
+          user?.email || 'admin',
+          selectedMonth
+        );
+
+        if (!res.success) {
+          setIsSaving(false);
+          setSaveError(res.error || 'Partial import error during bank credits storage.');
+          return;
+        }
+
+        setIsSaving(false);
+        setSaveProgress(null);
+        setCurrentUploadId(null);
+        setActiveSlot(null);
+        setStagedWorkbook(null);
+        setStagedBankReport(null);
+        clearTrackingSessionCache(selectedMonth);
+
+        setVerifiedSlotCounts((prev) => ({
+          ...prev,
+          [`${selectedMonth}_bank_statement`]: {
+            stored: res.writtenCount,
+            expected: res.totalMarketplaceCredits,
+          },
+        }));
+      } catch (err: any) {
+        setIsSaving(false);
+        setSaveError(err.message || 'Import failed for bank statement.');
+      }
+      return;
+    }
     setIsSaving(true);
     setSaveError(null);
     setSaveProgress(`Initializing batched commit (BATCH_SIZE = ${BATCH_SIZE})...`);
@@ -460,6 +587,7 @@ export const UploadCentreScreen: React.FC = () => {
       setStagedOrders(null);
       setStagedReturns(null);
       setStagedSettled(null);
+      clearTrackingSessionCache(selectedMonth);
 
       // Update verified counts for this slot immediately
       const primaryCol = activeSlot === 'orders' ? 'fk_order_items' : activeSlot === 'returns' ? 'fk_returns' : 'fk_settlement_rows';
@@ -686,7 +814,7 @@ export const UploadCentreScreen: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                Download from: Flipkart Seller Hub &gt; Reports &gt; Reports Center &gt; Orders Report (filter by Order Date)
+                Download from: {REPORT_PATHS.flipkart.orders}
               </p>
 
               {/* Status or Upload info */}
@@ -750,7 +878,7 @@ export const UploadCentreScreen: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                Download from: Flipkart Seller Hub &gt; Payments &gt; Settled Transactions (filter by Settlement Date)
+                Download from: {REPORT_PATHS.flipkart.settled}
               </p>
 
               {/* Status or Upload info */}
@@ -816,7 +944,7 @@ export const UploadCentreScreen: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                Download from: Flipkart Seller Hub &gt; Reports &gt; Reports Center &gt; Returns Report
+                Download from: {REPORT_PATHS.flipkart.returns}
               </p>
 
               {/* Status or Upload info */}
@@ -856,40 +984,111 @@ export const UploadCentreScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* Other Marketplaces Slots (Coming Soon) */}
+        {/* Bank Statement Slot & Other Marketplaces */}
         <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Other Marketplace Slots (Policy v2 Pipeline)
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Amazon India</span>
-                <p className="text-[11px] text-slate-500">Orders, Settlement, Returns</p>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Bank Statement &amp; Other Marketplace Ingestion
+            </h3>
+            <span className="text-[11px] text-slate-400">
+              Account statement NEFT credit matcher
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            {/* Active Bank Statement Slot */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'bank_statement')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'bank_statement'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Bank Slot
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Bank Statement</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    Statement (.xlsx / .csv)
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Download from: {REPORT_PATHS.bankStatement}
+                </p>
+
+                {/* Status or Upload info */}
+                {currentMonthUploads.bank_statement ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthUploads.bank_statement.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthUploads.bank_statement.date} by {currentMonthUploads.bank_statement.user}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {getSlotCountDisplay('bank_statement')?.stored ?? currentMonthUploads.bank_statement.rowCount} of {getSlotCountDisplay('bank_statement')?.expected ?? currentMonthUploads.bank_statement.rowCount} rows
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
               </div>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                Coming soon
-              </span>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('bank_statement')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthUploads.bank_statement ? 'Replace Statement' : 'Upload Statement'}
+                </button>
+              </div>
             </div>
 
-            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Meesho</span>
-                <p className="text-[11px] text-slate-500">Orders &amp; Payment files</p>
+            {/* Amazon India (Coming soon) */}
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Amazon India</span>
+                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Coming soon
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">{REPORT_PATHS.amazon}</p>
               </div>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                Coming soon
-              </span>
+              <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-200/60">
+                Orders, Settlement, Returns
+              </div>
             </div>
 
-            <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Bank Statement</span>
-                <p className="text-[11px] text-slate-500">NEFT Credit Line Matcher</p>
+            {/* Meesho (Coming soon) */}
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Meesho</span>
+                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Coming soon
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">{REPORT_PATHS.meesho}</p>
               </div>
-              <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                Coming soon
-              </span>
+              <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-200/60">
+                Orders &amp; Payment files
+              </div>
             </div>
           </div>
         </div>
@@ -1044,10 +1243,96 @@ export const UploadCentreScreen: React.FC = () => {
                     </div>
                   </>
                 )}
+
+                {activeSlot === 'bank_statement' && stagedBankReport && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Total Statement Lines</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        {stagedBankReport.summary.totalLines}
+                      </p>
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        {stagedBankReport.summary.creditCount} CR / {stagedBankReport.summary.debitCount} DR
+                      </span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Flipkart Credits</span>
+                      <p className="text-lg font-bold text-indigo-600">
+                        ₹{stagedBankReport.summary.marketplaceSummary.flipkart.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                      <span className="text-[10px] text-indigo-500 font-mono">
+                        {stagedBankReport.summary.marketplaceSummary.flipkart.count} credit rows
+                      </span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Meesho Credits</span>
+                      <p className="text-lg font-bold text-pink-600">
+                        ₹{stagedBankReport.summary.marketplaceSummary.meesho.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                      <span className="text-[10px] text-pink-500 font-mono">
+                        {stagedBankReport.summary.marketplaceSummary.meesho.count} credit rows
+                      </span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Amazon Credits</span>
+                      <p className="text-lg font-bold text-amber-600">
+                        ₹{stagedBankReport.summary.marketplaceSummary.amazon.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                      <span className="text-[10px] text-amber-500 font-mono">
+                        {stagedBankReport.summary.marketplaceSummary.amazon.count} credit rows
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Unmatched SKUs Box */}
-              <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 bg-slate-50/50 dark:bg-slate-950/30">
+              {activeSlot === 'bank_statement' && stagedBankReport && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800/60 text-xs text-slate-600 dark:text-slate-400 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <span>
+                      Policy v2: Only marketplace credits are stored ({stagedBankReport.marketplaceCredits.length} rows). Other lines ({stagedBankReport.summary.marketplaceSummary.other.count} other credits, {stagedBankReport.summary.debitCount} debits) are ignored and not stored.
+                    </span>
+                    <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 shrink-0">
+                      Period: {stagedBankReport.summary.periodStart || '—'} to {stagedBankReport.summary.periodEnd || '—'}
+                    </span>
+                  </div>
+
+                  <div className="max-h-56 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+                    <table className="w-full text-left text-xs font-mono">
+                      <thead className="bg-slate-50 dark:bg-slate-950 sticky top-0 border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500">
+                        <tr>
+                          <th className="py-2 px-3">Bank Reference</th>
+                          <th className="py-2 px-3">Value Date</th>
+                          <th className="py-2 px-3">Marketplace</th>
+                          <th className="py-2 px-3 text-right">Amount (₹)</th>
+                          <th className="py-2 px-3">Narration</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                        {stagedBankReport.marketplaceCredits.map((c, i) => (
+                          <tr key={i} className="hover:bg-slate-50/50">
+                            <td className="py-2 px-3 font-bold text-slate-900 dark:text-white">{c.bankReference}</td>
+                            <td className="py-2 px-3 text-slate-500">{c.valueDate}</td>
+                            <td className="py-2 px-3">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950 text-indigo-600 border border-indigo-200 dark:border-indigo-800">
+                                {c.marketplace}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right font-bold text-emerald-600">
+                              ₹{c.credit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-2 px-3 text-slate-500 truncate max-w-xs">{c.narrationShort}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Unmatched SKUs Box for Flipkart report slots */}
+              {activeSlot !== 'bank_statement' && (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 bg-slate-50/50 dark:bg-slate-950/30">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-900 dark:text-white">SKU Mapping Verification</span>
@@ -1122,6 +1407,7 @@ export const UploadCentreScreen: React.FC = () => {
                   </div>
                 )}
               </div>
+              )}
 
               {/* Progress and Save Actions */}
               {saveProgress && (
@@ -1156,6 +1442,7 @@ export const UploadCentreScreen: React.FC = () => {
                     setSaveError(null);
                     setSaveProgress(null);
                     setCurrentUploadId(null);
+                    setStagedBankReport(null);
                   }}
                   className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
                 >

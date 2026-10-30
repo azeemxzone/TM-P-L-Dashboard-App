@@ -53,16 +53,20 @@ export function cleanNeftId(neftId: any): string {
 }
 
 /**
- * Parses an Excel date (serial number) or date string into an ISO date string (YYYY-MM-DD).
- * Returns null if invalid or missing.
+ * Parses an Excel date (serial number) or date string into a date-only ISO string (YYYY-MM-DD).
+ * Strictly date-only. Never returns timestamps or time components.
+ * Prevents timezone shifts across different runtime environments.
  */
 export function parseDate(raw: any): string | null {
   if (raw == null || raw === '') return null;
 
-  // Handle Date instance
+  // Handle Date instance (extract calendar year, month, date without timezone shift)
   if (raw instanceof Date) {
     if (isNaN(raw.getTime())) return null;
-    return raw.toISOString().split('T')[0];
+    const y = raw.getFullYear();
+    const m = String(raw.getMonth() + 1).padStart(2, '0');
+    const d = String(raw.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   // Handle Excel serial date numbers (e.g. 46270)
@@ -72,7 +76,10 @@ export function parseDate(raw: any): string | null {
       // Excel 1900 date system leap year bug: 25569 is Jan 1 1970
       const date = new Date(Math.round((num - 25569) * 86400 * 1000));
       if (!isNaN(date.getTime())) {
-        return date.toISOString().split('T')[0];
+        const y = date.getUTCFullYear();
+        const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(date.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
       }
     }
   }
@@ -80,7 +87,7 @@ export function parseDate(raw: any): string | null {
   const str = String(raw).trim();
   if (!str) return null;
 
-  // Check ISO format YYYY-MM-DD
+  // Check ISO format YYYY-MM-DD or YYYY-MM-DD HH:mm:ss
   const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (isoMatch) {
     const y = isoMatch[1];
@@ -119,15 +126,37 @@ export function parseDate(raw: any): string | null {
   // Fallback to JS Date parsing
   const parsed = new Date(str);
   if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString().split('T')[0];
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
   return null;
 }
 
 /**
+ * Extracts time in HH:mm:ss format from raw date-time value if present,
+ * keeping time separate from the date-only string.
+ */
+export function parseTime(raw: any): string | null {
+  if (raw == null || raw === '') return null;
+  const str = String(raw).trim();
+  const timeMatch = str.match(/(?:[ T])(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+  if (timeMatch) {
+    const hh = timeMatch[1].padStart(2, '0');
+    const mm = timeMatch[2].padStart(2, '0');
+    const ss = (timeMatch[3] || '00').padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  }
+  return null;
+}
+
+/**
  * Returns the order month in "YYYY-MM" format.
+ * Uses date directly without any timezone shifts.
  * e.g. "2026-09-04" -> "2026-09"
+ * e.g. "2026-09-30 23:30:00" -> "2026-09"
  */
 export function orderMonth(dateStr: any): string {
   const d = parseDate(dateStr);
@@ -137,6 +166,7 @@ export function orderMonth(dateStr: any): string {
 
 /**
  * Returns the Indian financial year for a given date in "YYYY-YY" format (Apr to Mar).
+ * Uses date directly in India time (IST).
  * e.g. "2026-04-01" -> "2026-27"
  * e.g. "2026-09-04" -> "2026-27"
  * e.g. "2027-02-15" -> "2026-27"

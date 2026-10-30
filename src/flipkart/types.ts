@@ -7,7 +7,8 @@ export type FlipkartReportType = 'orders' | 'settled' | 'returns' | 'unknown';
 export interface FlipkartOrderRow {
   orderItemId: string;
   orderId: string;
-  orderDate: string | null;
+  orderDate: string | null; // strictly YYYY-MM-DD
+  orderTime?: string | null; // HH:mm:ss if present
   status: string; // DELIVERED, RETURNED, READY_TO_SHIP, RETURN_REQUESTED, CANCELLED, APPROVAL_HOLD, etc.
   sku: string; // cleaned SKU
   qty: number;

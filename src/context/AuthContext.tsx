@@ -5,7 +5,7 @@ import { auth, db, googleAuthProvider } from '../firebase';
 import { AllowedUsersDoc, UserRole, AllowedUserRecord } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrors';
 
-const SEED_EMAIL = 'mak44641@gmail.com';
+export const SEED_EMAIL = 'mak44641@gmail.com';
 
 interface AuthContextType {
   user: User | null;
@@ -85,7 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [allowedDoc]);
 
   // Seed or initialize allowed users doc
-  const ensureAllowedUsersSeeded = async (currentUser: User) => {
+  const ensureAllowedUsersSeeded = async (emailAddr: string) => {
     const docRef = doc(db, 'allowedUsers', 'default');
     try {
       const snap = await getDoc(docRef);
@@ -101,11 +101,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               email: SEED_EMAIL.toLowerCase(),
               role: 'admin',
               addedAt: new Date().toISOString(),
-              addedBy: currentUser.email || 'system',
+              addedBy: emailAddr || 'system',
             },
           ],
           updatedAt: new Date().toISOString(),
-          updatedBy: currentUser.email || 'system',
+          updatedBy: emailAddr || 'system',
         };
         await setDoc(docRef, initialDoc);
         setAllowedDoc(initialDoc);
@@ -144,8 +144,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     } catch (err) {
-      // If offline or initializing, onSnapshot will pick up the doc when connection is established
-      console.warn('Initial seeding waiting for online connection:', err instanceof Error ? err.message : err);
+      console.warn('Initial seeding error:', err);
+    }
+  };
+
+  const evaluateAuthorization = (firebaseUser: User | null, data: AllowedUsersDoc | null) => {
+    if (!firebaseUser || !firebaseUser.email) {
+      setIsAuthorized(false);
+      setIsAdmin(false);
+      setIsViewer(false);
+      setUserRole(null);
+      return;
+    }
+
+    const email = firebaseUser.email.toLowerCase().trim();
+    const isOwner = email === SEED_EMAIL.toLowerCase();
+
+    if (!data) {
+      if (isOwner) {
+        setIsAuthorized(true);
+        setIsAdmin(true);
+        setIsViewer(false);
+        setUserRole('admin');
+      } else {
+        setIsAuthorized(false);
+        setIsAdmin(false);
+        setIsViewer(false);
+        setUserRole(null);
+      }
+      return;
+    }
+
+    const allowedEmails = (data.emails || []).map((e) => e.toLowerCase().trim());
+    const adminEmails = (data.admins || []).map((e) => e.toLowerCase().trim());
+    const rolesMap = data.roles || {};
+
+    let currentRole: UserRole | null = null;
+    if (isOwner || adminEmails.includes(email) || rolesMap[email] === 'admin') {
+      currentRole = 'admin';
+    } else if (allowedEmails.includes(email) || rolesMap[email] === 'viewer') {
+      currentRole = 'viewer';
+    }
+
+    if (currentRole) {
+      setIsAuthorized(true);
+      setIsAdmin(currentRole === 'admin');
+      setIsViewer(currentRole === 'viewer');
+      setUserRole(currentRole);
+    } else {
+      setIsAuthorized(false);
+      setIsAdmin(false);
+      setIsViewer(false);
+      setUserRole(null);
     }
   };
 
@@ -164,39 +214,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      // Check if user's token can be refreshed; if securetoken API is disabled, handle gracefully
+      setUser(firebaseUser);
+
+      // Verify token
       try {
         await firebaseUser.getIdToken();
       } catch (tokenErr) {
-        const errStr = tokenErr instanceof Error ? tokenErr.message : String(tokenErr);
-        if (errStr.includes('token-service-api') || errStr.includes('securetoken.googleapis.com')) {
-          console.warn('Token Service API disabled on project 116053236246');
-          setAuthError(
-            'Google Cloud Token Service API is disabled in project continual-medium-b61jg (116053236246). Enable it at https://console.developers.google.com/apis/api/securetoken.googleapis.com/overview?project=116053236246 then sign in again.'
-          );
-          try {
-            await signOut(auth);
-          } catch {
-            // Ignore signout error
-          }
-          setUser(null);
-          setIsAuthorized(false);
-          setIsAdmin(false);
-          setIsViewer(false);
-          setUserRole(null);
-          setAllowedDoc(null);
-          setLoading(false);
-          return;
-        }
+        console.warn('Error refreshing token:', tokenErr);
+        await signOut(auth);
+        setUser(null);
+        setIsAuthorized(false);
+        setIsAdmin(false);
+        setIsViewer(false);
+        setUserRole(null);
+        setAllowedDoc(null);
+        setLoading(false);
+        return;
       }
 
-      setUser(firebaseUser);
-
       const email = firebaseUser.email?.toLowerCase().trim() || '';
-      const isOwner = email === SEED_EMAIL.toLowerCase();
 
       try {
-        await ensureAllowedUsersSeeded(firebaseUser);
+        await ensureAllowedUsersSeeded(email);
       } catch (e) {
         console.warn('Seed verification warning:', e);
       }
@@ -208,51 +247,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (snap.exists()) {
             const data = snap.data() as AllowedUsersDoc;
             setAllowedDoc(data);
-
-            const allowedEmails = (data.emails || []).map((e) => e.toLowerCase().trim());
-            const adminEmails = (data.admins || []).map((e) => e.toLowerCase().trim());
-            const rolesMap = data.roles || {};
-
-            let currentRole: UserRole | null = null;
-            if (isOwner || adminEmails.includes(email) || rolesMap[email] === 'admin') {
-              currentRole = 'admin';
-            } else if (allowedEmails.includes(email) || rolesMap[email] === 'viewer') {
-              currentRole = 'viewer';
-            }
-
-            if (currentRole) {
-              setIsAuthorized(true);
-              setIsAdmin(currentRole === 'admin');
-              setIsViewer(currentRole === 'viewer');
-              setUserRole(currentRole);
-            } else {
-              setIsAuthorized(false);
-              setIsAdmin(false);
-              setIsViewer(false);
-              setUserRole(null);
-            }
+            evaluateAuthorization(firebaseUser, data);
           } else {
-            // Document doesn't exist yet, seed owner is allowed admin
-            setIsAuthorized(isOwner);
-            setIsAdmin(isOwner);
-            setIsViewer(!isOwner);
-            setUserRole(isOwner ? 'admin' : null);
+            evaluateAuthorization(firebaseUser, null);
           }
           setLoading(false);
         },
         (error) => {
-          console.error('AllowedUsers snapshot error:', error);
-          if (isOwner) {
-            setIsAuthorized(true);
-            setIsAdmin(true);
-            setIsViewer(false);
-            setUserRole('admin');
-          } else {
-            setIsAuthorized(false);
-            setIsAdmin(false);
-            setIsViewer(false);
-            setUserRole(null);
-          }
+          console.warn('AllowedUsers snapshot error:', error);
+          evaluateAuthorization(firebaseUser, null);
           setLoading(false);
         }
       );
@@ -268,34 +271,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithGoogle = async () => {
     try {
       setAuthError(null);
-      const cred = await signInWithPopup(auth, googleAuthProvider);
-      await cred.user.getIdToken();
+      await signInWithPopup(auth, googleAuthProvider);
     } catch (err: unknown) {
-      console.error('Google sign in error:', err);
+      console.warn('Google sign in error:', err);
       const msg = err instanceof Error ? err.message : 'Sign in failed';
-      if (msg.includes('token-service-api') || msg.includes('securetoken.googleapis.com')) {
-        setAuthError(
-          'Google Cloud Token Service API is disabled in project continual-medium-b61jg (116053236246). Enable it at https://console.developers.google.com/apis/api/securetoken.googleapis.com/overview?project=116053236246 then sign in again.'
-        );
-      } else {
-        setAuthError(msg);
-      }
+      setAuthError(msg);
       throw err;
     }
   };
 
   const logout = async () => {
-    try {
-      await signOut(auth);
-      setUser(null);
-      setIsAuthorized(false);
-      setIsAdmin(false);
-      setIsViewer(false);
-      setUserRole(null);
-      setAllowedDoc(null);
-    } catch (err: unknown) {
-      console.error('Sign out error:', err);
-    }
+    await signOut(auth);
+    setUser(null);
+    setIsAuthorized(false);
+    setIsAdmin(false);
+    setIsViewer(false);
+    setUserRole(null);
+    setAllowedDoc(null);
   };
 
   const saveAllowedUsersDoc = async (newDoc: AllowedUsersDoc) => {

@@ -12,6 +12,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   flipkart_not_sellable_pct: 5,
   amazon_not_sellable_pct: 5,
   meesho_not_sellable_pct: 5,
+  tracking_amber_days: 30,
+  tracking_red_days: 60,
 };
 
 export const SettingsScreen: React.FC = () => {
@@ -40,6 +42,8 @@ export const SettingsScreen: React.FC = () => {
             flipkart_not_sellable_pct: Number(data.flipkart_not_sellable_pct ?? 5),
             amazon_not_sellable_pct: Number(data.amazon_not_sellable_pct ?? 5),
             meesho_not_sellable_pct: Number(data.meesho_not_sellable_pct ?? 5),
+            tracking_amber_days: Number(data.tracking_amber_days ?? 30),
+            tracking_red_days: Number(data.tracking_red_days ?? 60),
             updatedAt: data.updatedAt,
             updatedBy: data.updatedBy,
           };
@@ -153,6 +157,22 @@ export const SettingsScreen: React.FC = () => {
           newVal: `${settings.meesho_not_sellable_pct}%`,
         });
       }
+      if (Number(settings.tracking_amber_days) !== Number(initialSettings.tracking_amber_days)) {
+        changes.push({
+          key: 'tracking_amber_days',
+          label: 'Tracking Pipeline Amber Alert Threshold (Days)',
+          oldVal: `${initialSettings.tracking_amber_days ?? 30} days`,
+          newVal: `${settings.tracking_amber_days ?? 30} days`,
+        });
+      }
+      if (Number(settings.tracking_red_days) !== Number(initialSettings.tracking_red_days)) {
+        changes.push({
+          key: 'tracking_red_days',
+          label: 'Tracking Pipeline Red / Claim Threshold (Days)',
+          oldVal: `${initialSettings.tracking_red_days ?? 60} days`,
+          newVal: `${settings.tracking_red_days ?? 60} days`,
+        });
+      }
 
       if (changes.length === 0) {
         setSaving(false);
@@ -170,6 +190,8 @@ export const SettingsScreen: React.FC = () => {
         flipkart_not_sellable_pct: Number(settings.flipkart_not_sellable_pct),
         amazon_not_sellable_pct: Number(settings.amazon_not_sellable_pct),
         meesho_not_sellable_pct: Number(settings.meesho_not_sellable_pct),
+        tracking_amber_days: Number(settings.tracking_amber_days ?? 30),
+        tracking_red_days: Number(settings.tracking_red_days ?? 60),
         updatedAt: now,
         updatedBy: userEmail,
       });
@@ -396,6 +418,74 @@ export const SettingsScreen: React.FC = () => {
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   <span className="absolute right-3 top-2.5 text-slate-400 text-xs">%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Tracking Pipeline Age Thresholds */}
+            <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                Tracking Pipeline Age Thresholds (Days)
+              </label>
+              <p className="text-xs text-slate-500">
+                Days elapsed before marking in-transit, delivered-unpaid, and open returns as Amber or Red.
+              </p>
+
+              <div className="grid grid-cols-2 gap-3">
+                {/* Amber Days */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-amber-600 dark:text-amber-400 font-medium">Amber Alert</span>
+                    <span className="font-mono text-slate-500">{settings.tracking_amber_days ?? 30}d</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="365"
+                      required
+                      disabled={!isAdmin}
+                      value={settings.tracking_amber_days ?? 30}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          tracking_amber_days: parseInt(e.target.value, 10) || 30,
+                        })
+                      }
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                    />
+                    <span className="absolute right-3 top-2.5 text-slate-400 text-xs">days</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400">Default: 30 days</p>
+                </div>
+
+                {/* Red Days */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-red-600 dark:text-red-400 font-medium">Red / Claim</span>
+                    <span className="font-mono text-slate-500">{settings.tracking_red_days ?? 60}d</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="365"
+                      required
+                      disabled={!isAdmin}
+                      value={settings.tracking_red_days ?? 60}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          tracking_red_days: parseInt(e.target.value, 10) || 60,
+                        })
+                      }
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-indigo-500 font-mono disabled:opacity-60 disabled:cursor-not-allowed"
+                    />
+                    <span className="absolute right-3 top-2.5 text-slate-400 text-xs">days</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400">Default: 60 days</p>
                 </div>
               </div>
             </div>

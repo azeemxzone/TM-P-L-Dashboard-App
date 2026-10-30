@@ -24,6 +24,8 @@ export interface AppSettings {
   flipkart_not_sellable_pct: number; // default 5%
   amazon_not_sellable_pct: number; // default 5%
   meesho_not_sellable_pct: number; // default 5%
+  tracking_amber_days?: number; // default 30
+  tracking_red_days?: number; // default 60
   updatedAt?: string;
   updatedBy?: string;
 }

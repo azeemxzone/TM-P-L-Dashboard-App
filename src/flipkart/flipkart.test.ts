@@ -239,6 +239,7 @@ describe('Flipkart Report Parsers & Reconciliations (Stage 2a)', () => {
       expect(orderMonth('2026-09-04')).toBe('2026-09');
       expect(orderMonth('04-Sep-2026')).toBe('2026-09');
       expect(orderMonth('2026-04-01')).toBe('2026-04');
+      expect(orderMonth('2026-09-30 23:30:00')).toBe('2026-09');
       expect(orderMonth('')).toBe('');
     });
 
