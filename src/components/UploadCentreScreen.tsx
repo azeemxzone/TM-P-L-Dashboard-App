@@ -17,8 +17,9 @@ import {
   Search,
 } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, query, where, getCountFromServer } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
+import { stripUndefined } from '../utils/stripUndefined';
 import {
   detectFlipkartReport,
   parseOrders,
@@ -416,13 +417,13 @@ export const UploadCentreScreen: React.FC = () => {
       const aliasRef = doc(db, 'sku_aliases', cleanSku(sellerSku));
       await setDoc(
         aliasRef,
-        {
+        stripUndefined({
           alias: cleanSku(sellerSku),
           master_sku: cleanSku(masterSku),
           source: 'manual',
           createdAt: new Date().toISOString(),
           createdBy: user?.email || 'admin',
-        },
+        }),
         { merge: true }
       );
     } catch (err: any) {
@@ -1034,7 +1035,7 @@ export const UploadCentreScreen: React.FC = () => {
                       File: {currentMonthUploads.bank_statement.originalFileName}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      Date: {currentMonthUploads.bank_statement.date} by {currentMonthUploads.bank_statement.user}
+                      Date: {currentMonthUploads.bank_statement.date || currentMonthUploads.bank_statement.uploadedAt?.split('T')[0] || '—'} by {currentMonthUploads.bank_statement.user || currentMonthUploads.bank_statement.uploadedBy || '—'}
                     </p>
                     <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
                       Stored: {getSlotCountDisplay('bank_statement')?.stored ?? currentMonthUploads.bank_statement.rowCount} of {getSlotCountDisplay('bank_statement')?.expected ?? currentMonthUploads.bank_statement.rowCount} rows

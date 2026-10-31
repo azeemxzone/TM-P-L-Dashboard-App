@@ -3,6 +3,7 @@ import { collection, onSnapshot, doc, setDoc, updateDoc } from 'firebase/firesto
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { PurchaseItem, PurchaseUpload, CostMasterItem, AppSettings, PurchaseRow } from '../types';
+import { stripUndefined } from '../utils/stripUndefined';
 import { formatINR, validatePurchaseRow, isDuplicatePurchase } from '../utils/costCalculator';
 import { parseTableFile, extractPurchaseRowsFromTable, exportToCSV } from '../utils/csvParser';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrors';
@@ -262,7 +263,7 @@ export const PurchasesScreen: React.FC = () => {
 
     try {
       const docRef = doc(db, 'purchases', purchase.id);
-      await updateDoc(docRef, { void: newVoidStatus });
+      await updateDoc(docRef, stripUndefined({ void: newVoidStatus }));
       setStatusMessage({
         text: `Purchase for ${purchase.sku_code}${purchase.bill_no ? ` (Bill: ${purchase.bill_no})` : ''} was ${newVoidStatus ? 'marked VOID' : 'reinstated'}.`,
         type: newVoidStatus ? 'warning' : 'success',
@@ -307,7 +308,7 @@ export const PurchasesScreen: React.FC = () => {
     try {
       const landedRate = Math.round(((rowToValidate.mfg_rate || 0) + inboundFreight) * 100) / 100;
       const docRef = doc(collection(db, 'purchases'));
-      await setDoc(docRef, {
+      await setDoc(docRef, stripUndefined({
         date: rowToValidate.date,
         sku_code: rowToValidate.sku_code,
         qty: rowToValidate.qty,
@@ -319,7 +320,7 @@ export const PurchasesScreen: React.FC = () => {
         void: false,
         createdAt: new Date().toISOString(),
         createdBy: user?.email || 'admin',
-      });
+      }));
 
       const billSuffix = rowToValidate.bill_no ? ` on Bill #${rowToValidate.bill_no}` : '';
       setStatusMessage({
@@ -425,7 +426,7 @@ export const PurchasesScreen: React.FC = () => {
         const mfgRate = Number(row.mfg_rate || 0);
         const landedRate = Math.round((mfgRate + inboundFreight) * 100) / 100;
 
-        await setDoc(pRef, {
+        await setDoc(pRef, stripUndefined({
           date: row.date,
           sku_code: String(row.sku_code || '').trim().toUpperCase(),
           qty: Number(row.qty || 0),
@@ -437,12 +438,12 @@ export const PurchasesScreen: React.FC = () => {
           void: false,
           createdAt: now,
           createdBy: user?.email || 'admin',
-        });
+        }));
         committedCount++;
       }
 
       // 2. Commit log to purchase_uploads
-      await setDoc(uploadDocRef, {
+      await setDoc(uploadDocRef, stripUndefined({
         file_name: uploadFile.name,
         uploaded_at: now,
         user: user?.email || 'admin',
@@ -450,7 +451,7 @@ export const PurchasesScreen: React.FC = () => {
         rejected_count: uploadPreview.invalidRows.length,
         skipped_duplicates_count: uploadPreview.duplicateRows.length,
         total_rows: uploadPreview.validRows.length + uploadPreview.duplicateRows.length + uploadPreview.invalidRows.length,
-      });
+      }));
 
       setStatusMessage({
         text: `Upload committed successfully: ${committedCount} purchases recorded. ${uploadPreview.duplicateRows.length} duplicates skipped, ${uploadPreview.invalidRows.length} invalid rows rejected.`,

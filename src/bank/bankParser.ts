@@ -238,23 +238,35 @@ export function classifyCreditNarration(narration: any): 'Flipkart' | 'Meesho' |
  */
 export function parseBankStatement(workbook: XLSX.WorkBook): BankStatementReport {
   if (!workbook || !workbook.SheetNames || workbook.SheetNames.length === 0) {
-    return {
-      summary: {
-        periodStart: null,
-        periodEnd: null,
-        periodMonth: null,
-        totalLines: 0,
-        creditCount: 0,
-        debitCount: 0,
-        marketplaceSummary: {
-          flipkart: { count: 0, total: 0 },
-          meesho: { count: 0, total: 0 },
-          amazon: { count: 0, total: 0 },
-          other: { count: 0, total: 0 },
-        },
+    const emptySummary = {
+      periodStart: null,
+      periodEnd: null,
+      periodMonth: null,
+      totalLines: 0,
+      creditCount: 0,
+      debitCount: 0,
+      marketplaceSummary: {
+        flipkart: { count: 0, total: 0 },
+        meesho: { count: 0, total: 0 },
+        amazon: { count: 0, total: 0 },
+        other: { count: 0, total: 0 },
       },
+    };
+    return {
+      summary: emptySummary,
       marketplaceCredits: [],
       allRows: [],
+      periodStart: null,
+      periodEnd: null,
+      periodMonth: null,
+      totalRows: 0,
+      lines: [],
+      flipkartCredits: { count: 0, total: 0 },
+      meeshoCredits: { count: 0, total: 0 },
+      amazonCredits: { count: 0, total: 0 },
+      otherCredits: { count: 0, total: 0 },
+      totalCreditsCount: 0,
+      otherCreditsCount: 0,
     };
   }
 

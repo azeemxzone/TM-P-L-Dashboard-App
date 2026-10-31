@@ -18,6 +18,7 @@ import {
 } from './types';
 import { groupByBatch } from './settledParser';
 import { resolveMasterSku } from '../utils/skuResolver';
+import { stripUndefined } from '../utils/stripUndefined';
 
 export type FlipkartSlotType = 'orders' | 'settled' | 'returns' | 'bank_statement';
 
@@ -49,6 +50,10 @@ export interface FkUploadRecord {
   };
   date: string; // ISO date YYYY-MM-DD
   uploadedAt: string; // ISO timestamp
+  rowCount?: number;
+  uploadedBy?: string;
+  fileSha256?: string;
+  details?: Record<string, any>;
 }
 
 /**
@@ -262,14 +267,22 @@ export class VerificationCountError extends Error {
   }
 }
 
+export class UploadRecordWriteError extends Error {
+  constructor(
+    public uploadId: string,
+    public errorCode: string,
+    message: string
+  ) {
+    super(message);
+    this.name = 'UploadRecordWriteError';
+  }
+}
+
 /**
- * Commits parsed Flipkart data to Firestore with deterministic document IDs,
- * upsert with merge, sequentially in batches of constant BATCH_SIZE = 400.
- * After all batches write, verifies row counts via getCountFromServer per collection.
- * Creates fk_uploads record with status "complete" ONLY if all counts match.
+ * Builds all deterministic document payloads and the audit upload record for Flipkart imports.
+ * Ensures stripUndefined is applied at every level and all count fields are numeric.
  */
-export async function commitFlipkartImport(
-  db: Firestore,
+export function buildFlipkartImportPayloads(
   slot: FlipkartSlotType,
   data: {
     orders?: FlipkartOrderRow[];
@@ -281,21 +294,15 @@ export async function commitFlipkartImport(
     originalFileName: string;
     sha256: string;
     userEmail: string;
-    existingUploadId?: string;
-  },
-  onProgress?: (info: {
-    currentBatch: number;
-    totalBatches: number;
-    savedCount: number;
-    totalCount: number;
-    statusMessage?: string;
-  }) => void
-): Promise<{
+    uploadId?: string;
+  }
+): {
   uploadId: string;
-  totalRecords: number;
-  collectionCounts: Record<string, { stored: number; expected: number }>;
-}> {
-  const uploadId = meta.existingUploadId || `upload_${slot}_${meta.selectedMonth}_${Date.now()}`;
+  ops: Array<{ collectionName: string; id: string; data: Record<string, any> }>;
+  expectedCounts: Record<string, number>;
+  uploadRecord: FkUploadRecord;
+} {
+  const uploadId = meta.uploadId || `upload_${slot}_${meta.selectedMonth}_${Date.now()}`;
   const nowIso = new Date().toISOString();
   const todayDate = nowIso.split('T')[0];
 
@@ -309,7 +316,7 @@ export async function commitFlipkartImport(
   const expectedCounts: Record<string, number> = {};
 
   const addOp = (collectionName: string, id: string, data: Record<string, any>) => {
-    ops.push({ collectionName, id, data });
+    ops.push({ collectionName, id, data: stripUndefined(data) });
     expectedCounts[collectionName] = (expectedCounts[collectionName] || 0) + 1;
   };
 
@@ -399,10 +406,10 @@ export async function commitFlipkartImport(
     }
   }
 
-  // Breakdowns for the audit record
-  let statusCounts: Record<string, number> | undefined;
-  let returnTypeCounts: Record<string, number> | undefined;
-  let batchesCount: number | undefined;
+  // Breakdowns for the audit record - always numeric, never undefined
+  let statusCounts: Record<string, number> = {};
+  let returnTypeCounts: Record<string, number> = { courier: 0, customer: 0 };
+  let batchesCount: number = 0;
 
   if (data.orders) {
     statusCounts = {};
@@ -411,57 +418,156 @@ export async function commitFlipkartImport(
     }
   }
   if (data.returns) {
-    returnTypeCounts = {};
+    returnTypeCounts = { courier: 0, customer: 0 };
     for (const r of data.returns) {
-      returnTypeCounts[r.returnType] = (returnTypeCounts[r.returnType] || 0) + 1;
+      const rt = String(r.returnType || '').trim().toLowerCase();
+      if (rt) {
+        returnTypeCounts[rt] = (returnTypeCounts[rt] || 0) + 1;
+      }
     }
   }
   if (data.settled) {
     batchesCount = groupByBatch(data.settled).length;
   }
 
-  // Execute in sequential chunks of constant BATCH_SIZE = 400
-  const chunks: DocOp[][] = [];
+  const uploadRecord: FkUploadRecord = stripUndefined({
+    id: uploadId,
+    uploadId,
+    slot,
+    period: meta.selectedMonth,
+    originalFileName: meta.originalFileName,
+    sha256: meta.sha256,
+    user: meta.userEmail,
+    status: 'complete',
+    counts: {
+      total: ops.length,
+      valid: ops.length,
+      statusCounts,
+      returnTypeCounts,
+      batchesCount,
+      storedCounts: Object.fromEntries(
+        Object.entries(expectedCounts).map(([k, v]) => [k, v])
+      ),
+    },
+    date: todayDate,
+    uploadedAt: nowIso,
+  });
+
+  return { uploadId, ops, expectedCounts, uploadRecord };
+}
+
+/**
+ * Commits parsed Flipkart data to Firestore with deterministic document IDs,
+ * upsert with merge, sequentially in batches of constant BATCH_SIZE = 400.
+ * After all batches write, verifies row counts via getCountFromServer per collection.
+ * Creates fk_uploads record with status "complete" ONLY if all counts match.
+ * If only the upload record fails, lets Retry re-write only the record (and any failed batches).
+ */
+export async function commitFlipkartImport(
+  db: Firestore,
+  slot: FlipkartSlotType,
+  data: {
+    orders?: FlipkartOrderRow[];
+    returns?: FlipkartReturnRow[];
+    settled?: FlipkartSettledReport;
+  },
+  meta: {
+    selectedMonth: string;
+    originalFileName: string;
+    sha256: string;
+    userEmail: string;
+    existingUploadId?: string;
+  },
+  onProgress?: (info: {
+    currentBatch: number;
+    totalBatches: number;
+    savedCount: number;
+    totalCount: number;
+    statusMessage?: string;
+  }) => void
+): Promise<{
+  uploadId: string;
+  totalRecords: number;
+  collectionCounts: Record<string, { stored: number; expected: number }>;
+}> {
+  const { uploadId, ops, expectedCounts, uploadRecord } = buildFlipkartImportPayloads(
+    slot,
+    data,
+    {
+      selectedMonth: meta.selectedMonth,
+      originalFileName: meta.originalFileName,
+      sha256: meta.sha256,
+      userEmail: meta.userEmail,
+      uploadId: meta.existingUploadId,
+    }
+  );
+
+  // 1. Check if batches were already written and verified (Retry optimization)
+  let skipBatches = false;
+  if (meta.existingUploadId && Object.keys(expectedCounts).length > 0) {
+    let allMatched = true;
+    for (const [colName, expected] of Object.entries(expectedCounts)) {
+      try {
+        const q = query(collection(db, colName), where('lastUploadId', '==', uploadId));
+        const snapshot = await getCountFromServer(q);
+        if (snapshot.data().count !== expected) {
+          allMatched = false;
+          break;
+        }
+      } catch {
+        allMatched = false;
+        break;
+      }
+    }
+    if (allMatched) {
+      skipBatches = true;
+    }
+  }
+
+  // 2. Write data batches if not already completely written
+  const chunks: Array<typeof ops> = [];
   for (let i = 0; i < ops.length; i += BATCH_SIZE) {
     chunks.push(ops.slice(i, i + BATCH_SIZE));
   }
 
-  let savedCount = 0;
-  for (let bIdx = 0; bIdx < chunks.length; bIdx++) {
-    const chunk = chunks[bIdx];
-    const batch = writeBatch(db);
-    const collectionsInChunk = Array.from(new Set(chunk.map((c) => c.collectionName))).join(', ');
+  if (!skipBatches) {
+    let savedCount = 0;
+    for (let bIdx = 0; bIdx < chunks.length; bIdx++) {
+      const chunk = chunks[bIdx];
+      const batch = writeBatch(db);
+      const collectionsInChunk = Array.from(new Set(chunk.map((c) => c.collectionName))).join(', ');
 
-    for (const op of chunk) {
-      const ref = doc(db, op.collectionName, op.id);
-      batch.set(ref, op.data, { merge: true });
+      for (const op of chunk) {
+        const ref = doc(db, op.collectionName, op.id);
+        batch.set(ref, stripUndefined(op.data), { merge: true });
+      }
+
+      try {
+        await batch.commit();
+      } catch (err: any) {
+        const errorCode = err.code || err.name || 'UNKNOWN';
+        const batchNum = bIdx + 1;
+        throw new BatchWriteError(
+          batchNum,
+          chunks.length,
+          collectionsInChunk,
+          errorCode,
+          `Batch ${batchNum} of ${chunks.length} failed for collection ${collectionsInChunk} (${errorCode}): ${err.message}`
+        );
+      }
+
+      savedCount += chunk.length;
+      onProgress?.({
+        currentBatch: bIdx + 1,
+        totalBatches: chunks.length,
+        savedCount,
+        totalCount: ops.length,
+        statusMessage: `Written batch ${bIdx + 1} of ${chunks.length} (${savedCount}/${ops.length} rows)...`,
+      });
     }
-
-    try {
-      await batch.commit();
-    } catch (err: any) {
-      const errorCode = err.code || err.name || 'UNKNOWN';
-      const batchNum = bIdx + 1;
-      throw new BatchWriteError(
-        batchNum,
-        chunks.length,
-        collectionsInChunk,
-        errorCode,
-        `Batch ${batchNum} of ${chunks.length} failed for collection ${collectionsInChunk} (${errorCode}): ${err.message}`
-      );
-    }
-
-    savedCount += chunk.length;
-    onProgress?.({
-      currentBatch: bIdx + 1,
-      totalBatches: chunks.length,
-      savedCount,
-      totalCount: ops.length,
-      statusMessage: `Written batch ${bIdx + 1} of ${chunks.length} (${savedCount}/${ops.length} rows)...`,
-    });
   }
 
-  // Run post-write count query (getCountFromServer) per collection filtered by lastUploadId == uploadId
+  // 3. Post-write count query (getCountFromServer) per collection filtered by lastUploadId == uploadId
   onProgress?.({
     currentBatch: chunks.length,
     totalBatches: chunks.length,
@@ -487,31 +593,25 @@ export async function commitFlipkartImport(
     }
   }
 
-  // Only if every count matches, create the fk_uploads record with status "complete"
-  const uploadRecord: FkUploadRecord = {
-    id: uploadId,
-    uploadId,
-    slot,
-    period: meta.selectedMonth,
-    originalFileName: meta.originalFileName,
-    sha256: meta.sha256,
-    user: meta.userEmail,
-    status: 'complete',
-    counts: {
-      total: ops.length,
-      valid: ops.length,
-      statusCounts,
-      returnTypeCounts,
-      batchesCount,
-      storedCounts: Object.fromEntries(
-        Object.entries(collectionCounts).map(([k, v]) => [k, v.stored])
-      ),
-    },
-    date: todayDate,
-    uploadedAt: nowIso,
-  };
-
-  await setDoc(doc(db, 'fk_uploads', uploadId), uploadRecord);
+  // 4. Create the fk_uploads record with status "complete"
+  try {
+    const finalRecord = {
+      ...uploadRecord,
+      counts: {
+        ...uploadRecord.counts,
+        storedCounts: Object.fromEntries(
+          Object.entries(collectionCounts).map(([k, v]) => [k, v.stored])
+        ),
+      },
+    };
+    await setDoc(doc(db, 'fk_uploads', uploadId), stripUndefined(finalRecord));
+  } catch (err: any) {
+    throw new UploadRecordWriteError(
+      uploadId,
+      err.code || err.name || 'UNKNOWN',
+      `Data verified, but failed to create upload record for ${uploadId}: ${err.message}`
+    );
+  }
 
   return { uploadId, totalRecords: ops.length, collectionCounts };
 }
@@ -596,13 +696,13 @@ export async function loadBundledAliasesIntoFirestore(
       const ref = doc(db, 'sku_aliases', alias);
       batch.set(
         ref,
-        {
+        stripUndefined({
           alias,
           master_sku: masterSku,
           source: 'bundled',
           createdAt: nowIso,
           createdBy: userEmail,
-        },
+        }),
         { merge: true }
       );
     }

@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { auth, db, googleAuthProvider } from '../firebase';
 import { AllowedUsersDoc, UserRole, AllowedUserRecord } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrors';
+import { stripUndefined } from '../utils/stripUndefined';
 
 export const SEED_EMAIL = 'mak44641@gmail.com';
 
@@ -107,7 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           updatedAt: new Date().toISOString(),
           updatedBy: emailAddr || 'system',
         };
-        await setDoc(docRef, initialDoc);
+        await setDoc(docRef, stripUndefined(initialDoc));
         setAllowedDoc(initialDoc);
       } else {
         const data = snap.data() as AllowedUsersDoc;
@@ -137,7 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             roles,
             updatedAt: new Date().toISOString(),
           };
-          await setDoc(docRef, updated);
+          await setDoc(docRef, stripUndefined(updated));
           setAllowedDoc(updated);
         } else {
           setAllowedDoc(data);
@@ -293,7 +294,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const saveAllowedUsersDoc = async (newDoc: AllowedUsersDoc) => {
     const docRef = doc(db, 'allowedUsers', 'default');
     try {
-      await setDoc(docRef, newDoc);
+      await setDoc(docRef, stripUndefined(newDoc));
       setAllowedDoc(newDoc);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'allowedUsers/default');

@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { CostMasterItem, AppSettings } from '../types';
 import { calculateStandardCost, formatINR } from '../utils/costCalculator';
+import { stripUndefined } from '../utils/stripUndefined';
 import {
   parseCSV,
   exportToCSV,
@@ -191,7 +192,7 @@ export const CostMasterScreen: React.FC = () => {
         return;
       }
 
-      await setDoc(docRef, {
+      await setDoc(docRef, stripUndefined({
         sku_code: newItem.sku_code.trim(),
         sku_name: newItem.sku_name.trim(),
         weight_grams: weightNum,
@@ -200,7 +201,7 @@ export const CostMasterScreen: React.FC = () => {
         effective_from: effFrom,
         createdAt: new Date().toISOString(),
         createdBy: user?.email || 'admin',
-      });
+      }));
 
       setShowAddModal(false);
       setNewItem({
@@ -243,7 +244,7 @@ export const CostMasterScreen: React.FC = () => {
       const newDocId = getCostMasterDocId(editingItem.sku_code, editForm.effective_from);
       const newDocRef = doc(db, 'cost_master', newDocId);
 
-      await setDoc(newDocRef, {
+      await setDoc(newDocRef, stripUndefined({
         sku_code: editingItem.sku_code,
         sku_name: editForm.sku_name.trim(),
         weight_grams: newWeight,
@@ -252,7 +253,7 @@ export const CostMasterScreen: React.FC = () => {
         effective_from: editForm.effective_from,
         createdAt: new Date().toISOString(),
         createdBy: user?.email || 'admin',
-      });
+      }));
 
       setStatusMessage({
         text: `Created new effective-dated row (${editForm.effective_from}) for ${editingItem.sku_code}. Historical rates preserved.`,
@@ -283,7 +284,7 @@ export const CostMasterScreen: React.FC = () => {
 
     try {
       const docRef = doc(db, 'cost_master', item.id);
-      await setDoc(docRef, { active: targetStatus }, { merge: true });
+      await setDoc(docRef, stripUndefined({ active: targetStatus }), { merge: true });
       setStatusMessage({
         text: `SKU ${item.sku_code} ${targetStatus ? 'reactivated' : 'deactivated'} successfully.`,
         type: 'success',
@@ -319,7 +320,7 @@ export const CostMasterScreen: React.FC = () => {
           continue;
         }
 
-        await setDoc(docRef, {
+        await setDoc(docRef, stripUndefined({
           sku_code: row.sku_code,
           sku_name: row.sku_name,
           weight_grams: row.weight_grams,
@@ -328,7 +329,7 @@ export const CostMasterScreen: React.FC = () => {
           effective_from: row.effective_from,
           createdAt: new Date().toISOString(),
           createdBy: user?.email || 'csv-import',
-        });
+        }));
       }
 
       setStatusMessage({

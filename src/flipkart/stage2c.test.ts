@@ -23,6 +23,8 @@ import { BankCreditDoc } from '../bank/types';
 import { parseAliasCsv } from '../utils/skuResolver';
 import { parseCSV } from '../utils/csvParser';
 import { cleanItemId, cleanNeftId, orderMonth, parseDate, parseTime } from './normalizers';
+import { buildFlipkartImportPayloads } from './storage';
+import { buildBankCreditsImportPayloads } from '../bank/bankStorage';
 
 /**
  * Finds a real sample file in /samples or ./samples by normalized name.
@@ -146,9 +148,9 @@ describe('STAGE 2c: Bank Statement, Flipkart Reconciliation & Flipkart Tracking'
       const bank = parseBankStatement(bankWb);
 
       // Convert parsed Flipkart credits to BankCreditDoc format
-      const flipkartBankCredits: BankCreditDoc[] = bank.lines
-        .filter((l) => l.marketplace === 'Flipkart')
-        .map((c) => ({
+      const flipkartBankCredits: BankCreditDoc[] = (bank.lines || [])
+        .filter((l: any) => l.marketplace === 'Flipkart')
+        .map((c: any) => ({
           id: c.bankReference,
           date: c.valueDate || '2026-09-01',
           amount: c.credit,
@@ -434,4 +436,156 @@ describe('STAGE 2c: Bank Statement, Flipkart Reconciliation & Flipkart Tracking'
       expect(ageDayOnly).toBe(30);
     });
   });
+
+  describe('6. Firestore undefined rejection prevention & Real Sample Upload Payloads', () => {
+    function findUndefinedPath(val: any, currentPath = 'root'): string | null {
+      if (val === undefined) return currentPath;
+      if (val === null || typeof val !== 'object') return null;
+      if (Array.isArray(val)) {
+        for (let i = 0; i < val.length; i++) {
+          const p = findUndefinedPath(val[i], `${currentPath}[${i}]`);
+          if (p) return p;
+        }
+        return null;
+      }
+      for (const [k, v] of Object.entries(val)) {
+        const p = findUndefinedPath(v, `${currentPath}.${k}`);
+        if (p) return p;
+      }
+      return null;
+    }
+
+    it('builds Orders upload payload from real sample with no undefined at any depth', () => {
+      const wb = loadWorkbook('7 Orders.xlsx');
+      const orders = parseOrders(wb.Sheets[wb.SheetNames[0]]);
+      expect(orders.length).toBe(493);
+
+      const meta = {
+        selectedMonth: '2026-09',
+        originalFileName: '7 Orders.xlsx',
+        sha256: 'dummy_orders_sha256',
+        userEmail: 'mak44641@gmail.com',
+        uploadId: 'upload_orders_2026-09_test',
+      };
+
+      const { ops, uploadRecord } = buildFlipkartImportPayloads('orders', { orders }, meta);
+
+      // Check upload record
+      expect(findUndefinedPath(uploadRecord)).toBeNull();
+      expect(uploadRecord.counts.total).toBe(493);
+      expect(uploadRecord.counts.batchesCount).toBe(0);
+      expect(uploadRecord.counts.returnTypeCounts).toEqual({ courier: 0, customer: 0 });
+      expect(typeof uploadRecord.counts.statusCounts).toBe('object');
+      expect(uploadRecord.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(uploadRecord.user).toBe('mak44641@gmail.com');
+
+      // Check all 493 document payloads
+      expect(ops.length).toBe(493);
+      for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        const undefPath = findUndefinedPath(op.data, `ops[${i}]`);
+        expect(undefPath).toBeNull();
+        expect(op.data.orderItemId).toBeDefined();
+        expect(op.data.orderMonth).toBe('2026-09');
+      }
+    });
+
+    it('builds Settled upload payload from real sample with no undefined at any depth', () => {
+      const wb = loadWorkbook('2 Settled Transaction.xlsx');
+      const settled = parseSettled(wb);
+      expect(settled.orders.length).toBe(683);
+
+      const meta = {
+        selectedMonth: '2026-09',
+        originalFileName: '2 Settled Transaction.xlsx',
+        sha256: 'dummy_settled_sha256',
+        userEmail: 'mak44641@gmail.com',
+        uploadId: 'upload_settled_2026-09_test',
+      };
+
+      const { ops, uploadRecord } = buildFlipkartImportPayloads('settled', { settled }, meta);
+
+      // Check upload record
+      expect(findUndefinedPath(uploadRecord)).toBeNull();
+      expect(uploadRecord.counts.batchesCount).toBeGreaterThan(0);
+      expect(uploadRecord.counts.returnTypeCounts).toEqual({ courier: 0, customer: 0 });
+      expect(uploadRecord.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(uploadRecord.user).toBe('mak44641@gmail.com');
+
+      // Check all settlement document payloads
+      expect(ops.length).toBeGreaterThan(683);
+      for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        const undefPath = findUndefinedPath(op.data, `ops[${i}]`);
+        expect(undefPath).toBeNull();
+      }
+    });
+
+    it('builds Returns upload payload from real sample with no undefined at any depth', () => {
+      const wb = loadWorkbook('3 Return.xlsx');
+      const returns = parseReturns(wb.Sheets[wb.SheetNames[0]]);
+      expect(returns.length).toBe(204);
+
+      const meta = {
+        selectedMonth: '2026-09',
+        originalFileName: '3 Return.xlsx',
+        sha256: 'dummy_returns_sha256',
+        userEmail: 'mak44641@gmail.com',
+        uploadId: 'upload_returns_2026-09_test',
+      };
+
+      const { ops, uploadRecord } = buildFlipkartImportPayloads('returns', { returns }, meta);
+
+      // Check upload record
+      expect(findUndefinedPath(uploadRecord)).toBeNull();
+      expect(uploadRecord.counts.total).toBe(204);
+      expect(uploadRecord.counts.batchesCount).toBe(0);
+      expect(typeof uploadRecord.counts.returnTypeCounts?.courier).toBe('number');
+      expect(typeof uploadRecord.counts.returnTypeCounts?.customer).toBe('number');
+      expect(uploadRecord.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+      // Check all return document payloads
+      expect(ops.length).toBe(204);
+      for (let i = 0; i < ops.length; i++) {
+        const op = ops[i];
+        const undefPath = findUndefinedPath(op.data, `ops[${i}]`);
+        expect(undefPath).toBeNull();
+      }
+    });
+
+    it('builds Bank Statement upload payload from real sample with no undefined at any depth', () => {
+      const wb = loadWorkbook('SEP_2026.xlsx');
+      const bankReport = parseBankStatement(wb);
+      expect(bankReport.marketplaceCredits.length).toBe(43);
+
+      const { creditDocs, uploadRecord } = buildBankCreditsImportPayloads(
+        bankReport,
+        'upload_bank_2026-09_test',
+        'SEP_2026.xlsx',
+        'dummy_bank_sha256',
+        'mak44641@gmail.com',
+        '2026-09'
+      );
+
+      // Check upload record
+      expect(findUndefinedPath(uploadRecord)).toBeNull();
+      expect(uploadRecord.date).toBe(new Date().toISOString().split('T')[0]);
+      expect(uploadRecord.user).toBe('mak44641@gmail.com');
+      expect(uploadRecord.uploadedBy).toBe('mak44641@gmail.com');
+      expect(uploadRecord.rowCount).toBe(43);
+      expect(uploadRecord.counts.total).toBe(43);
+      expect(uploadRecord.counts.valid).toBe(43);
+      expect(uploadRecord.counts.batchesCount).toBe(0);
+      expect(uploadRecord.counts.returnTypeCounts).toEqual({ courier: 0, customer: 0 });
+
+      // Check all credit document payloads
+      expect(creditDocs.length).toBe(43);
+      for (let i = 0; i < creditDocs.length; i++) {
+        const item = creditDocs[i];
+        const undefPath = findUndefinedPath(item.data, `creditDocs[${i}]`);
+        expect(undefPath).toBeNull();
+      }
+    });
+  });
 });
+

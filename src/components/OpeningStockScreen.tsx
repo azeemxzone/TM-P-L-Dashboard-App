@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { OpeningStockItem, CostMasterItem, AppSettings } from '../types';
 import { formatINR } from '../utils/costCalculator';
+import { stripUndefined } from '../utils/stripUndefined';
 import {
   parseTableFile,
   extractOpeningStockRowsFromTable,
@@ -291,7 +292,7 @@ export const OpeningStockScreen: React.FC = () => {
       }
 
       const landedRate = Math.round((mfgRate + inboundFreight) * 100) / 100;
-      await setDoc(docRef, {
+      await setDoc(docRef, stripUndefined({
         sku_code: sku,
         qty,
         mfg_rate: mfgRate,
@@ -299,7 +300,7 @@ export const OpeningStockScreen: React.FC = () => {
         effective_from: effFrom,
         createdAt: new Date().toISOString(),
         createdBy: user?.email || 'admin',
-      });
+      }));
 
       setStatusMessage({
         text: `Opening stock for ${sku} saved successfully (${qty} units @ ₹${mfgRate}).`,
@@ -395,7 +396,7 @@ export const OpeningStockScreen: React.FC = () => {
         }
 
         const landedRate = Math.round((row.mfg_rate + inboundFreight) * 100) / 100;
-        await setDoc(docRef, {
+        await setDoc(docRef, stripUndefined({
           sku_code: row.sku_code,
           qty: row.qty,
           mfg_rate: row.mfg_rate,
@@ -403,7 +404,7 @@ export const OpeningStockScreen: React.FC = () => {
           effective_from: row.effective_from,
           createdAt: now,
           createdBy: user?.email || 'admin',
-        });
+        }));
       }
 
       setStatusMessage({

@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { AppSettings, AuditLogItem } from '../types';
 import { handleFirestoreError, OperationType } from '../lib/firestoreErrors';
+import { stripUndefined } from '../utils/stripUndefined';
 import { Settings, Save, History, CheckCircle2, ShieldAlert, Lock, Package, Truck } from 'lucide-react';
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -51,12 +52,12 @@ export const SettingsScreen: React.FC = () => {
           setInitialSettings(merged);
         } else if (isAdmin) {
           try {
-            await setDoc(configRef, {
+            await setDoc(configRef, stripUndefined({
               ...DEFAULT_SETTINGS,
               type: 'config',
               updatedAt: new Date().toISOString(),
               updatedBy: user?.email || 'system-init',
-            });
+            }));
             setSettings(DEFAULT_SETTINGS);
             setInitialSettings(DEFAULT_SETTINGS);
           } catch (err) {
@@ -183,7 +184,7 @@ export const SettingsScreen: React.FC = () => {
 
       // Update config document in settings collection
       const configRef = doc(db, 'settings', 'config');
-      await setDoc(configRef, {
+      await setDoc(configRef, stripUndefined({
         type: 'config',
         packing_per_dispatched_unit: Number(settings.packing_per_dispatched_unit),
         inbound_freight_per_purchased_unit: Number(settings.inbound_freight_per_purchased_unit),
@@ -194,20 +195,20 @@ export const SettingsScreen: React.FC = () => {
         tracking_red_days: Number(settings.tracking_red_days ?? 60),
         updatedAt: now,
         updatedBy: userEmail,
-      });
+      }));
 
       // Write each change to create-only audit log in settings collection
       for (const ch of changes) {
         const auditDocId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         const auditRef = doc(db, 'settings', auditDocId);
-        await setDoc(auditRef, {
+        await setDoc(auditRef, stripUndefined({
           type: 'audit',
           setting_key: ch.label,
           old_value: ch.oldVal,
           new_value: ch.newVal,
           user_email: userEmail,
           timestamp: now,
-        });
+        }));
       }
 
       setInitialSettings(settings);

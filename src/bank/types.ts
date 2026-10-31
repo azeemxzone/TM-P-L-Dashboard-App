@@ -33,6 +33,17 @@ export interface BankStatementReport {
   summary: BankStatementSummary;
   marketplaceCredits: BankCreditRow[]; // Flipkart, Meesho, Amazon credits only
   allRows: BankCreditRow[];
+  periodStart: string | null;
+  periodEnd: string | null;
+  periodMonth: string | null;
+  totalRows: number;
+  lines: BankCreditRow[];
+  flipkartCredits: { count: number; total: number };
+  meeshoCredits: { count: number; total: number };
+  amazonCredits: { count: number; total: number };
+  otherCredits: { count: number; total: number };
+  totalCreditsCount: number;
+  otherCreditsCount: number;
 }
 
 export interface BankCreditDoc {
