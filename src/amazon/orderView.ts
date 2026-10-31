@@ -46,7 +46,10 @@ export function buildAmazonOrderView(
     const uRows = unifiedByOrder.get(id) || [];
     const mRows = mtrByOrder.get(id) || [];
 
-    if (uRows.length > 0 && mRows.length === 0) {
+    const hasOrderOrRefund = uRows.some(
+      (r) => r.type === 'Order' || r.type === 'Refund' || r.category === 'sale' || r.category === 'refund'
+    );
+    if (hasOrderOrRefund && mRows.length === 0) {
       missingFromMtr.push(id);
     }
 

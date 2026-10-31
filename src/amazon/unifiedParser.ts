@@ -116,13 +116,18 @@ export function parseAmazonUnified(text: string): AmazonUnifiedRow[] {
   const allRows = parseCSV(text);
   if (allRows.length === 0) return [];
 
-  // Find the header row starting with "date/time"
+  // Find the header row starting with "date/time" (must have multiple columns to skip preamble definition lines)
   let headerRowIdx = -1;
   for (let r = 0; r < allRows.length; r++) {
     const row = allRows[r];
-    if (row.length === 0) continue;
+    if (row.length < 5) continue;
     const firstCell = (row[0] || '').toLowerCase().trim();
-    if (firstCell.startsWith('date/time') || firstCell === 'date/time' || row.some((c) => (c || '').toLowerCase().trim() === 'settlement id')) {
+    if (
+      firstCell === 'date/time' ||
+      firstCell === 'date time' ||
+      (firstCell.startsWith('date/time') && row.some((c) => (c || '').toLowerCase().includes('settlement'))) ||
+      row.some((c) => (c || '').toLowerCase().trim() === 'settlement id')
+    ) {
       headerRowIdx = r;
       break;
     }
@@ -136,16 +141,21 @@ export function parseAmazonUnified(text: string): AmazonUnifiedRow[] {
     (h || '')
       .toLowerCase()
       .trim()
-      .replace(/[\s\-_/.]+/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
   );
 
   const getCol = (patterns: string[]): number => {
     for (const p of patterns) {
-      const idx = rawHeaders.findIndex((h) => h === p || h.replace(/\s+/g, '') === p.replace(/\s+/g, ''));
+      const normP = p.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const idx = rawHeaders.findIndex(
+        (h) => h === normP || h.replace(/\s+/g, '') === normP.replace(/\s+/g, '')
+      );
       if (idx !== -1) return idx;
     }
     for (const p of patterns) {
-      const idx = rawHeaders.findIndex((h) => h.includes(p));
+      const normP = p.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const idx = rawHeaders.findIndex((h) => h.includes(normP));
       if (idx !== -1) return idx;
     }
     return -1;
@@ -159,7 +169,7 @@ export function parseAmazonUnified(text: string): AmazonUnifiedRow[] {
   const colDescription = getCol(['description', 'item description']);
   const colQuantity = getCol(['quantity', 'qty']);
   const colFulfillment = getCol(['fulfillment', 'fulfillment channel']);
-  const colState = getCol(['order state', 'state', 'ship to state']);
+  const colState = getCol(['order state', 'ship to state', 'state']);
   const colProductSales = getCol(['product sales', 'product sales amount']);
   const colShippingCredits = getCol(['shipping credits']);
   const colGiftWrapCredits = getCol(['gift wrap credits']);
@@ -168,14 +178,14 @@ export function parseAmazonUnified(text: string): AmazonUnifiedRow[] {
   const colTcsCgst = getCol(['tcs cgst', 'tcs cgst amount']);
   const colTcsSgst = getCol(['tcs sgst', 'tcs sgst amount']);
   const colTcsIgst = getCol(['tcs igst', 'tcs igst amount']);
-  const colTds = getCol(['tds', 'tds 194o', 'tds section 194o']);
+  const colTds = getCol(['tds 194o', 'tds section 194o', 'tds section 194 o', 'tds']);
   const colSellingFees = getCol(['selling fees', 'selling fee']);
   const colFbaFees = getCol(['fba fees', 'fba fee']);
   const colOtherTransactionFees = getCol(['other transaction fees']);
   const colOther = getCol(['other', 'other amount']);
   const colTotal = getCol(['total', 'net total']);
-  const colStatus = getCol(['status', 'transaction status']);
-  const colReleaseDate = getCol(['release date', 'releasedate']);
+  const colStatus = getCol(['transaction status', 'status']);
+  const colReleaseDate = getCol(['transaction release date', 'release date', 'releasedate']);
 
   const parsedRows: AmazonUnifiedRow[] = [];
 

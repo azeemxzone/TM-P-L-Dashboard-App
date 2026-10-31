@@ -22,16 +22,21 @@ export function parseAmazonMtr(text: string): AmazonMtrRow[] {
     (h || '')
       .toLowerCase()
       .trim()
-      .replace(/[\s\-_/.]+/g, ' ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
   );
 
   const getCol = (patterns: string[]): number => {
     for (const p of patterns) {
-      const idx = rawHeaders.findIndex((h) => h === p || h.replace(/\s+/g, '') === p.replace(/\s+/g, ''));
+      const normP = p.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const idx = rawHeaders.findIndex(
+        (h) => h === normP || h.replace(/\s+/g, '') === normP.replace(/\s+/g, '')
+      );
       if (idx !== -1) return idx;
     }
     for (const p of patterns) {
-      const idx = rawHeaders.findIndex((h) => h.includes(p));
+      const normP = p.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const idx = rawHeaders.findIndex((h) => h.includes(normP));
       if (idx !== -1) return idx;
     }
     return -1;
