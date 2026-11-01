@@ -15,6 +15,8 @@ import {
   validateAmazonSlotMatch,
   buildAzTxDocId,
   buildAzMtrDocId,
+  buildAzMtrDocIds,
+  verifyExpectedDocumentIds,
 } from './storage';
 import { findAmazonSampleFile } from './amazon.test';
 
@@ -319,6 +321,111 @@ describe('STAGE 3b: Amazon Upload Slots, Period Validation & Storage Payloads', 
       // Assert counts by status: Released 84, Deferred 10
       expect(payloadStatusCounts['Released']).toBe(84);
       expect(payloadStatusCounts['Deferred']).toBe(10);
+    });
+  });
+
+  describe('5. Real MTR Simulation: Write Twice (Import & Retry) & Verification', () => {
+    it('simulates writing the 60 payloads twice into an in-memory map keyed by ID, asserting 60 of 60 expected IDs found and 0 collisions', () => {
+      const mPath = findAmazonSampleFile('mtr_b2c');
+      const text = fs.readFileSync(mPath, 'utf8');
+      const rows = parseAmazonMtr(text);
+      expect(rows).toHaveLength(60);
+
+      const inMemoryStore = new Map<string, Record<string, any>>();
+
+      // 1. First import
+      const firstImport = buildAmazonImportPayloads(
+        'amazon_mtr',
+        { mtr: rows },
+        {
+          selectedMonth: '2026-09',
+          originalFileName: '2-MTR_B2C-SEPTEMBER-2026-A1F60URCAL99HJ.csv',
+          sha256: 'sha-first-import',
+          userEmail: 'admin@tabbymart.com',
+          uploadId: 'upload_first_123',
+        }
+      );
+      expect(firstImport.ops).toHaveLength(60);
+
+      // Write first import into store
+      for (const op of firstImport.ops) {
+        inMemoryStore.set(op.id, { ...op.data });
+      }
+      expect(inMemoryStore.size).toBe(60);
+
+      // Verify first import
+      const verifyFirst = verifyExpectedDocumentIds(
+        firstImport.ops,
+        firstImport.uploadId,
+        inMemoryStore
+      );
+      expect(verifyFirst.isMatch).toBe(true);
+      expect(verifyFirst.totalExpected).toBe(60);
+      expect(verifyFirst.totalFound).toBe(60);
+      expect(verifyFirst.missingInFirestoreCount).toBe(0);
+      expect(verifyFirst.duplicateExpectedIdCount).toBe(0);
+      expect(verifyFirst.differingUploadIdCount).toBe(0);
+
+      // 2. Retry import (second import with same rows and new uploadId, simulating upsert with merge)
+      const retryImport = buildAmazonImportPayloads(
+        'amazon_mtr',
+        { mtr: rows },
+        {
+          selectedMonth: '2026-09',
+          originalFileName: '2-MTR_B2C-SEPTEMBER-2026-A1F60URCAL99HJ.csv',
+          sha256: 'sha-retry-import',
+          userEmail: 'admin@tabbymart.com',
+          uploadId: 'upload_retry_456',
+        }
+      );
+      expect(retryImport.ops).toHaveLength(60);
+
+      // Write retry import into store (upsert / overwrite same IDs)
+      for (const op of retryImport.ops) {
+        inMemoryStore.set(op.id, { ...op.data });
+      }
+
+      // Assert size remains exactly 60 (0 duplicate ID collisions created in store)
+      expect(inMemoryStore.size).toBe(60);
+
+      // Run verification function against the map for the retry import
+      const verifyRetry = verifyExpectedDocumentIds(
+        retryImport.ops,
+        retryImport.uploadId,
+        inMemoryStore
+      );
+
+      // Assert 60 of 60 expected IDs found and 0 collisions
+      expect(verifyRetry.isMatch).toBe(true);
+      expect(verifyRetry.totalExpected).toBe(60);
+      expect(verifyRetry.totalFound).toBe(60);
+      expect(verifyRetry.missingInFirestoreCount).toBe(0);
+      expect(verifyRetry.duplicateExpectedIdCount).toBe(0);
+      expect(verifyRetry.differingUploadIdCount).toBe(0);
+
+      // Test verifying against an older upload ID reports differingUploadIdCount but still counts 60 found
+      const verifyOldUploadId = verifyExpectedDocumentIds(
+        retryImport.ops,
+        'old_upload_id_789',
+        inMemoryStore
+      );
+      expect(verifyOldUploadId.totalExpected).toBe(60);
+      expect(verifyOldUploadId.totalFound).toBe(60); // verification rule: counts expected IDs that exist, regardless of lastUploadId
+      expect(verifyOldUploadId.differingUploadIdCount).toBe(60);
+    });
+
+    it('asserts 12 MTR rows without invoiceNumber have deterministic IDs and 0 collisions', () => {
+      const mPath = findAmazonSampleFile('mtr_b2c');
+      const text = fs.readFileSync(mPath, 'utf8');
+      const rows = parseAmazonMtr(text);
+
+      const noInvoiceRows = rows.filter((r) => !r.invoiceNumber && !r.creditNoteNo);
+      expect(noInvoiceRows.length).toBe(12);
+
+      const docIds = buildAzMtrDocIds(rows);
+      expect(docIds).toHaveLength(60);
+      const uniqueIds = new Set(docIds);
+      expect(uniqueIds.size).toBe(60);
     });
   });
 });

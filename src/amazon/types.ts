@@ -162,4 +162,28 @@ export interface AzUploadRecord {
   uploadedAt: string; // ISO timestamp
   rowCount?: number;
   uploadedBy?: string;
+  expectedDocIds?: string[];
+}
+
+export interface MismatchItem {
+  type: 'missing_in_firestore' | 'differing_upload_id' | 'duplicate_expected_id';
+  id: string;
+  transactionType?: string;
+  orderId?: string;
+  sku?: string;
+  invoiceNumber?: string;
+  creditNoteNo?: string;
+  lastUploadId?: string;
+  expectedUploadId?: string;
+  reason: string;
+}
+
+export interface VerificationDiffReport {
+  isMatch: boolean;
+  totalExpected: number;
+  totalFound: number;
+  missingInFirestoreCount: number;
+  differingUploadIdCount: number;
+  duplicateExpectedIdCount: number;
+  items: MismatchItem[];
 }

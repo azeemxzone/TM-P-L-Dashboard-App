@@ -76,6 +76,8 @@ import {
   validateAmazonSlotMatch,
   isDuplicateAzUpload,
   commitAmazonImport,
+  verifyAmazonSlotUpload,
+  VerificationDiffReport,
 } from '../amazon';
 
 export type AppUploadSlot = FlipkartSlotType | AmazonSlotType;
@@ -121,6 +123,7 @@ export const UploadCentreScreen: React.FC = () => {
   const [aliases, setAliases] = useState<Map<string, string>>(new Map());
   const [masterCodes, setMasterCodes] = useState<string[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(true);
+  const [mismatchReport, setMismatchReport] = useState<VerificationDiffReport | null>(null);
 
   // Bundled aliases action
   const [bundlingLoading, setBundlingLoading] = useState(false);
@@ -687,23 +690,23 @@ export const UploadCentreScreen: React.FC = () => {
       // Verify Amazon Unified
       if (currentMonthAzUploads.unified) {
         checkedCount++;
-        const countQ = query(collection(db, 'az_transactions'), where('orderMonth', '==', selectedMonth));
-        const countSnap = await getCountFromServer(countQ);
-        const stored = countSnap.data().count;
-        const expected = currentMonthAzUploads.unified.counts?.total ?? stored;
-        updatedCounts[`${selectedMonth}_amazon_unified`] = { stored, expected };
-        if (stored !== expected) allMatched = false;
+        const res = await verifyAmazonSlotUpload(db, 'amazon_unified', currentMonthAzUploads.unified);
+        updatedCounts[`${selectedMonth}_amazon_unified`] = { stored: res.stored, expected: res.expected };
+        if (!res.isMatch) {
+          allMatched = false;
+          setMismatchReport(res.diffReport);
+        }
       }
 
       // Verify Amazon MTR
       if (currentMonthAzUploads.mtr) {
         checkedCount++;
-        const countQ = query(collection(db, 'az_mtr_rows'), where('orderMonth', '==', selectedMonth));
-        const countSnap = await getCountFromServer(countQ);
-        const stored = countSnap.data().count;
-        const expected = currentMonthAzUploads.mtr.counts?.total ?? stored;
-        updatedCounts[`${selectedMonth}_amazon_mtr`] = { stored, expected };
-        if (stored !== expected) allMatched = false;
+        const res = await verifyAmazonSlotUpload(db, 'amazon_mtr', currentMonthAzUploads.mtr);
+        updatedCounts[`${selectedMonth}_amazon_mtr`] = { stored: res.stored, expected: res.expected };
+        if (!res.isMatch) {
+          allMatched = false;
+          setMismatchReport(res.diffReport);
+        }
       }
 
       setVerifiedSlotCounts((prev) => ({ ...prev, ...updatedCounts }));
@@ -711,6 +714,7 @@ export const UploadCentreScreen: React.FC = () => {
         setVerifyMessage(`No completed uploads found for ${selectedMonth} to verify.`);
       } else if (allMatched) {
         setVerifyMessage(`All ${checkedCount} uploaded slot(s) verified with Firestore count query: 100% rows match.`);
+        setMismatchReport(null);
       } else {
         setVerifyMessage(`Count mismatch detected in one or more slots for ${selectedMonth}.`);
       }
@@ -769,6 +773,7 @@ export const UploadCentreScreen: React.FC = () => {
         setStagedWorkbook(null);
         setStagedAmazonUnified(null);
         setStagedAmazonMtr(null);
+        setMismatchReport(null);
 
         const primaryCol = activeSlot === 'amazon_unified' ? 'az_transactions' : 'az_mtr_rows';
         const stored = res.collectionCounts[primaryCol]?.stored ?? res.totalRecords;
@@ -780,6 +785,9 @@ export const UploadCentreScreen: React.FC = () => {
       } catch (err: any) {
         setIsSaving(false);
         setSaveError(err.message || 'Import failed for Amazon report.');
+        if (err.diffReport) {
+          setMismatchReport(err.diffReport);
+        }
       }
       return;
     }
@@ -1087,6 +1095,106 @@ export const UploadCentreScreen: React.FC = () => {
             >
               Dismiss
             </button>
+          </div>
+        )}
+
+        {/* Missing Documents Panel (Appears on any mismatch) */}
+        {mismatchReport && mismatchReport.items && mismatchReport.items.length > 0 && (
+          <div className="bg-red-50/95 dark:bg-red-950/50 border-2 border-red-500 rounded-2xl p-6 shadow-lg space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-red-200 dark:border-red-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-red-900 dark:text-red-200">
+                    Missing Documents &amp; Storage Verification Mismatch
+                  </h3>
+                  <p className="text-xs text-red-700 dark:text-red-400">
+                    Expected {mismatchReport.totalExpected} rows, but verified {mismatchReport.totalFound} documents in Firestore.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setMismatchReport(null)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+
+            {/* Breakdown summary pills */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-red-200 dark:border-red-900">
+                <span className="text-slate-500 block text-[11px]">Total Expected</span>
+                <span className="text-base font-bold text-slate-900 dark:text-white font-mono">{mismatchReport.totalExpected}</span>
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-red-200 dark:border-red-900">
+                <span className="text-slate-500 block text-[11px]">Found in Firestore</span>
+                <span className="text-base font-bold text-slate-900 dark:text-white font-mono">{mismatchReport.totalFound}</span>
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-red-200 dark:border-red-900">
+                <span className="text-red-600 block text-[11px]">Missing in Firestore (a)</span>
+                <span className="text-base font-bold text-red-600 font-mono">{mismatchReport.missingInFirestoreCount}</span>
+              </div>
+              <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-red-200 dark:border-red-900">
+                <span className="text-amber-600 block text-[11px]">Differing Upload ID (b)</span>
+                <span className="text-base font-bold text-amber-600 font-mono">{mismatchReport.differingUploadIdCount}</span>
+              </div>
+            </div>
+
+            {/* Detailed Mismatch Items Table */}
+            <div className="overflow-x-auto rounded-xl border border-red-200 dark:border-red-900 bg-white dark:bg-slate-900 max-h-96 overflow-y-auto">
+              <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
+                <thead className="bg-red-100/70 dark:bg-red-950/70 text-[11px] font-bold text-slate-800 dark:text-slate-200 border-b border-red-200 dark:border-red-900 sticky top-0">
+                  <tr>
+                    <th className="py-2.5 px-3">Mismatch Category</th>
+                    <th className="py-2.5 px-3">ID</th>
+                    <th className="py-2.5 px-3">Transaction Type</th>
+                    <th className="py-2.5 px-3">Order ID</th>
+                    <th className="py-2.5 px-3">SKU</th>
+                    <th className="py-2.5 px-3">Invoice Number</th>
+                    <th className="py-2.5 px-3">Credit Note No</th>
+                    <th className="py-2.5 px-3">Last Upload ID</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
+                  {mismatchReport.items.map((item, idx) => (
+                    <tr key={`${item.id}_${idx}`} className="hover:bg-red-50/50 dark:hover:bg-red-950/20">
+                      <td className="py-2 px-3 font-sans font-semibold">
+                        {item.type === 'missing_in_firestore' && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300">
+                            (a) Missing doc
+                          </span>
+                        )}
+                        {item.type === 'differing_upload_id' && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                            (b) Differing upload ID
+                          </span>
+                        )}
+                        {item.type === 'duplicate_expected_id' && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300">
+                            (c) Duplicate expected ID
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 px-3 truncate max-w-xs font-bold text-slate-900 dark:text-white" title={item.id}>
+                        {item.id}
+                      </td>
+                      <td className="py-2 px-3 font-sans">{item.transactionType || '—'}</td>
+                      <td className="py-2 px-3">{item.orderId || '—'}</td>
+                      <td className="py-2 px-3 truncate max-w-[150px]" title={item.sku}>{item.sku || '—'}</td>
+                      <td className="py-2 px-3">{item.invoiceNumber || '—'}</td>
+                      <td className="py-2 px-3">{item.creditNoteNo || '—'}</td>
+                      <td className="py-2 px-3 truncate max-w-[150px]" title={item.lastUploadId || ''}>
+                        {item.lastUploadId || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 

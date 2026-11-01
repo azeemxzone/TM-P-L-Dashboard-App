@@ -3,8 +3,11 @@ import {
   doc,
   collection,
   setDoc,
+  getDoc,
+  getDocs,
   query,
   where,
+  documentId,
   getCountFromServer,
   Firestore,
 } from 'firebase/firestore';
@@ -13,6 +16,8 @@ import {
   AzUploadRecord,
   AmazonUnifiedRow,
   AmazonMtrRow,
+  MismatchItem,
+  VerificationDiffReport,
 } from './types';
 import { orderMonthByOrderId } from './mtrParser';
 import { summariseUnified } from './unifiedParser';
@@ -74,6 +79,32 @@ export function buildAzMtrDocId(row: AmazonMtrRow, counter: number = 1): string 
     raw = raw.slice(0, 110);
   }
   return counter > 1 ? `${raw}_${counter}` : raw;
+}
+
+/**
+ * Builds deterministic document IDs for an array of Amazon MTR rows.
+ * Ordered strictly by file row index so occurrence counter is identical for SAVE and VERIFY.
+ */
+export function buildAzMtrDocIds(rows: AmazonMtrRow[]): string[] {
+  const occurrenceMap: Record<string, number> = {};
+  return rows.map((r) => {
+    const baseId = buildAzMtrDocId(r, 1);
+    occurrenceMap[baseId] = (occurrenceMap[baseId] || 0) + 1;
+    return buildAzMtrDocId(r, occurrenceMap[baseId]);
+  });
+}
+
+/**
+ * Builds deterministic document IDs for an array of Amazon Unified transaction rows.
+ * Ordered strictly by file row index so occurrence counter is identical for SAVE and VERIFY.
+ */
+export function buildAzTxDocIds(rows: AmazonUnifiedRow[]): string[] {
+  const occurrenceMap: Record<string, number> = {};
+  return rows.map((r) => {
+    const baseId = buildAzTxDocId(r, 1);
+    occurrenceMap[baseId] = (occurrenceMap[baseId] || 0) + 1;
+    return buildAzTxDocId(r, occurrenceMap[baseId]);
+  });
 }
 
 /**
@@ -310,12 +341,11 @@ export function buildAmazonImportPayloads(
     countsByStatus = summary.countsByStatus;
     transfersCount = summary.transfers.length;
 
-    const occurrenceMap: Record<string, number> = {};
+    const docIds = buildAzTxDocIds(data.unified);
 
-    for (const r of data.unified) {
-      const baseId = buildAzTxDocId(r, 1);
-      occurrenceMap[baseId] = (occurrenceMap[baseId] || 0) + 1;
-      const docId = buildAzTxDocId(r, occurrenceMap[baseId]);
+    for (let i = 0; i < data.unified.length; i++) {
+      const r = data.unified[i];
+      const docId = docIds[i];
 
       addOp('az_transactions', docId, {
         postedAtUtc: r.postedAtUtc,
@@ -352,15 +382,13 @@ export function buildAmazonImportPayloads(
     }
   } else if (slot === 'amazon_mtr' && data.mtr) {
     const monthMap = orderMonthByOrderId(data.mtr);
-    const occurrenceMap: Record<string, number> = {};
+    const docIds = buildAzMtrDocIds(data.mtr);
 
     countsByType = {};
-    for (const r of data.mtr) {
+    for (let i = 0; i < data.mtr.length; i++) {
+      const r = data.mtr[i];
       countsByType[r.transactionType] = (countsByType[r.transactionType] || 0) + 1;
-
-      const baseId = buildAzMtrDocId(r, 1);
-      occurrenceMap[baseId] = (occurrenceMap[baseId] || 0) + 1;
-      const docId = buildAzMtrDocId(r, occurrenceMap[baseId]);
+      const docId = docIds[i];
 
       const oMonth = (r.orderId && monthMap.get(r.orderId)) || (r.orderDate ? r.orderDate.slice(0, 7) : null);
 
@@ -401,6 +429,7 @@ export function buildAmazonImportPayloads(
     sha256: meta.sha256,
     user: meta.userEmail,
     status: 'complete',
+    expectedDocIds: ops.map((o) => o.id),
     counts: {
       total: ops.length,
       valid: ops.length,
@@ -449,6 +478,7 @@ export async function commitAmazonImport(
   uploadId: string;
   totalRecords: number;
   collectionCounts: Record<string, { stored: number; expected: number }>;
+  diffReport?: VerificationDiffReport;
 }> {
   const { uploadId, ops, expectedCounts, uploadRecord } = buildAmazonImportPayloads(
     slot,
@@ -489,36 +519,34 @@ export async function commitAmazonImport(
     }
   }
 
-  // Verification step: query getCountFromServer for this uploadId
+  // Verification step: read back documents by ID in chunks of 30, regardless of lastUploadId
   if (onProgress) {
     onProgress({
       currentBatch: numBatches,
       totalBatches: numBatches,
       savedCount: totalOps,
       totalCount: totalOps,
-      statusMessage: 'Verifying stored row counts with Firestore server...',
+      statusMessage: 'Verifying stored documents with Firestore server...',
     });
   }
 
-  const collectionCounts: Record<string, { stored: number; expected: number }> = {};
-  for (const [colName, expected] of Object.entries(expectedCounts)) {
-    try {
-      const q = query(collection(db, colName), where('lastUploadId', '==', uploadId));
-      const snap = await getCountFromServer(q);
-      const stored = snap.data().count;
-      collectionCounts[colName] = { stored, expected };
+  const primaryCol = opTargetCollection(slot);
+  const expectedIds = ops.map((o) => o.id);
+  const storedDocsMap = await fetchFirestoreDocsByIds(db, primaryCol, expectedIds);
+  const diffReport = verifyExpectedDocumentIds(ops, uploadId, storedDocsMap);
 
-      if (stored < expected) {
-        throw new Error(
-          `Count verification failed for ${colName}: expected ${expected} rows, but Firestore stored ${stored}.`
-        );
-      }
-    } catch (err: any) {
-      if (err.message && err.message.includes('Count verification failed')) {
-        throw err;
-      }
-      collectionCounts[colName] = { stored: expected, expected };
-    }
+  const collectionCounts: Record<string, { stored: number; expected: number }> = {
+    [primaryCol]: { stored: diffReport.totalFound, expected: totalOps },
+  };
+
+  if (!diffReport.isMatch) {
+    const errorDetails = diffReport.items
+      .slice(0, 5)
+      .map((it) => `${it.id}: ${it.reason}`)
+      .join('; ');
+    throw new Error(
+      `Count verification failed for ${primaryCol}: expected ${totalOps} rows, but Firestore stored ${diffReport.totalFound}. ${errorDetails}`
+    );
   }
 
   // Write audit upload record in az_uploads (create-only)
@@ -537,13 +565,214 @@ export async function commitAmazonImport(
     uploadId,
     totalRecords: totalOps,
     collectionCounts,
+    diffReport,
   };
 }
 
-function opTargetCollection(slot: AmazonSlotType): string {
+export function opTargetCollection(slot: AmazonSlotType): string {
   if (slot === 'amazon_unified') return 'az_transactions';
   if (slot === 'amazon_mtr') return 'az_mtr_rows';
   return 'records';
+}
+
+/**
+ * Reads Firestore documents by their IDs in chunks of at most 30 (Firestore 'in' query limit).
+ */
+export async function fetchFirestoreDocsByIds(
+  db: Firestore,
+  collectionName: string,
+  ids: string[]
+): Promise<Map<string, Record<string, any>>> {
+  const result = new Map<string, Record<string, any>>();
+  if (!ids || ids.length === 0) return result;
+
+  const CHUNK_SIZE = 30;
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + CHUNK_SIZE);
+    try {
+      const q = query(collection(db, collectionName), where(documentId(), 'in', chunk));
+      const snap = await getDocs(q);
+      snap.forEach((d) => {
+        result.set(d.id, d.data());
+      });
+    } catch {
+      // Fallback: fetch individually
+      for (const id of chunk) {
+        try {
+          const docSnap = await getDoc(doc(db, collectionName, id));
+          if (docSnap.exists()) {
+            result.set(docSnap.id, docSnap.data());
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Pure diff and verification function:
+ * Diffs expected payloads against stored documents map:
+ * (a) expected IDs not found in Firestore
+ * (b) stored documents whose lastUploadId differs from current upload's ID or is missing
+ * (c) IDs that appear twice in the expected list
+ *
+ * Verification rule: count how many of the expected IDs exist in Firestore (regardless of lastUploadId).
+ * Separately report documents whose lastUploadId is not the current upload.
+ */
+export function verifyExpectedDocumentIds(
+  expectedOps: Array<{
+    id: string;
+    collectionName?: string;
+    data: Record<string, any>;
+  }>,
+  currentUploadId: string,
+  storedDocsMap: Map<string, Record<string, any>>
+): VerificationDiffReport {
+  const items: MismatchItem[] = [];
+  const seenIds = new Set<string>();
+  let duplicateExpectedIdCount = 0;
+
+  // (c) IDs that appear twice in the expected list
+  for (const op of expectedOps) {
+    if (seenIds.has(op.id)) {
+      duplicateExpectedIdCount++;
+      items.push({
+        type: 'duplicate_expected_id',
+        id: op.id,
+        transactionType: op.data.transactionType || op.data.type,
+        orderId: op.data.orderId,
+        sku: op.data.sku,
+        invoiceNumber: op.data.invoiceNumber,
+        creditNoteNo: op.data.creditNoteNo,
+        lastUploadId: op.data.lastUploadId,
+        expectedUploadId: currentUploadId,
+        reason: 'ID appears more than once in expected upload list',
+      });
+    }
+    seenIds.add(op.id);
+  }
+
+  let totalFound = 0;
+  let missingInFirestoreCount = 0;
+  let differingUploadIdCount = 0;
+
+  for (const op of expectedOps) {
+    const stored = storedDocsMap.get(op.id);
+    if (!stored) {
+      // (a) expected IDs not found in Firestore
+      missingInFirestoreCount++;
+      items.push({
+        type: 'missing_in_firestore',
+        id: op.id,
+        transactionType: op.data.transactionType || op.data.type,
+        orderId: op.data.orderId,
+        sku: op.data.sku,
+        invoiceNumber: op.data.invoiceNumber,
+        creditNoteNo: op.data.creditNoteNo,
+        lastUploadId: undefined,
+        expectedUploadId: currentUploadId,
+        reason: 'Expected document ID not found in Firestore',
+      });
+    } else {
+      totalFound++;
+      // (b) stored documents whose lastUploadId differs from current upload's ID or is missing
+      const storedUploadId = stored.lastUploadId;
+      if (!storedUploadId || storedUploadId !== currentUploadId) {
+        differingUploadIdCount++;
+        items.push({
+          type: 'differing_upload_id',
+          id: op.id,
+          transactionType: stored.transactionType || op.data.transactionType || op.data.type,
+          orderId: stored.orderId || op.data.orderId,
+          sku: stored.sku || op.data.sku,
+          invoiceNumber: stored.invoiceNumber || op.data.invoiceNumber,
+          creditNoteNo: stored.creditNoteNo || op.data.creditNoteNo,
+          lastUploadId: storedUploadId || '(missing)',
+          expectedUploadId: currentUploadId,
+          reason: storedUploadId
+            ? `Stored document has different lastUploadId (${storedUploadId})`
+            : 'Stored document has no lastUploadId',
+        });
+      }
+    }
+  }
+
+  // Verification rule: count how many of the expected IDs exist in Firestore (regardless of lastUploadId)
+  const isMatch = totalFound === expectedOps.length && duplicateExpectedIdCount === 0;
+
+  return {
+    isMatch,
+    totalExpected: expectedOps.length,
+    totalFound,
+    missingInFirestoreCount,
+    differingUploadIdCount,
+    duplicateExpectedIdCount,
+    items,
+  };
+}
+
+/**
+ * Verifies live stored documents for an Amazon slot upload:
+ * Reads all documents for this upload by expected IDs in chunks of 30.
+ * If expectedDocIds is not directly available, queries all docs for this upload by lastUploadId.
+ * Returns stored count, expected count, match flag, and full VerificationDiffReport.
+ */
+export async function verifyAmazonSlotUpload(
+  db: Firestore,
+  slot: AmazonSlotType,
+  uploadRecord: AzUploadRecord,
+  expectedDocIds?: string[]
+): Promise<{
+  stored: number;
+  expected: number;
+  isMatch: boolean;
+  diffReport: VerificationDiffReport;
+}> {
+  const collectionName = opTargetCollection(slot);
+  const uploadId = uploadRecord.uploadId || uploadRecord.id || '';
+  const expectedCount = uploadRecord.counts?.total ?? 0;
+
+  let idsToVerify = expectedDocIds || uploadRecord.expectedDocIds || [];
+
+  // If no expectedDocIds on uploadRecord, read all docs where lastUploadId == uploadId
+  if (idsToVerify.length === 0 && uploadId) {
+    try {
+      const q = query(collection(db, collectionName), where('lastUploadId', '==', uploadId));
+      const snap = await getDocs(q);
+      idsToVerify = snap.docs.map((d) => d.id);
+    } catch {
+      // fallback
+    }
+  }
+
+  // Fetch all documents by ID in chunks of 30
+  const storedDocsMap = await fetchFirestoreDocsByIds(db, collectionName, idsToVerify);
+
+  // Build expectedOps representation from stored docs or IDs
+  const expectedOps = idsToVerify.map((id) => {
+    const docData = storedDocsMap.get(id) || {};
+    return {
+      id,
+      collectionName,
+      data: docData,
+    };
+  });
+
+  const diffReport = verifyExpectedDocumentIds(expectedOps, uploadId, storedDocsMap);
+  const stored = diffReport.totalFound;
+  const effectiveExpected = expectedCount || idsToVerify.length;
+  const isMatch = stored === effectiveExpected && diffReport.duplicateExpectedIdCount === 0;
+
+  return {
+    stored,
+    expected: effectiveExpected,
+    isMatch,
+    diffReport,
+  };
 }
 
 /**
