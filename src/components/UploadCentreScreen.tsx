@@ -61,6 +61,24 @@ import {
 import { BankStatementReport } from '../bank/types';
 import { commitBankCreditsImport } from '../bank/bankStorage';
 import { clearTrackingSessionCache } from './FlipkartTrackingScreen';
+import {
+  detectAmazonReport,
+  parseAmazonUnified,
+  summariseUnified,
+  parseAmazonMtr,
+  summariseMtr,
+  AmazonSlotType,
+  AzUploadRecord,
+  AmazonUnifiedRow,
+  AmazonMtrRow,
+  validateAmazonUnifiedPeriod,
+  validateAmazonMtrPeriod,
+  validateAmazonSlotMatch,
+  isDuplicateAzUpload,
+  commitAmazonImport,
+} from '../amazon';
+
+export type AppUploadSlot = FlipkartSlotType | AmazonSlotType;
 
 interface FYMonth {
   key: string; // "2026-04"
@@ -99,6 +117,7 @@ export const UploadCentreScreen: React.FC = () => {
 
   // Firestore real-time data
   const [uploads, setUploads] = useState<FkUploadRecord[]>([]);
+  const [azUploads, setAzUploads] = useState<AzUploadRecord[]>([]);
   const [aliases, setAliases] = useState<Map<string, string>>(new Map());
   const [masterCodes, setMasterCodes] = useState<string[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -108,7 +127,7 @@ export const UploadCentreScreen: React.FC = () => {
   const [bundlingMessage, setBundlingMessage] = useState<string | null>(null);
 
   // Active file staging / preview state
-  const [activeSlot, setActiveSlot] = useState<FlipkartSlotType | null>(null);
+  const [activeSlot, setActiveSlot] = useState<AppUploadSlot | null>(null);
   const [stagedFileName, setStagedFileName] = useState<string>('');
   const [stagedSha256, setStagedSha256] = useState<string>('');
   const [stagedWorkbook, setStagedWorkbook] = useState<XLSX.WorkBook | null>(null);
@@ -119,6 +138,8 @@ export const UploadCentreScreen: React.FC = () => {
   const [stagedReturns, setStagedReturns] = useState<FlipkartReturnRow[] | null>(null);
   const [stagedSettled, setStagedSettled] = useState<FlipkartSettledReport | null>(null);
   const [stagedBankReport, setStagedBankReport] = useState<BankStatementReport | null>(null);
+  const [stagedAmazonUnified, setStagedAmazonUnified] = useState<AmazonUnifiedRow[] | null>(null);
+  const [stagedAmazonMtr, setStagedAmazonMtr] = useState<AmazonMtrRow[] | null>(null);
 
   // Validation results
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -140,7 +161,7 @@ export const UploadCentreScreen: React.FC = () => {
   const [mappingSearchQuery, setMappingSearchQuery] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const currentSlotForBrowse = useRef<FlipkartSlotType>('orders');
+  const currentSlotForBrowse = useRef<AppUploadSlot>('orders');
 
   // 1. Subscribe to uploads, aliases, and cost master
   useEffect(() => {
@@ -148,6 +169,12 @@ export const UploadCentreScreen: React.FC = () => {
       const records: FkUploadRecord[] = [];
       snap.forEach((d) => records.push({ id: d.id, ...(d.data() as FkUploadRecord) }));
       setUploads(records);
+    });
+
+    const unsubAzUploads = onSnapshot(collection(db, 'az_uploads'), (snap) => {
+      const records: AzUploadRecord[] = [];
+      snap.forEach((d) => records.push({ id: d.id, ...(d.data() as AzUploadRecord) }));
+      setAzUploads(records);
     });
 
     const unsubAliases = onSnapshot(collection(db, 'sku_aliases'), (snap) => {
@@ -174,6 +201,7 @@ export const UploadCentreScreen: React.FC = () => {
 
     return () => {
       unsubUploads();
+      unsubAzUploads();
       unsubAliases();
       unsubCostMaster();
     };
@@ -200,8 +228,24 @@ export const UploadCentreScreen: React.FC = () => {
     return map;
   }, [uploads]);
 
+  const azUploadStatusMap = useMemo(() => {
+    const map = new Map<string, { unified?: AzUploadRecord; mtr?: AzUploadRecord }>();
+    for (const u of azUploads) {
+      if (u.status && u.status !== 'complete') continue;
+      const period = u.period || '';
+      if (!map.has(period)) {
+        map.set(period, {});
+      }
+      const entry = map.get(period)!;
+      if (u.slot === 'amazon_unified') entry.unified = u;
+      if (u.slot === 'amazon_mtr') entry.mtr = u;
+    }
+    return map;
+  }, [azUploads]);
+
   // Current month's uploads
   const currentMonthUploads = uploadStatusMap.get(selectedMonth) || {};
+  const currentMonthAzUploads = azUploadStatusMap.get(selectedMonth) || {};
 
   // Re-validate period when selectedMonth changes
   useEffect(() => {
@@ -235,21 +279,54 @@ export const UploadCentreScreen: React.FC = () => {
       } else {
         setPeriodWarning(null);
       }
+    } else if (stagedAmazonUnified) {
+      const pCheck = validateAmazonUnifiedPeriod(stagedAmazonUnified, selectedMonth);
+      if (!pCheck.valid && pCheck.detectedMonth) {
+        setPeriodWarning({
+          message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+          targetMonth: pCheck.detectedMonth,
+        });
+      } else {
+        setPeriodWarning(null);
+      }
+    } else if (stagedAmazonMtr) {
+      const pCheck = validateAmazonMtrPeriod(stagedAmazonMtr, selectedMonth);
+      if (!pCheck.valid && pCheck.detectedMonth) {
+        setPeriodWarning({
+          message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+          targetMonth: pCheck.detectedMonth,
+        });
+      } else {
+        setPeriodWarning(null);
+      }
     }
-  }, [selectedMonth, stagedOrders, stagedSettled, stagedBankReport]);
+  }, [selectedMonth, stagedOrders, stagedSettled, stagedBankReport, stagedAmazonUnified, stagedAmazonMtr]);
 
   // Extract all seller SKUs from staged data to check unmapped
   const stagedSellerSkus = useMemo(() => {
     if (stagedOrders) return stagedOrders.map((o) => o.sku);
     if (stagedReturns) return stagedReturns.map((r) => r.sku);
     if (stagedSettled) return stagedSettled.orders.map((s: FlipkartSettledOrderRow) => s.sellerSku);
+    if (stagedAmazonUnified) return stagedAmazonUnified.map((u) => u.sku).filter(Boolean);
+    if (stagedAmazonMtr) return stagedAmazonMtr.map((m) => m.sku).filter(Boolean);
     return [];
-  }, [stagedOrders, stagedReturns, stagedSettled]);
+  }, [stagedOrders, stagedReturns, stagedSettled, stagedAmazonUnified, stagedAmazonMtr]);
 
   // Unmapped SKUs
   const unmappedList = useMemo(() => {
     return checkUnmappedSkus(stagedSellerSkus, masterCodes, aliases);
   }, [stagedSellerSkus, masterCodes, aliases]);
+
+  // Summaries for Staged Amazon Reports
+  const amazonUnifiedSummary = useMemo(() => {
+    if (!stagedAmazonUnified) return null;
+    return summariseUnified(stagedAmazonUnified);
+  }, [stagedAmazonUnified]);
+
+  const amazonMtrSummary = useMemo(() => {
+    if (!stagedAmazonMtr) return null;
+    return summariseMtr(stagedAmazonMtr);
+  }, [stagedAmazonMtr]);
 
   // Handle Bundled Aliases Load
   const handleLoadBundledAliases = async () => {
@@ -267,7 +344,7 @@ export const UploadCentreScreen: React.FC = () => {
   };
 
   // Process File
-  const processUploadedFile = async (file: File, targetSlot: FlipkartSlotType) => {
+  const processUploadedFile = async (file: File, targetSlot: AppUploadSlot) => {
     setActiveSlot(targetSlot);
     setStagedFileName(file.name);
     setValidationError(null);
@@ -280,23 +357,126 @@ export const UploadCentreScreen: React.FC = () => {
       const sha256 = await computeBufferSha256(buffer);
       setStagedSha256(sha256);
 
-      // Check SHA-256 duplicate
-      const dupCheck = isDuplicateUpload(sha256, uploads);
-      if (dupCheck.isDuplicate) {
-        setValidationError(`Refused: ${dupCheck.message} (${dupCheck.duplicateRecord?.originalFileName || file.name}).`);
+      // Check SHA-256 duplicate for the corresponding marketplace
+      if (targetSlot === 'amazon_unified' || targetSlot === 'amazon_mtr') {
+        const isDup = isDuplicateAzUpload(azUploads, sha256);
+        if (isDup) {
+          setValidationError(`Refused: Byte-identical Amazon file already uploaded and completed (${file.name}).`);
+          return;
+        }
+      } else {
+        const dupCheck = isDuplicateUpload(sha256, uploads);
+        if (dupCheck.isDuplicate) {
+          setValidationError(`Refused: ${dupCheck.message} (${dupCheck.duplicateRecord?.originalFileName || file.name}).`);
+          return;
+        }
+      }
+
+      // Try decoding text for CSV detection
+      const textDecoder = new TextDecoder('utf-8', { fatal: false });
+      const rawText = textDecoder.decode(buffer);
+
+      // Read Excel Workbook or CSV with SheetJS if applicable
+      let wb: XLSX.WorkBook | null = null;
+      try {
+        wb = XLSX.read(buffer, { type: 'array' });
+      } catch {
+        // text only
+      }
+      setStagedWorkbook(wb);
+
+      // Detect Amazon report
+      let azDetected = detectAmazonReport(rawText);
+      if (azDetected === 'unknown' && wb) {
+        azDetected = detectAmazonReport(wb);
+      }
+
+      // Detect Bank Statement
+      const isBank = wb ? detectBankStatement(wb) : false;
+
+      // Detect Flipkart Report
+      const fkDetected = wb ? detectFlipkartReport(wb) : 'unknown';
+
+      // 1. Amazon Slots
+      if (targetSlot === 'amazon_unified') {
+        if (azDetected !== 'unified') {
+          if (azDetected === 'mtr') {
+            setValidationError('Expected Amazon Unified Transaction report, but detected Amazon MTR report.');
+          } else if (azDetected === 'gstr1') {
+            setValidationError('Expected Amazon Unified Transaction report, but detected Amazon GSTR-1 report.');
+          } else if (fkDetected !== 'unknown') {
+            setValidationError(`Expected Amazon Unified Transaction report, but detected Flipkart ${fkDetected} report.`);
+          } else if (isBank) {
+            setValidationError('Expected Amazon Unified Transaction report, but detected Bank Statement.');
+          } else {
+            setValidationError('Could not identify file as an Amazon Unified Transaction report. Please verify file format.');
+          }
+          return;
+        }
+
+        setStagedDetectedType('amazon_unified');
+        const rows = parseAmazonUnified(rawText);
+        setStagedAmazonUnified(rows);
+        setStagedAmazonMtr(null);
+        setStagedOrders(null);
+        setStagedReturns(null);
+        setStagedSettled(null);
+        setStagedBankReport(null);
+
+        const pCheck = validateAmazonUnifiedPeriod(rows, selectedMonth);
+        if (!pCheck.valid && pCheck.detectedMonth) {
+          setPeriodWarning({
+            message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+            targetMonth: pCheck.detectedMonth,
+          });
+        }
         return;
       }
 
-      // Read Excel Workbook or CSV with SheetJS
-      const wb = XLSX.read(buffer, { type: 'array' });
-      setStagedWorkbook(wb);
+      if (targetSlot === 'amazon_mtr') {
+        if (azDetected !== 'mtr') {
+          if (azDetected === 'unified') {
+            setValidationError('Expected Amazon MTR report, but detected Amazon Unified Transaction report.');
+          } else if (azDetected === 'gstr1') {
+            setValidationError('Expected Amazon MTR report, but detected Amazon GSTR-1 report.');
+          } else if (fkDetected !== 'unknown') {
+            setValidationError(`Expected Amazon MTR report, but detected Flipkart ${fkDetected} report.`);
+          } else if (isBank) {
+            setValidationError('Expected Amazon MTR report, but detected Bank Statement.');
+          } else {
+            setValidationError('Could not identify file as an Amazon MTR report. Please verify file format.');
+          }
+          return;
+        }
 
-      // Detect report type by CONTENT
-      const isBank = detectBankStatement(wb);
+        setStagedDetectedType('amazon_mtr');
+        const rows = parseAmazonMtr(rawText);
+        setStagedAmazonMtr(rows);
+        setStagedAmazonUnified(null);
+        setStagedOrders(null);
+        setStagedReturns(null);
+        setStagedSettled(null);
+        setStagedBankReport(null);
 
+        const pCheck = validateAmazonMtrPeriod(rows, selectedMonth);
+        if (!pCheck.valid && pCheck.detectedMonth) {
+          setPeriodWarning({
+            message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+            targetMonth: pCheck.detectedMonth,
+          });
+        }
+        return;
+      }
+
+      // If dropped in Flipkart or Bank slot, check if it is an Amazon report:
+      if (azDetected === 'unified' || azDetected === 'mtr' || azDetected === 'gstr1') {
+        setValidationError(`Expected ${targetSlot === 'bank_statement' ? 'Bank Statement' : 'Flipkart'} report, but detected Amazon ${azDetected} report.`);
+        return;
+      }
+
+      // 2. Bank Statement Slot
       if (targetSlot === 'bank_statement') {
-        if (!isBank) {
-          const fkDetected = detectFlipkartReport(wb);
+        if (!isBank || !wb) {
           if (fkDetected === 'returns') {
             setValidationError('This looks like a Returns report; please use the Returns slot.');
             return;
@@ -319,6 +499,8 @@ export const UploadCentreScreen: React.FC = () => {
         setStagedOrders(null);
         setStagedReturns(null);
         setStagedSettled(null);
+        setStagedAmazonUnified(null);
+        setStagedAmazonMtr(null);
 
         const pCheck = validateBankStatementMonth(bankReport, selectedMonth);
         if (!pCheck.valid && pCheck.detectedMonth) {
@@ -336,12 +518,18 @@ export const UploadCentreScreen: React.FC = () => {
         return;
       }
 
-      const detected = detectFlipkartReport(wb);
-      setStagedDetectedType(detected);
+      if (!wb) {
+        setValidationError('Please upload a valid Excel or CSV workbook.');
+        return;
+      }
+
+      setStagedDetectedType(fkDetected);
       setStagedBankReport(null);
+      setStagedAmazonUnified(null);
+      setStagedAmazonMtr(null);
 
       // Check wrong slot
-      const slotValidation = validateSlotReportMatch(detected, targetSlot);
+      const slotValidation = validateSlotReportMatch(fkDetected, targetSlot as FlipkartSlotType);
       if (!slotValidation.valid) {
         setValidationError(slotValidation.error || 'Wrong report format for this slot');
         return;
@@ -387,14 +575,14 @@ export const UploadCentreScreen: React.FC = () => {
     }
   };
 
-  const handleFileDrop = (e: React.DragEvent<HTMLDivElement>, slot: FlipkartSlotType) => {
+  const handleFileDrop = (e: React.DragEvent<HTMLDivElement>, slot: AppUploadSlot) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       processUploadedFile(e.dataTransfer.files[0], slot);
     }
   };
 
-  const triggerBrowse = (slot: FlipkartSlotType) => {
+  const triggerBrowse = (slot: AppUploadSlot) => {
     currentSlotForBrowse.current = slot;
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -432,8 +620,24 @@ export const UploadCentreScreen: React.FC = () => {
   };
 
   // Helper to get stored vs expected counts for slot cards
-  const getSlotCountDisplay = (slotType: FlipkartSlotType) => {
-    const upload = currentMonthUploads[slotType];
+  const getSlotCountDisplay = (slotType: AppUploadSlot) => {
+    if (slotType === 'amazon_unified') {
+      const upload = currentMonthAzUploads.unified;
+      if (!upload) return null;
+      const verified = verifiedSlotCounts[`${selectedMonth}_amazon_unified`];
+      if (verified) return { stored: verified.stored, expected: verified.expected };
+      const stored = upload.counts?.storedCounts?.['az_transactions'] ?? upload.counts?.total ?? 0;
+      return { stored, expected: upload.counts?.total ?? stored };
+    }
+    if (slotType === 'amazon_mtr') {
+      const upload = currentMonthAzUploads.mtr;
+      if (!upload) return null;
+      const verified = verifiedSlotCounts[`${selectedMonth}_amazon_mtr`];
+      if (verified) return { stored: verified.stored, expected: verified.expected };
+      const stored = upload.counts?.storedCounts?.['az_mtr_rows'] ?? upload.counts?.total ?? 0;
+      return { stored, expected: upload.counts?.total ?? stored };
+    }
+    const upload = currentMonthUploads[slotType as FlipkartSlotType];
     if (!upload) return null;
     const verified = verifiedSlotCounts[`${selectedMonth}_${slotType}`];
     if (verified) {
@@ -479,6 +683,29 @@ export const UploadCentreScreen: React.FC = () => {
           }
         }
       }
+
+      // Verify Amazon Unified
+      if (currentMonthAzUploads.unified) {
+        checkedCount++;
+        const countQ = query(collection(db, 'az_transactions'), where('orderMonth', '==', selectedMonth));
+        const countSnap = await getCountFromServer(countQ);
+        const stored = countSnap.data().count;
+        const expected = currentMonthAzUploads.unified.counts?.total ?? stored;
+        updatedCounts[`${selectedMonth}_amazon_unified`] = { stored, expected };
+        if (stored !== expected) allMatched = false;
+      }
+
+      // Verify Amazon MTR
+      if (currentMonthAzUploads.mtr) {
+        checkedCount++;
+        const countQ = query(collection(db, 'az_mtr_rows'), where('orderMonth', '==', selectedMonth));
+        const countSnap = await getCountFromServer(countQ);
+        const stored = countSnap.data().count;
+        const expected = currentMonthAzUploads.mtr.counts?.total ?? stored;
+        updatedCounts[`${selectedMonth}_amazon_mtr`] = { stored, expected };
+        if (stored !== expected) allMatched = false;
+      }
+
       setVerifiedSlotCounts((prev) => ({ ...prev, ...updatedCounts }));
       if (checkedCount === 0) {
         setVerifyMessage(`No completed uploads found for ${selectedMonth} to verify.`);
@@ -497,6 +724,65 @@ export const UploadCentreScreen: React.FC = () => {
   // Commit Import to Firestore with BATCH_SIZE = 400 and post-commit count verification
   const handleConfirmCommit = async () => {
     if (!activeSlot || !isAdmin || periodWarning) return;
+
+    if (activeSlot === 'amazon_unified' || activeSlot === 'amazon_mtr') {
+      if (activeSlot === 'amazon_unified' && !stagedAmazonUnified) return;
+      if (activeSlot === 'amazon_mtr' && !stagedAmazonMtr) return;
+
+      setIsSaving(true);
+      setSaveError(null);
+      setSaveProgress(`Initializing batched commit for Amazon (BATCH_SIZE = ${BATCH_SIZE})...`);
+
+      const upId = currentUploadId || `upload_${activeSlot}_${selectedMonth}_${Date.now()}`;
+      setCurrentUploadId(upId);
+
+      try {
+        const res = await commitAmazonImport(
+          db,
+          activeSlot,
+          {
+            unified: stagedAmazonUnified || undefined,
+            mtr: stagedAmazonMtr || undefined,
+          },
+          {
+            selectedMonth,
+            originalFileName: stagedFileName,
+            sha256: stagedSha256,
+            userEmail: user?.email || 'unknown',
+            existingUploadId: upId,
+          },
+          (info) => {
+            if (info.statusMessage) {
+              setSaveProgress(info.statusMessage);
+            } else {
+              setSaveProgress(
+                `Writing batch ${info.currentBatch} of ${info.totalBatches} (${info.savedCount}/${info.totalCount} documents)...`
+              );
+            }
+          }
+        );
+
+        setIsSaving(false);
+        setSaveProgress(null);
+        setCurrentUploadId(null);
+        setActiveSlot(null);
+        setStagedWorkbook(null);
+        setStagedAmazonUnified(null);
+        setStagedAmazonMtr(null);
+
+        const primaryCol = activeSlot === 'amazon_unified' ? 'az_transactions' : 'az_mtr_rows';
+        const stored = res.collectionCounts[primaryCol]?.stored ?? res.totalRecords;
+        const expected = res.collectionCounts[primaryCol]?.expected ?? res.totalRecords;
+        setVerifiedSlotCounts((prev) => ({
+          ...prev,
+          [`${selectedMonth}_${activeSlot}`]: { stored, expected },
+        }));
+      } catch (err: any) {
+        setIsSaving(false);
+        setSaveError(err.message || 'Import failed for Amazon report.');
+      }
+      return;
+    }
 
     if (activeSlot === 'bank_statement') {
       if (!stagedBankReport) return;
@@ -617,7 +903,7 @@ export const UploadCentreScreen: React.FC = () => {
         type="file"
         ref={fileInputRef}
         onChange={handleFileInputChange}
-        accept=".xlsx,.xls"
+        accept=".xlsx,.xls,.csv"
         className="hidden"
       />
 
@@ -690,7 +976,10 @@ export const UploadCentreScreen: React.FC = () => {
 
           <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
             <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" /> Uploaded
+              <span className="w-2 h-2 rounded-full bg-emerald-500" /> Flipkart
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-indigo-500" /> Amazon
             </span>
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-700" /> Pending
@@ -706,6 +995,9 @@ export const UploadCentreScreen: React.FC = () => {
             const hasOrders = Boolean(status?.orders);
             const hasSettled = Boolean(status?.settled);
             const hasReturns = Boolean(status?.returns);
+            const azStatus = azUploadStatusMap.get(m.key);
+            const hasUnified = Boolean(azStatus?.unified);
+            const hasMtr = Boolean(azStatus?.mtr);
 
             return (
               <button
@@ -723,8 +1015,8 @@ export const UploadCentreScreen: React.FC = () => {
                 <span className="text-xs font-bold">{m.label}</span>
                 <span className="text-[10px] text-slate-400 font-mono">{m.year}</span>
 
-                {/* Status dots per Flipkart slot: Orders, Settled, Returns */}
-                <div className="flex items-center gap-1 mt-2" title="Orders | Settled | Returns">
+                {/* Status dots: Flipkart (Orders, Settled, Returns) | Amazon (Unified, MTR) */}
+                <div className="flex items-center gap-1 mt-2" title="FK: Orders, Settled, Returns | AZ: Unified, MTR">
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${hasOrders ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'}`}
                     title={hasOrders ? 'Orders uploaded' : 'Orders pending'}
@@ -736,6 +1028,15 @@ export const UploadCentreScreen: React.FC = () => {
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${hasReturns ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'}`}
                     title={hasReturns ? 'Returns uploaded' : 'Returns pending'}
+                  />
+                  <span className="w-px h-2 bg-slate-300 dark:bg-slate-700 mx-0.5" />
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${hasUnified ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-700'}`}
+                    title={hasUnified ? 'Amazon Unified uploaded' : 'Amazon Unified pending'}
+                  />
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${hasMtr ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-700'}`}
+                    title={hasMtr ? 'Amazon MTR uploaded' : 'Amazon MTR pending'}
                   />
                 </div>
               </button>
@@ -1060,22 +1361,6 @@ export const UploadCentreScreen: React.FC = () => {
               </div>
             </div>
 
-            {/* Amazon India (Coming soon) */}
-            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Amazon India</span>
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                    Coming soon
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500">{REPORT_PATHS.amazon}</p>
-              </div>
-              <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-200/60">
-                Orders, Settlement, Returns
-              </div>
-            </div>
-
             {/* Meesho (Coming soon) */}
             <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
               <div className="space-y-2">
@@ -1089,6 +1374,169 @@ export const UploadCentreScreen: React.FC = () => {
               </div>
               <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-200/60">
                 Orders &amp; Payment files
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Amazon India Ingestion Section */}
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Amazon India Reports &amp; Verified Settlement Ingestion
+            </h3>
+            <span className="text-[11px] text-slate-400">
+              Content-detected ingestion with verified counts &amp; SHA-256 duplicate guards
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            {/* Slot 1: Unified Transaction.csv */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'amazon_unified')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'amazon_unified'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Slot 1
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Unified Transaction.csv</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    Standard CSV
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Download from: {REPORT_PATHS.amazon.unified}
+                </p>
+
+                {/* Status or Upload info */}
+                {currentMonthAzUploads.unified ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthAzUploads.unified.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthAzUploads.unified.date || currentMonthAzUploads.unified.uploadedAt?.split('T')[0] || '—'} by {currentMonthAzUploads.unified.user || currentMonthAzUploads.unified.uploadedBy || '—'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {getSlotCountDisplay('amazon_unified')?.stored ?? currentMonthAzUploads.unified.counts.storedCounts?.['az_transactions'] ?? currentMonthAzUploads.unified.counts.total} of {getSlotCountDisplay('amazon_unified')?.expected ?? currentMonthAzUploads.unified.counts.total} rows
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('amazon_unified')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthAzUploads.unified ? 'Replace Unified Transaction.csv' : 'Upload Unified Transaction.csv'}
+                </button>
+              </div>
+            </div>
+
+            {/* Slot 2: MTR B2C.csv */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'amazon_mtr')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'amazon_mtr'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Slot 2
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">MTR B2C.csv</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    B2C Tax CSV
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Download from: {REPORT_PATHS.amazon.mtr}
+                </p>
+
+                {/* Status or Upload info */}
+                {currentMonthAzUploads.mtr ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthAzUploads.mtr.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthAzUploads.mtr.date || currentMonthAzUploads.mtr.uploadedAt?.split('T')[0] || '—'} by {currentMonthAzUploads.mtr.user || currentMonthAzUploads.mtr.uploadedBy || '—'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {getSlotCountDisplay('amazon_mtr')?.stored ?? currentMonthAzUploads.mtr.counts.storedCounts?.['az_mtr_rows'] ?? currentMonthAzUploads.mtr.counts.total} of {getSlotCountDisplay('amazon_mtr')?.expected ?? currentMonthAzUploads.mtr.counts.total} rows
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('amazon_mtr')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthAzUploads.mtr ? 'Replace MTR B2C.csv' : 'Upload MTR B2C.csv'}
+                </button>
+              </div>
+            </div>
+
+            {/* Slot 3: GSTR1.xlsx (Greyed out) */}
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Slot 3
+                    </span>
+                    <span className="text-sm font-bold text-slate-700 dark:text-slate-300">GSTR1.xlsx</span>
+                  </div>
+                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Coming in the GST stage
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Download from: {REPORT_PATHS.amazon.gstr1}
+                </p>
+              </div>
+              <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-200/60">
+                B2C Small &amp; HSN Summary sheets. (Unified Summary PDF is not uploaded)
               </div>
             </div>
           </div>
@@ -1117,8 +1565,17 @@ export const UploadCentreScreen: React.FC = () => {
               onClick={() => {
                 setActiveSlot(null);
                 setStagedWorkbook(null);
+                setStagedOrders(null);
+                setStagedReturns(null);
+                setStagedSettled(null);
+                setStagedBankReport(null);
+                setStagedAmazonUnified(null);
+                setStagedAmazonMtr(null);
                 setValidationError(null);
                 setPeriodWarning(null);
+                setSaveError(null);
+                setSaveProgress(null);
+                setCurrentUploadId(null);
               }}
               className="px-3 py-1 text-xs font-medium text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 rounded-lg border border-slate-200 dark:border-slate-800 cursor-pointer"
             >
@@ -1285,7 +1742,172 @@ export const UploadCentreScreen: React.FC = () => {
                     </div>
                   </>
                 )}
+
+                {activeSlot === 'amazon_unified' && amazonUnifiedSummary && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Total Rows</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        {stagedAmazonUnified?.length || 0}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Released vs Deferred</span>
+                      <p className="text-lg font-bold text-emerald-600">
+                        {amazonUnifiedSummary.countsByStatus['Released'] || 0}{' '}
+                        <span className="text-xs font-normal text-slate-400">rel /</span>{' '}
+                        <span className="text-amber-500">{amazonUnifiedSummary.countsByStatus['Deferred'] || 0}</span>{' '}
+                        <span className="text-xs font-normal text-slate-400">def</span>
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Transfers ({amazonUnifiedSummary.transfers.length})</span>
+                      <p className="text-lg font-bold text-indigo-600">
+                        ₹{amazonUnifiedSummary.transfers.reduce((sum, t) => sum + t.total, 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Net Total (All Rows)</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        ₹{amazonUnifiedSummary.sums.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {activeSlot === 'amazon_mtr' && amazonMtrSummary && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Total Rows</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        {amazonMtrSummary.rowCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Shipments</span>
+                      <p className="text-lg font-bold text-indigo-600">
+                        {amazonMtrSummary.typeCounts['Shipment'] || 0} rows
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Shipment Invoice Total</span>
+                      <p className="text-lg font-bold text-emerald-600">
+                        ₹{amazonMtrSummary.shipmentInvoiceTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Shipment Total Tax</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        ₹{amazonMtrSummary.shipmentTaxTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
+
+              {activeSlot === 'amazon_unified' && amazonUnifiedSummary && (
+                <div className="space-y-4">
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-xs">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">Counts by Transaction Type:</span>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {Object.entries(amazonUnifiedSummary.countsByType).map(([type, count]) => (
+                        <span
+                          key={type}
+                          className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono text-[11px] text-slate-700 dark:text-slate-300"
+                        >
+                          {type}: <strong className="text-indigo-600 dark:text-indigo-400">{count}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 8 Transfers Table */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        Amazon Payout Transfers ({amazonUnifiedSummary.transfers.length})
+                      </span>
+                      <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        Transfers Total: ₹{amazonUnifiedSummary.transfers.reduce((sum, t) => sum + t.total, 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+                      <table className="w-full text-left text-xs font-mono">
+                        <thead className="bg-slate-50 dark:bg-slate-950 sticky top-0 border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500">
+                          <tr>
+                            <th className="py-2 px-3">Date (IST)</th>
+                            <th className="py-2 px-3">Settlement ID</th>
+                            <th className="py-2 px-3 text-right">Amount (₹)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                          {amazonUnifiedSummary.transfers.map((t, i) => (
+                            <tr key={i} className="hover:bg-slate-50/50">
+                              <td className="py-2 px-3 text-slate-700 dark:text-slate-300">{t.postedDateIST}</td>
+                              <td className="py-2 px-3 font-bold text-slate-900 dark:text-white">{t.settlementId}</td>
+                              <td className="py-2 px-3 text-right font-bold text-slate-900 dark:text-white">
+                                ₹{t.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeSlot === 'amazon_mtr' && amazonMtrSummary && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                      Transaction Type Breakdown
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Parsed from MTR B2C CSV ({amazonMtrSummary.rowCount} rows)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {/* Shipment Tile */}
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                      <span className="text-[11px] font-medium text-slate-500">Shipment</span>
+                      <p className="text-xl font-bold text-indigo-600 mt-1">
+                        {amazonMtrSummary.typeCounts['Shipment'] || 0}
+                      </p>
+                      <span className="text-[10px] text-slate-400 mt-1">
+                        ₹{amazonMtrSummary.shipmentInvoiceTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    {/* Cancel Tile */}
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                      <span className="text-[11px] font-medium text-slate-500">Cancel</span>
+                      <p className="text-xl font-bold text-amber-600 mt-1">
+                        {amazonMtrSummary.typeCounts['Cancel'] || 0}
+                      </p>
+                      <span className="text-[10px] text-slate-400 mt-1">Zero tax / non-shipped</span>
+                    </div>
+
+                    {/* Refund Tile */}
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                      <span className="text-[11px] font-medium text-slate-500">Refund</span>
+                      <p className="text-xl font-bold text-rose-600 mt-1">
+                        {amazonMtrSummary.typeCounts['Refund'] || 0}
+                      </p>
+                      <span className="text-[10px] text-slate-400 mt-1">Credit notes</span>
+                    </div>
+
+                    {/* FreeReplacement Tile (its own tile) */}
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                      <span className="text-[11px] font-medium text-slate-500">FreeReplacement</span>
+                      <p className="text-xl font-bold text-emerald-600 mt-1">
+                        {amazonMtrSummary.typeCounts['FreeReplacement'] || 0}
+                      </p>
+                      <span className="text-[10px] text-slate-400 mt-1">Replacement orders</span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {activeSlot === 'bank_statement' && stagedBankReport && (
                 <div className="space-y-3">
@@ -1444,6 +2066,8 @@ export const UploadCentreScreen: React.FC = () => {
                     setSaveProgress(null);
                     setCurrentUploadId(null);
                     setStagedBankReport(null);
+                    setStagedAmazonUnified(null);
+                    setStagedAmazonMtr(null);
                   }}
                   className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
                 >

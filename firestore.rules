@@ -202,6 +202,36 @@ service cloud.firestore {
       allow create, update: if isAdmin();
       allow delete: if false;
     }
+
+    // Amazon Transactions (Stage 3b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /az_transactions/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Amazon MTR B2C Rows (Stage 3b)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /az_mtr_rows/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Amazon Uploads audit log (Stage 3b)
+    // Read: Allowed users
+    // Create: Admin only (create-only)
+    // Update, Delete: denied
+    match /az_uploads/{docId} {
+      allow read: if isAllowedUser();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
   }
 }
 

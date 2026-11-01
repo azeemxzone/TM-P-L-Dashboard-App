@@ -138,3 +138,59 @@ export function orderMonthByOrderId(mtrRows: AmazonMtrRow[]): Map<string, string
 
   return map;
 }
+
+export interface AmazonMtrSummary {
+  rowCount: number;
+  typeCounts: Record<string, number>;
+  shipmentInvoiceTotal: number;
+  shipmentTaxTotal: number;
+  refundInvoiceTotal: number;
+  refundTaxTotal: number;
+  distinctOrderCount: number;
+}
+
+/**
+ * Summarises parsed Amazon MTR B2C rows:
+ * - Transaction type counts (Shipment, Cancel, Refund, FreeReplacement)
+ * - Shipment invoice total & tax total
+ * - Refund invoice total & tax total
+ * - Distinct order count
+ */
+export function summariseMtr(rows: AmazonMtrRow[]): AmazonMtrSummary {
+  const typeCounts: Record<string, number> = {
+    Shipment: 0,
+    Cancel: 0,
+    Refund: 0,
+    FreeReplacement: 0,
+  };
+  let shipmentInvoiceTotal = 0;
+  let shipmentTaxTotal = 0;
+  let refundInvoiceTotal = 0;
+  let refundTaxTotal = 0;
+  const orderIds = new Set<string>();
+
+  for (const r of rows) {
+    const t = r.transactionType || 'Unknown';
+    typeCounts[t] = (typeCounts[t] || 0) + 1;
+    if (r.orderId && r.orderId.trim()) {
+      orderIds.add(r.orderId.trim());
+    }
+    if (r.transactionType === 'Shipment') {
+      shipmentInvoiceTotal += r.invoiceAmount;
+      shipmentTaxTotal += r.totalTaxAmount;
+    } else if (r.transactionType === 'Refund') {
+      refundInvoiceTotal += r.invoiceAmount;
+      refundTaxTotal += r.totalTaxAmount;
+    }
+  }
+
+  return {
+    rowCount: rows.length,
+    typeCounts,
+    shipmentInvoiceTotal: Math.round(shipmentInvoiceTotal * 100) / 100,
+    shipmentTaxTotal: Math.round(shipmentTaxTotal * 100) / 100,
+    refundInvoiceTotal: Math.round(refundInvoiceTotal * 100) / 100,
+    refundTaxTotal: Math.round(refundTaxTotal * 100) / 100,
+    distinctOrderCount: orderIds.size,
+  };
+}

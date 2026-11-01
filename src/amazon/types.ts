@@ -137,3 +137,29 @@ export interface AmazonTransferMatchResult {
   unmatchedTransfers: AmazonUnifiedRow[];
   unmatchedCredits: AmazonBankCredit[];
 }
+
+export type AmazonSlotType = 'amazon_unified' | 'amazon_mtr';
+
+export interface AzUploadRecord {
+  id?: string;
+  uploadId?: string;
+  slot: AmazonSlotType;
+  period: string; // e.g. "2026-09"
+  originalFileName: string;
+  sha256: string;
+  user: string;
+  status: 'complete' | 'partial' | string;
+  counts: {
+    total: number;
+    valid?: number;
+    countsByType?: Record<string, number>;
+    countsByStatus?: Record<string, number>;
+    transfersCount?: number;
+    unmappedCount?: number;
+    storedCounts?: Record<string, number>;
+  };
+  date: string; // YYYY-MM-DD
+  uploadedAt: string; // ISO timestamp
+  rowCount?: number;
+  uploadedBy?: string;
+}

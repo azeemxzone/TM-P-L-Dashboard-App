@@ -4,3 +4,4 @@ export * from './unifiedParser';
 export * from './mtrParser';
 export * from './orderView';
 export * from './reconciliation';
+export * from './storage';

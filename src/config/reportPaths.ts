@@ -9,6 +9,10 @@ export const REPORT_PATHS = {
     returns: 'Flipkart Seller Hub > Reports > Fulfilment Reports > Returns',
   },
   bankStatement: 'Bank NetBanking / Corporate Portal > Statements > Account Statement (XLSX / CSV)',
-  amazon: 'Amazon Seller Central > Reports > Payments & Fulfilment Reports',
+  amazon: {
+    unified: 'Amazon Seller Central > Payments > Date Range Reports > Unified Transaction (CSV) [TO CONFIRM]',
+    mtr: 'Amazon Seller Central > Reports > Tax Document Library > Merchant Tax Report B2C (CSV) [TO CONFIRM]',
+    gstr1: 'Amazon Seller Central > Reports > Tax Document Library > GSTR-1 (XLSX) [TO CONFIRM]',
+  },
   meesho: 'Meesho Supplier Panel > Payments & Orders',
 };
