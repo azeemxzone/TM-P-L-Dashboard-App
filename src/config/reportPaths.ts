@@ -10,9 +10,9 @@ export const REPORT_PATHS = {
   },
   bankStatement: 'Bank NetBanking / Corporate Portal > Statements > Account Statement (XLSX / CSV)',
   amazon: {
-    unified: 'Amazon Seller Central > Payments > Date Range Reports > Unified Transaction (CSV) [TO CONFIRM]',
-    mtr: 'Amazon Seller Central > Reports > Tax Document Library > Merchant Tax Report B2C (CSV) [TO CONFIRM]',
-    gstr1: 'Amazon Seller Central > Reports > Tax Document Library > GSTR-1 (XLSX) [TO CONFIRM]',
+    unified: 'Amazon Seller Central > Finance > Finance Reports > Payment Reports > All (Unified Reports)',
+    mtr: 'Amazon Seller Central > Finance > Manage Taxes > GST Reporting > GST Monthly Reports',
+    gstr1: 'Amazon Seller Central > Finance > Manage Taxes > GST Reporting > GST Monthly Reports',
   },
   meesho: 'Meesho Supplier Panel > Payments & Orders',
 };

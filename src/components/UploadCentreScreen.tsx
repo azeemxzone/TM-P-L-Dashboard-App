@@ -78,6 +78,7 @@ import {
   commitAmazonImport,
   verifyAmazonSlotUpload,
   VerificationDiffReport,
+  clearAmazonTrackingSessionCache,
 } from '../amazon';
 
 export type AppUploadSlot = FlipkartSlotType | AmazonSlotType;
@@ -774,6 +775,7 @@ export const UploadCentreScreen: React.FC = () => {
         setStagedAmazonUnified(null);
         setStagedAmazonMtr(null);
         setMismatchReport(null);
+        clearAmazonTrackingSessionCache(selectedMonth);
 
         const primaryCol = activeSlot === 'amazon_unified' ? 'az_transactions' : 'az_mtr_rows';
         const stored = res.collectionCounts[primaryCol]?.stored ?? res.totalRecords;
