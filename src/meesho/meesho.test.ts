@@ -115,10 +115,14 @@ describe('STAGE 4a: Meesho Parsers, Classification, Batches & Reconciliation', (
       expect(detectMeeshoReport(taxWb)).toBe('taxInvoice');
 
       const tcsSalesPath = findMeeshoSampleFile('tcs_sales');
-      expect(detectMeeshoReport(fs.readFileSync(tcsSalesPath, 'utf8'))).toBe('tcsSales');
+      const tcsSalesWb = XLSX.readFile(tcsSalesPath);
+      expect(detectMeeshoReport(tcsSalesWb)).toBe('tcsSales');
+      expect(detectMeeshoReport(fs.readFileSync(tcsSalesPath))).toBe('tcsSales');
 
       const tcsReturnPath = findMeeshoSampleFile('tcs_sales_return');
-      expect(detectMeeshoReport(fs.readFileSync(tcsReturnPath, 'utf8'))).toBe('tcsSalesReturn');
+      const tcsReturnWb = XLSX.readFile(tcsReturnPath);
+      expect(detectMeeshoReport(tcsReturnWb)).toBe('tcsSalesReturn');
+      expect(detectMeeshoReport(fs.readFileSync(tcsReturnPath))).toBe('tcsSalesReturn');
     });
 
     it('returns "unknown" for Flipkart or Amazon files', () => {

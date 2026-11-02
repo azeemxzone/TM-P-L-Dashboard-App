@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { MeeshoReportType } from './types';
+import { fixSheetRef, fixWorkbookRefs } from './sheetUtils';
 
 /**
  * Normalizes text for keyword search (lowercase, removes whitespace/underscores/hyphens).
@@ -59,6 +60,9 @@ export function detectMeeshoReport(
 function detectFromWorkbook(wb: XLSX.WorkBook): MeeshoReportType {
   if (!wb.SheetNames || wb.SheetNames.length === 0) return 'unknown';
 
+  // Recompute !ref across all sheets to prevent truncated ranges
+  fixWorkbookRefs(wb);
+
   const sheetNamesNorm = wb.SheetNames.map(normText);
 
   // 1. payment: workbook with sheets "Order Payments" and "Ads Cost"
@@ -73,18 +77,37 @@ function detectFromWorkbook(wb: XLSX.WorkBook): MeeshoReportType {
   if (invoiceInfoSheet) {
     const sheet = wb.Sheets[invoiceInfoSheet];
     if (sheet) {
+      fixSheetRef(sheet);
       const csvSample = XLSX.utils.sheet_to_csv(sheet);
       const csvNorm = normText(csvSample);
-      if (csvNorm.includes('suborderno')) {
+      if (csvNorm.includes('suborderno') || csvNorm.includes('subordernum')) {
         return 'taxInvoice';
       }
     }
   }
 
-  // 3. Check first sheet content if workbook contains CSV-like data
-  const firstSheet = wb.Sheets[wb.SheetNames[0]];
-  if (firstSheet) {
-    const csvSample = XLSX.utils.sheet_to_csv(firstSheet);
+  // 3. Check every sheet for TCS Sales / TCS Sales Return
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) continue;
+    fixSheetRef(sheet);
+
+    // Check header row (row 0 or first non-empty row)
+    const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+    if (rows && rows.length > 0) {
+      for (let r = 0; r < Math.min(rows.length, 5); r++) {
+        const rowText = (rows[r] || []).map((c) => String(c || '').trim()).join(' ');
+        const rowNorm = normText(rowText);
+        if (rowNorm.includes('subordernum') && rowNorm.includes('ecotcsgstin')) {
+          if (rowNorm.includes('cancelreturndate')) {
+            return 'tcsSalesReturn';
+          }
+          return 'tcsSales';
+        }
+      }
+    }
+
+    const csvSample = XLSX.utils.sheet_to_csv(sheet);
     const det = detectFromStringContent(csvSample);
     if (det !== 'unknown') return det;
   }

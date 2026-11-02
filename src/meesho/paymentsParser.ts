@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { parseMeeshoDate } from './dateUtils';
+import { fixWorkbookRefs } from './sheetUtils';
 import {
   MeeshoPaymentRow,
   MeeshoAdCostRow,
@@ -25,6 +26,20 @@ function cleanText(val: any): string {
 }
 
 /**
+ * Extracts letter code as the leading token of the cell:
+ * the text before the first space or "=" (trimmed).
+ * e.g. "Q = - 1% of..." -> "Q", "T = - X%..." -> "T", "AD" -> "AD".
+ * Plain formulas like "(B + C + ...)" with no letter return null.
+ */
+function extractLetterCode(cellVal: any): string | null {
+  if (cellVal === undefined || cellVal === null) return null;
+  const s = String(cellVal).trim();
+  if (!s) return null;
+  const leading = s.split(/[\s=]/)[0].trim().toUpperCase();
+  return /^[A-Z]{1,3}$/.test(leading) ? leading : null;
+}
+
+/**
  * Parses Meesho Payment Workbook (.xlsx) with sheets:
  * 1. "Order Payments"
  * 2. "Ads Cost"
@@ -40,6 +55,7 @@ export function parseMeeshoPayments(
   } else {
     wb = XLSX.read(fileOrWb, { type: typeof fileOrWb === 'string' ? 'string' : 'buffer' });
   }
+  fixWorkbookRefs(wb);
 
   const payments = parseOrderPaymentsSheet(wb);
   const ads = parseAdsCostSheet(wb);
@@ -68,13 +84,13 @@ function parseOrderPaymentsSheet(wb: XLSX.WorkBook): MeeshoPaymentRow[] {
   // Row 2 (index 2) is letter codes (e.g. B, C, G, H, I, Q, T, etc.)
   // Data starts at row 4 (index 3)
   const fieldRow = rows[1] ? rows[1].map((c) => String(c || '').trim()) : [];
-  const letterRow = rows[2] ? rows[2].map((c) => String(c || '').trim().toUpperCase()) : [];
+  const letterRow = rows[2] ? rows[2].map((c) => String(c || '').trim()) : [];
 
   // Map column index to letter code
   const letterCodeByCol = new Map<number, string>();
   for (let c = 0; c < letterRow.length; c++) {
-    const code = letterRow[c];
-    if (code && /^[A-Z]{1,3}$/.test(code)) {
+    const code = extractLetterCode(letterRow[c]);
+    if (code) {
       letterCodeByCol.set(c, code);
     }
   }
