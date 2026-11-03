@@ -14,5 +14,13 @@ export const REPORT_PATHS = {
     mtr: 'Amazon Seller Central > Finance > Manage Taxes > GST Reporting > GST Monthly Reports',
     gstr1: 'Amazon Seller Central > Finance > Manage Taxes > GST Reporting > GST Monthly Reports',
   },
-  meesho: 'Meesho Supplier Panel > Payments & Orders',
+  meesho: {
+    orders: 'Meesho Supplier Panel > Orders > Manage Orders > Download Orders Data',
+    returnsDelivered: 'Meesho Supplier Panel > Returns > Return Tracking > Delivered > Download Table Data',
+    returnsInTransit: 'Meesho Supplier Panel > Returns > Return Tracking > In transit > Download Table Data',
+    payments: 'Meesho Supplier Panel > Payments > Download > Payments to Date',
+    taxInvoice: 'Meesho Supplier Panel > GST > Tax invoice details',
+    tcsSales: 'Meesho Supplier Panel > GST > TCS sales',
+    tcsSalesReturn: 'Meesho Supplier Panel > GST > TCS sales return',
+  },
 };

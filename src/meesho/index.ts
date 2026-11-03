@@ -7,3 +7,4 @@ export * from './inTransitParser';
 export * from './paymentsParser';
 export * from './batches';
 export * from './sheetUtils';
+export * from './storage';

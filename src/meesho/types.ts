@@ -141,3 +141,59 @@ export interface MeeshoBankReconciliationResult {
   unmatchedBatches: MeeshoPaymentBatch[];
   unmatchedCredits: MeeshoBankCredit[];
 }
+
+export type MeeshoSlotType =
+  | 'meesho_orders'
+  | 'meesho_returns_completed'
+  | 'meesho_returns_in_transit'
+  | 'meesho_payments';
+
+export interface MsUploadRecord {
+  id?: string;
+  uploadId?: string;
+  slot: MeeshoSlotType;
+  period: string; // e.g. "2026-09"
+  originalFileName: string;
+  sha256: string;
+  user: string;
+  status: 'complete' | 'partial' | string;
+  counts: {
+    total: number;
+    valid?: number;
+    paymentsCount?: number;
+    adsCount?: number;
+    batchesCount?: number;
+    rtoCount?: number;
+    customerCount?: number;
+    claimsCount?: number;
+    storedCounts?: Record<string, number>;
+    [key: string]: any;
+  };
+  date: string; // YYYY-MM-DD
+  uploadedAt: string; // ISO timestamp
+  expectedDocIds?: string[];
+  [key: string]: any;
+}
+
+export interface MeeshoMismatchItem {
+  type: 'missing_in_firestore' | 'differing_upload_id' | 'duplicate_expected_id';
+  id: string;
+  transactionType?: string;
+  orderId?: string;
+  sku?: string;
+  invoiceNumber?: string;
+  creditNoteNo?: string;
+  lastUploadId?: string;
+  expectedUploadId?: string;
+  reason: string;
+}
+
+export interface MeeshoVerificationDiffReport {
+  isMatch: boolean;
+  totalExpected: number;
+  totalFound: number;
+  missingInFirestoreCount: number;
+  differingUploadIdCount: number;
+  duplicateExpectedIdCount: number;
+  items: MeeshoMismatchItem[];
+}

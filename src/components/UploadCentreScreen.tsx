@@ -80,8 +80,31 @@ import {
   VerificationDiffReport,
   clearAmazonTrackingSessionCache,
 } from '../amazon';
+import {
+  detectMeeshoReport,
+  parseMeeshoOrders,
+  parseMeeshoReturns,
+  parseMeeshoInTransitReturns,
+  parseMeeshoPayments,
+  groupMeeshoBatches,
+  getMeeshoReturnsDateRange,
+  MeeshoSlotType,
+  MsUploadRecord,
+  MeeshoOrderRow,
+  MeeshoReturnRow,
+  MeeshoInTransitReturnRow,
+  MeeshoPaymentRow,
+  MeeshoPaymentsResult,
+  validateMeeshoOrdersPeriod,
+  validateMeeshoPaymentsPeriod,
+  validateMeeshoSlotMatch,
+  isDuplicateMsUpload,
+  commitMeeshoImport,
+  verifyMeeshoSlotUpload,
+  MeeshoVerificationDiffReport,
+} from '../meesho';
 
-export type AppUploadSlot = FlipkartSlotType | AmazonSlotType;
+export type AppUploadSlot = FlipkartSlotType | AmazonSlotType | MeeshoSlotType;
 
 interface FYMonth {
   key: string; // "2026-04"
@@ -121,10 +144,11 @@ export const UploadCentreScreen: React.FC = () => {
   // Firestore real-time data
   const [uploads, setUploads] = useState<FkUploadRecord[]>([]);
   const [azUploads, setAzUploads] = useState<AzUploadRecord[]>([]);
+  const [msUploads, setMsUploads] = useState<MsUploadRecord[]>([]);
   const [aliases, setAliases] = useState<Map<string, string>>(new Map());
   const [masterCodes, setMasterCodes] = useState<string[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(true);
-  const [mismatchReport, setMismatchReport] = useState<VerificationDiffReport | null>(null);
+  const [mismatchReport, setMismatchReport] = useState<VerificationDiffReport | MeeshoVerificationDiffReport | null>(null);
 
   // Bundled aliases action
   const [bundlingLoading, setBundlingLoading] = useState(false);
@@ -144,6 +168,10 @@ export const UploadCentreScreen: React.FC = () => {
   const [stagedBankReport, setStagedBankReport] = useState<BankStatementReport | null>(null);
   const [stagedAmazonUnified, setStagedAmazonUnified] = useState<AmazonUnifiedRow[] | null>(null);
   const [stagedAmazonMtr, setStagedAmazonMtr] = useState<AmazonMtrRow[] | null>(null);
+  const [stagedMeeshoOrders, setStagedMeeshoOrders] = useState<MeeshoOrderRow[] | null>(null);
+  const [stagedMeeshoReturnsCompleted, setStagedMeeshoReturnsCompleted] = useState<MeeshoReturnRow[] | null>(null);
+  const [stagedMeeshoReturnsInTransit, setStagedMeeshoReturnsInTransit] = useState<MeeshoInTransitReturnRow[] | null>(null);
+  const [stagedMeeshoPayments, setStagedMeeshoPayments] = useState<MeeshoPaymentsResult | null>(null);
 
   // Validation results
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -181,6 +209,12 @@ export const UploadCentreScreen: React.FC = () => {
       setAzUploads(records);
     });
 
+    const unsubMsUploads = onSnapshot(collection(db, 'ms_uploads'), (snap) => {
+      const records: MsUploadRecord[] = [];
+      snap.forEach((d) => records.push({ id: d.id, ...(d.data() as MsUploadRecord) }));
+      setMsUploads(records);
+    });
+
     const unsubAliases = onSnapshot(collection(db, 'sku_aliases'), (snap) => {
       const map = new Map<string, string>();
       snap.forEach((d) => {
@@ -206,6 +240,7 @@ export const UploadCentreScreen: React.FC = () => {
     return () => {
       unsubUploads();
       unsubAzUploads();
+      unsubMsUploads();
       unsubAliases();
       unsubCostMaster();
     };
@@ -247,9 +282,32 @@ export const UploadCentreScreen: React.FC = () => {
     return map;
   }, [azUploads]);
 
+  const msUploadStatusMap = useMemo(() => {
+    const map = new Map<string, {
+      orders?: MsUploadRecord;
+      returnsCompleted?: MsUploadRecord;
+      returnsInTransit?: MsUploadRecord;
+      payments?: MsUploadRecord;
+    }>();
+    for (const u of msUploads) {
+      if (u.status && u.status !== 'complete') continue;
+      const period = u.period || '';
+      if (!map.has(period)) {
+        map.set(period, {});
+      }
+      const entry = map.get(period)!;
+      if (u.slot === 'meesho_orders') entry.orders = u;
+      if (u.slot === 'meesho_returns_completed') entry.returnsCompleted = u;
+      if (u.slot === 'meesho_returns_in_transit') entry.returnsInTransit = u;
+      if (u.slot === 'meesho_payments') entry.payments = u;
+    }
+    return map;
+  }, [msUploads]);
+
   // Current month's uploads
   const currentMonthUploads = uploadStatusMap.get(selectedMonth) || {};
   const currentMonthAzUploads = azUploadStatusMap.get(selectedMonth) || {};
+  const currentMonthMsUploads = msUploadStatusMap.get(selectedMonth) || {};
 
   // Re-validate period when selectedMonth changes
   useEffect(() => {
@@ -303,8 +361,37 @@ export const UploadCentreScreen: React.FC = () => {
       } else {
         setPeriodWarning(null);
       }
+    } else if (stagedMeeshoOrders) {
+      const pCheck = validateMeeshoOrdersPeriod(stagedMeeshoOrders, selectedMonth);
+      if (!pCheck.valid && pCheck.detectedMonth) {
+        setPeriodWarning({
+          message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+          targetMonth: pCheck.detectedMonth,
+        });
+      } else {
+        setPeriodWarning(null);
+      }
+    } else if (stagedMeeshoPayments && stagedMeeshoPayments.payments) {
+      const pCheck = validateMeeshoPaymentsPeriod(stagedMeeshoPayments.payments, selectedMonth);
+      if (!pCheck.valid && pCheck.detectedMonth) {
+        setPeriodWarning({
+          message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+          targetMonth: pCheck.detectedMonth,
+        });
+      } else {
+        setPeriodWarning(null);
+      }
     }
-  }, [selectedMonth, stagedOrders, stagedSettled, stagedBankReport, stagedAmazonUnified, stagedAmazonMtr]);
+  }, [
+    selectedMonth,
+    stagedOrders,
+    stagedSettled,
+    stagedBankReport,
+    stagedAmazonUnified,
+    stagedAmazonMtr,
+    stagedMeeshoOrders,
+    stagedMeeshoPayments,
+  ]);
 
   // Extract all seller SKUs from staged data to check unmapped
   const stagedSellerSkus = useMemo(() => {
@@ -313,8 +400,22 @@ export const UploadCentreScreen: React.FC = () => {
     if (stagedSettled) return stagedSettled.orders.map((s: FlipkartSettledOrderRow) => s.sellerSku);
     if (stagedAmazonUnified) return stagedAmazonUnified.map((u) => u.sku).filter(Boolean);
     if (stagedAmazonMtr) return stagedAmazonMtr.map((m) => m.sku).filter(Boolean);
+    if (stagedMeeshoOrders) return stagedMeeshoOrders.map((o) => o.sku).filter(Boolean);
+    if (stagedMeeshoReturnsCompleted) return stagedMeeshoReturnsCompleted.map((r) => r.sku).filter(Boolean);
+    if (stagedMeeshoReturnsInTransit) return stagedMeeshoReturnsInTransit.map((r) => r.sku).filter(Boolean);
+    if (stagedMeeshoPayments) return stagedMeeshoPayments.payments.map((p) => p.supplierSku).filter(Boolean);
     return [];
-  }, [stagedOrders, stagedReturns, stagedSettled, stagedAmazonUnified, stagedAmazonMtr]);
+  }, [
+    stagedOrders,
+    stagedReturns,
+    stagedSettled,
+    stagedAmazonUnified,
+    stagedAmazonMtr,
+    stagedMeeshoOrders,
+    stagedMeeshoReturnsCompleted,
+    stagedMeeshoReturnsInTransit,
+    stagedMeeshoPayments,
+  ]);
 
   // Unmapped SKUs
   const unmappedList = useMemo(() => {
@@ -331,6 +432,89 @@ export const UploadCentreScreen: React.FC = () => {
     if (!stagedAmazonMtr) return null;
     return summariseMtr(stagedAmazonMtr);
   }, [stagedAmazonMtr]);
+
+  // Summaries for Staged Meesho Reports
+  const meeshoOrdersSummary = useMemo(() => {
+    if (!stagedMeeshoOrders) return null;
+    const statusCounts: Record<string, number> = {};
+    let minDate = '';
+    let maxDate = '';
+    for (const row of stagedMeeshoOrders) {
+      statusCounts[row.status] = (statusCounts[row.status] || 0) + 1;
+      if (row.orderDate) {
+        if (!minDate || row.orderDate < minDate) minDate = row.orderDate;
+        if (!maxDate || row.orderDate > maxDate) maxDate = row.orderDate;
+      }
+    }
+    return {
+      rowCount: stagedMeeshoOrders.length,
+      statusCounts,
+      dateRange: minDate && maxDate ? `${minDate} to ${maxDate}` : '—',
+    };
+  }, [stagedMeeshoOrders]);
+
+  const meeshoReturnsCompletedSummary = useMemo(() => {
+    if (!stagedMeeshoReturnsCompleted) return null;
+    const dateRange = getMeeshoReturnsDateRange(stagedMeeshoReturnsCompleted);
+    let rtoCount = 0;
+    let customerCount = 0;
+    for (const row of stagedMeeshoReturnsCompleted) {
+      if (row.typeOfReturn === 'courier_return') rtoCount++;
+      else if (row.typeOfReturn === 'customer_return') customerCount++;
+    }
+    return {
+      rowCount: stagedMeeshoReturnsCompleted.length,
+      rtoCount,
+      customerCount,
+      dateRange: dateRange ? `${dateRange.minDate} to ${dateRange.maxDate}` : '—',
+    };
+  }, [stagedMeeshoReturnsCompleted]);
+
+  const meeshoReturnsInTransitSummary = useMemo(() => {
+    if (!stagedMeeshoReturnsInTransit) return null;
+    const dateRange = getMeeshoReturnsDateRange(stagedMeeshoReturnsInTransit);
+    let rtoCount = 0;
+    let customerCount = 0;
+    for (const row of stagedMeeshoReturnsInTransit) {
+      if (row.typeOfReturn === 'courier_return') rtoCount++;
+      else if (row.typeOfReturn === 'customer_return') customerCount++;
+    }
+    return {
+      rowCount: stagedMeeshoReturnsInTransit.length,
+      rtoCount,
+      customerCount,
+      dateRange: dateRange ? `${dateRange.minDate} to ${dateRange.maxDate}` : '—',
+    };
+  }, [stagedMeeshoReturnsInTransit]);
+
+  const meeshoPaymentsSummary = useMemo(() => {
+    if (!stagedMeeshoPayments) return null;
+    const { payments, ads, batches } = stagedMeeshoPayments;
+    let totalSettlement = 0;
+    let claimsCount = 0;
+    let minPaymentDate = '';
+    let maxPaymentDate = '';
+    for (const p of payments) {
+      totalSettlement += p.finalSettlement || 0;
+      if (p.amounts['Y'] || p.claimsReason) claimsCount++;
+      if (p.paymentDate) {
+        if (!minPaymentDate || p.paymentDate < minPaymentDate) minPaymentDate = p.paymentDate;
+        if (!maxPaymentDate || p.paymentDate > maxPaymentDate) maxPaymentDate = p.paymentDate;
+      }
+    }
+    const totalAds = ads.reduce((sum, a) => sum + (a.totalAdsCost || 0), 0);
+    const expectedBank = batches.reduce((sum, b) => sum + (b.expectedBank || 0), 0);
+    return {
+      orderRowsCount: payments.length,
+      batchesCount: batches.length,
+      totalSettlement: Math.round(totalSettlement * 100) / 100,
+      totalAds: Math.round(totalAds * 100) / 100,
+      expectedBank: Math.round(expectedBank * 100) / 100,
+      claimsCount,
+      paymentDateRange: minPaymentDate && maxPaymentDate ? `${minPaymentDate} to ${maxPaymentDate}` : '—',
+      batches,
+    };
+  }, [stagedMeeshoPayments]);
 
   // Handle Bundled Aliases Load
   const handleLoadBundledAliases = async () => {
@@ -368,6 +552,12 @@ export const UploadCentreScreen: React.FC = () => {
           setValidationError(`Refused: Byte-identical Amazon file already uploaded and completed (${file.name}).`);
           return;
         }
+      } else if (targetSlot.startsWith('meesho_')) {
+        const isDup = isDuplicateMsUpload(msUploads, sha256);
+        if (isDup) {
+          setValidationError(`Refused: Byte-identical Meesho file already uploaded and completed (${file.name}).`);
+          return;
+        }
       } else {
         const dupCheck = isDuplicateUpload(sha256, uploads);
         if (dupCheck.isDuplicate) {
@@ -395,13 +585,103 @@ export const UploadCentreScreen: React.FC = () => {
         azDetected = detectAmazonReport(wb);
       }
 
+      // Detect Meesho report
+      let msDetected = detectMeeshoReport(rawText);
+      if (msDetected === 'unknown' && wb) {
+        msDetected = detectMeeshoReport(wb);
+      }
+
       // Detect Bank Statement
       const isBank = wb ? detectBankStatement(wb) : false;
 
       // Detect Flipkart Report
       const fkDetected = wb ? detectFlipkartReport(wb) : 'unknown';
 
-      // 1. Amazon Slots
+      // 1. Meesho Slots
+      if (targetSlot.startsWith('meesho_')) {
+        const slotCheck = validateMeeshoSlotMatch(targetSlot as MeeshoSlotType, msDetected);
+        if (!slotCheck.valid) {
+          if (azDetected !== 'unknown') {
+            setValidationError(`Expected Meesho report, but detected Amazon ${azDetected} report.`);
+          } else if (fkDetected !== 'unknown') {
+            setValidationError(`Expected Meesho report, but detected Flipkart ${fkDetected} report.`);
+          } else if (isBank) {
+            setValidationError('Expected Meesho report, but detected Bank Statement.');
+          } else {
+            setValidationError(slotCheck.message || 'Could not identify file as the expected Meesho report.');
+          }
+          return;
+        }
+
+        setStagedDetectedType(msDetected);
+        setStagedAmazonUnified(null);
+        setStagedAmazonMtr(null);
+        setStagedOrders(null);
+        setStagedReturns(null);
+        setStagedSettled(null);
+        setStagedBankReport(null);
+
+        if (targetSlot === 'meesho_orders') {
+          const rows = parseMeeshoOrders(rawText);
+          setStagedMeeshoOrders(rows);
+          setStagedMeeshoReturnsCompleted(null);
+          setStagedMeeshoReturnsInTransit(null);
+          setStagedMeeshoPayments(null);
+
+          const pCheck = validateMeeshoOrdersPeriod(rows, selectedMonth);
+          if (!pCheck.valid && pCheck.detectedMonth) {
+            setPeriodWarning({
+              message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+              targetMonth: pCheck.detectedMonth,
+            });
+          }
+          return;
+        }
+
+        if (targetSlot === 'meesho_returns_completed') {
+          const rows = parseMeeshoReturns(rawText);
+          setStagedMeeshoReturnsCompleted(rows);
+          setStagedMeeshoOrders(null);
+          setStagedMeeshoReturnsInTransit(null);
+          setStagedMeeshoPayments(null);
+          return;
+        }
+
+        if (targetSlot === 'meesho_returns_in_transit') {
+          const rows = parseMeeshoInTransitReturns(rawText);
+          setStagedMeeshoReturnsInTransit(rows);
+          setStagedMeeshoOrders(null);
+          setStagedMeeshoReturnsCompleted(null);
+          setStagedMeeshoPayments(null);
+          return;
+        }
+
+        if (targetSlot === 'meesho_payments') {
+          const parsed = parseMeeshoPayments(wb || buffer);
+          setStagedMeeshoPayments(parsed);
+          setStagedMeeshoOrders(null);
+          setStagedMeeshoReturnsCompleted(null);
+          setStagedMeeshoReturnsInTransit(null);
+
+          const pCheck = validateMeeshoPaymentsPeriod(parsed.payments, selectedMonth);
+          if (!pCheck.valid && pCheck.detectedMonth) {
+            setPeriodWarning({
+              message: pCheck.message || `This file covers ${pCheck.detectedMonth}, you selected ${selectedMonth}`,
+              targetMonth: pCheck.detectedMonth,
+            });
+          }
+          return;
+        }
+      }
+
+      // If targetSlot is NOT Meesho, but a Meesho report was dropped:
+      if (msDetected !== 'unknown') {
+        const slotName = targetSlot === 'bank_statement' ? 'Bank Statement' : targetSlot.startsWith('amazon_') ? 'Amazon' : 'Flipkart';
+        setValidationError(`Expected ${slotName} report, but detected Meesho ${msDetected} report.`);
+        return;
+      }
+
+      // 2. Amazon Slots
       if (targetSlot === 'amazon_unified') {
         if (azDetected !== 'unified') {
           if (azDetected === 'mtr') {
@@ -426,6 +706,10 @@ export const UploadCentreScreen: React.FC = () => {
         setStagedReturns(null);
         setStagedSettled(null);
         setStagedBankReport(null);
+        setStagedMeeshoOrders(null);
+        setStagedMeeshoReturnsCompleted(null);
+        setStagedMeeshoReturnsInTransit(null);
+        setStagedMeeshoPayments(null);
 
         const pCheck = validateAmazonUnifiedPeriod(rows, selectedMonth);
         if (!pCheck.valid && pCheck.detectedMonth) {
@@ -461,6 +745,10 @@ export const UploadCentreScreen: React.FC = () => {
         setStagedReturns(null);
         setStagedSettled(null);
         setStagedBankReport(null);
+        setStagedMeeshoOrders(null);
+        setStagedMeeshoReturnsCompleted(null);
+        setStagedMeeshoReturnsInTransit(null);
+        setStagedMeeshoPayments(null);
 
         const pCheck = validateAmazonMtrPeriod(rows, selectedMonth);
         if (!pCheck.valid && pCheck.detectedMonth) {
@@ -641,6 +929,41 @@ export const UploadCentreScreen: React.FC = () => {
       const stored = upload.counts?.storedCounts?.['az_mtr_rows'] ?? upload.counts?.total ?? 0;
       return { stored, expected: upload.counts?.total ?? stored };
     }
+    if (slotType === 'meesho_orders') {
+      const upload = currentMonthMsUploads.orders;
+      if (!upload) return null;
+      const verified = verifiedSlotCounts[`${selectedMonth}_meesho_orders`];
+      if (verified) return { stored: verified.stored, expected: verified.expected };
+      const stored = upload.counts?.storedCounts?.['ms_orders'] ?? upload.counts?.total ?? 0;
+      return { stored, expected: upload.counts?.total ?? stored };
+    }
+    if (slotType === 'meesho_returns_completed') {
+      const upload = currentMonthMsUploads.returnsCompleted;
+      if (!upload) return null;
+      const verified = verifiedSlotCounts[`${selectedMonth}_meesho_returns_completed`];
+      if (verified) return { stored: verified.stored, expected: verified.expected };
+      const stored = upload.counts?.storedCounts?.['ms_returns_completed'] ?? upload.counts?.total ?? 0;
+      return { stored, expected: upload.counts?.total ?? stored };
+    }
+    if (slotType === 'meesho_returns_in_transit') {
+      const upload = currentMonthMsUploads.returnsInTransit;
+      if (!upload) return null;
+      const verified = verifiedSlotCounts[`${selectedMonth}_meesho_returns_in_transit`];
+      if (verified) return { stored: verified.stored, expected: verified.expected };
+      const stored = upload.counts?.storedCounts?.['ms_returns_in_transit'] ?? upload.counts?.total ?? 0;
+      return { stored, expected: upload.counts?.total ?? stored };
+    }
+    if (slotType === 'meesho_payments') {
+      const upload = currentMonthMsUploads.payments;
+      if (!upload) return null;
+      const verified = verifiedSlotCounts[`${selectedMonth}_meesho_payments`];
+      if (verified) return { stored: verified.stored, expected: verified.expected };
+      const pCount = upload.counts?.storedCounts?.['ms_payments'] ?? upload.counts?.paymentsCount ?? 0;
+      const aCount = upload.counts?.storedCounts?.['ms_ads'] ?? upload.counts?.adsCount ?? 0;
+      const bCount = upload.counts?.storedCounts?.['ms_batches'] ?? upload.counts?.batchesCount ?? 0;
+      const stored = pCount + aCount + bCount;
+      return { stored, expected: upload.counts?.total ?? stored };
+    }
     const upload = currentMonthUploads[slotType as FlipkartSlotType];
     if (!upload) return null;
     const verified = verifiedSlotCounts[`${selectedMonth}_${slotType}`];
@@ -710,6 +1033,44 @@ export const UploadCentreScreen: React.FC = () => {
         }
       }
 
+      // Verify Meesho Slots
+      if (currentMonthMsUploads.orders) {
+        checkedCount++;
+        const res = await verifyMeeshoSlotUpload(db, 'meesho_orders', currentMonthMsUploads.orders);
+        updatedCounts[`${selectedMonth}_meesho_orders`] = { stored: res.stored, expected: res.expected };
+        if (!res.isMatch) {
+          allMatched = false;
+          setMismatchReport(res.diffReport);
+        }
+      }
+      if (currentMonthMsUploads.returnsCompleted) {
+        checkedCount++;
+        const res = await verifyMeeshoSlotUpload(db, 'meesho_returns_completed', currentMonthMsUploads.returnsCompleted);
+        updatedCounts[`${selectedMonth}_meesho_returns_completed`] = { stored: res.stored, expected: res.expected };
+        if (!res.isMatch) {
+          allMatched = false;
+          setMismatchReport(res.diffReport);
+        }
+      }
+      if (currentMonthMsUploads.returnsInTransit) {
+        checkedCount++;
+        const res = await verifyMeeshoSlotUpload(db, 'meesho_returns_in_transit', currentMonthMsUploads.returnsInTransit);
+        updatedCounts[`${selectedMonth}_meesho_returns_in_transit`] = { stored: res.stored, expected: res.expected };
+        if (!res.isMatch) {
+          allMatched = false;
+          setMismatchReport(res.diffReport);
+        }
+      }
+      if (currentMonthMsUploads.payments) {
+        checkedCount++;
+        const res = await verifyMeeshoSlotUpload(db, 'meesho_payments', currentMonthMsUploads.payments);
+        updatedCounts[`${selectedMonth}_meesho_payments`] = { stored: res.stored, expected: res.expected };
+        if (!res.isMatch) {
+          allMatched = false;
+          setMismatchReport(res.diffReport);
+        }
+      }
+
       setVerifiedSlotCounts((prev) => ({ ...prev, ...updatedCounts }));
       if (checkedCount === 0) {
         setVerifyMessage(`No completed uploads found for ${selectedMonth} to verify.`);
@@ -729,6 +1090,75 @@ export const UploadCentreScreen: React.FC = () => {
   // Commit Import to Firestore with BATCH_SIZE = 400 and post-commit count verification
   const handleConfirmCommit = async () => {
     if (!activeSlot || !isAdmin || periodWarning) return;
+
+    if (activeSlot.startsWith('meesho_')) {
+      if (activeSlot === 'meesho_orders' && !stagedMeeshoOrders) return;
+      if (activeSlot === 'meesho_returns_completed' && !stagedMeeshoReturnsCompleted) return;
+      if (activeSlot === 'meesho_returns_in_transit' && !stagedMeeshoReturnsInTransit) return;
+      if (activeSlot === 'meesho_payments' && !stagedMeeshoPayments) return;
+
+      setIsSaving(true);
+      setSaveError(null);
+      setSaveProgress(`Initializing batched commit for Meesho (BATCH_SIZE = ${BATCH_SIZE})...`);
+
+      const upId = currentUploadId || `upload_${activeSlot}_${selectedMonth}_${Date.now()}`;
+      setCurrentUploadId(upId);
+
+      try {
+        const res = await commitMeeshoImport(
+          db,
+          activeSlot as MeeshoSlotType,
+          {
+            orders: stagedMeeshoOrders || undefined,
+            returnsCompleted: stagedMeeshoReturnsCompleted || undefined,
+            returnsInTransit: stagedMeeshoReturnsInTransit || undefined,
+            payments: stagedMeeshoPayments || undefined,
+          },
+          {
+            selectedMonth,
+            originalFileName: stagedFileName,
+            sha256: stagedSha256,
+            userEmail: user?.email || 'unknown',
+            existingUploadId: upId,
+          },
+          (info) => {
+            if (info.statusMessage) {
+              setSaveProgress(info.statusMessage);
+            } else {
+              setSaveProgress(
+                `Writing batch ${info.currentBatch} of ${info.totalBatches} (${info.savedCount}/${info.totalCount} documents)...`
+              );
+            }
+          }
+        );
+
+        setIsSaving(false);
+        setSaveProgress(null);
+        setCurrentUploadId(null);
+        setActiveSlot(null);
+        setStagedWorkbook(null);
+        setStagedMeeshoOrders(null);
+        setStagedMeeshoReturnsCompleted(null);
+        setStagedMeeshoReturnsInTransit(null);
+        setStagedMeeshoPayments(null);
+        setMismatchReport(null);
+
+        setVerifiedSlotCounts((prev) => ({
+          ...prev,
+          [`${selectedMonth}_${activeSlot}`]: {
+            stored: res.diffReport?.totalFound ?? res.totalRecords,
+            expected: res.totalRecords,
+          },
+        }));
+      } catch (err: any) {
+        setIsSaving(false);
+        setSaveError(err.message || 'Import failed for Meesho report.');
+        if (err.diffReport) {
+          setMismatchReport(err.diffReport);
+        }
+      }
+      return;
+    }
 
     if (activeSlot === 'amazon_unified' || activeSlot === 'amazon_mtr') {
       if (activeSlot === 'amazon_unified' && !stagedAmazonUnified) return;
@@ -992,6 +1422,9 @@ export const UploadCentreScreen: React.FC = () => {
               <span className="w-2 h-2 rounded-full bg-indigo-500" /> Amazon
             </span>
             <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-fuchsia-500" /> Meesho
+            </span>
+            <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-700" /> Pending
             </span>
           </div>
@@ -1008,6 +1441,10 @@ export const UploadCentreScreen: React.FC = () => {
             const azStatus = azUploadStatusMap.get(m.key);
             const hasUnified = Boolean(azStatus?.unified);
             const hasMtr = Boolean(azStatus?.mtr);
+            const msStatus = msUploadStatusMap.get(m.key);
+            const hasMsOrders = Boolean(msStatus?.orders);
+            const hasMsPayments = Boolean(msStatus?.payments);
+            const hasMsReturns = Boolean(msStatus?.returnsCompleted || msStatus?.returnsInTransit);
 
             return (
               <button
@@ -1025,19 +1462,19 @@ export const UploadCentreScreen: React.FC = () => {
                 <span className="text-xs font-bold">{m.label}</span>
                 <span className="text-[10px] text-slate-400 font-mono">{m.year}</span>
 
-                {/* Status dots: Flipkart (Orders, Settled, Returns) | Amazon (Unified, MTR) */}
-                <div className="flex items-center gap-1 mt-2" title="FK: Orders, Settled, Returns | AZ: Unified, MTR">
+                {/* Status dots: Flipkart | Amazon | Meesho */}
+                <div className="flex items-center gap-1 mt-2" title="FK: Orders, Settled, Returns | AZ: Unified, MTR | MS: Orders, Payments, Returns">
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${hasOrders ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'}`}
-                    title={hasOrders ? 'Orders uploaded' : 'Orders pending'}
+                    title={hasOrders ? 'FK Orders uploaded' : 'FK Orders pending'}
                   />
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${hasSettled ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'}`}
-                    title={hasSettled ? 'Settled uploaded' : 'Settled pending'}
+                    title={hasSettled ? 'FK Settled uploaded' : 'FK Settled pending'}
                   />
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${hasReturns ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'}`}
-                    title={hasReturns ? 'Returns uploaded' : 'Returns pending'}
+                    title={hasReturns ? 'FK Returns uploaded' : 'FK Returns pending'}
                   />
                   <span className="w-px h-2 bg-slate-300 dark:bg-slate-700 mx-0.5" />
                   <span
@@ -1047,6 +1484,15 @@ export const UploadCentreScreen: React.FC = () => {
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${hasMtr ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-slate-700'}`}
                     title={hasMtr ? 'Amazon MTR uploaded' : 'Amazon MTR pending'}
+                  />
+                  <span className="w-px h-2 bg-slate-300 dark:bg-slate-700 mx-0.5" />
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${hasMsOrders ? 'bg-fuchsia-500' : 'bg-slate-300 dark:bg-slate-700'}`}
+                    title={hasMsOrders ? 'Meesho Orders uploaded' : 'Meesho Orders pending'}
+                  />
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${hasMsPayments ? 'bg-fuchsia-500' : 'bg-slate-300 dark:bg-slate-700'}`}
+                    title={hasMsPayments ? 'Meesho Payments uploaded' : 'Meesho Payments pending'}
                   />
                 </div>
               </button>
@@ -1471,21 +1917,6 @@ export const UploadCentreScreen: React.FC = () => {
               </div>
             </div>
 
-            {/* Meesho (Coming soon) */}
-            <div className="p-5 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-slate-700 dark:text-slate-300">Meesho</span>
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                    Coming soon
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-500">{REPORT_PATHS.meesho}</p>
-              </div>
-              <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-200/60">
-                Orders &amp; Payment files
-              </div>
-            </div>
           </div>
         </div>
 
@@ -1651,6 +2082,311 @@ export const UploadCentreScreen: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Meesho Marketplace Reports & Verified Ingestion Section */}
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Meesho Marketplace Reports &amp; Verified Settlement Ingestion
+            </h3>
+            <span className="text-[11px] text-slate-400">
+              Content-detected ingestion with verified counts &amp; SHA-256 duplicate guards
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {/* Slot 1: Orders.csv */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'meesho_orders')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'meesho_orders'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Slot 1
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Orders.csv</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    Orders CSV
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Download from: {REPORT_PATHS.meesho.orders}
+                </p>
+
+                {/* Status or Upload info */}
+                {currentMonthMsUploads.orders ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthMsUploads.orders.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthMsUploads.orders.date || currentMonthMsUploads.orders.uploadedAt?.split('T')[0] || '—'} by {currentMonthMsUploads.orders.user || '—'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {getSlotCountDisplay('meesho_orders')?.stored ?? currentMonthMsUploads.orders.counts.storedCounts?.['ms_orders'] ?? currentMonthMsUploads.orders.counts.total} of {getSlotCountDisplay('meesho_orders')?.expected ?? currentMonthMsUploads.orders.counts.total} rows
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('meesho_orders')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthMsUploads.orders ? 'Replace Orders.csv' : 'Upload Orders.csv'}
+                </button>
+              </div>
+            </div>
+
+            {/* Slot 2: Returns Delivered.csv */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'meesho_returns_completed')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'meesho_returns_completed'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Slot 2
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Returns Delivered.csv</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    Delivered CSV
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Download from: {REPORT_PATHS.meesho.returnsDelivered}
+                </p>
+
+                {/* Status or Upload info */}
+                {currentMonthMsUploads.returnsCompleted ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthMsUploads.returnsCompleted.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthMsUploads.returnsCompleted.date || currentMonthMsUploads.returnsCompleted.uploadedAt?.split('T')[0] || '—'} by {currentMonthMsUploads.returnsCompleted.user || '—'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {getSlotCountDisplay('meesho_returns_completed')?.stored ?? currentMonthMsUploads.returnsCompleted.counts.storedCounts?.['ms_returns_completed'] ?? currentMonthMsUploads.returnsCompleted.counts.total} of {getSlotCountDisplay('meesho_returns_completed')?.expected ?? currentMonthMsUploads.returnsCompleted.counts.total} rows
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('meesho_returns_completed')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthMsUploads.returnsCompleted ? 'Replace Returns Delivered.csv' : 'Upload Returns Delivered.csv'}
+                </button>
+              </div>
+            </div>
+
+            {/* Slot 3: Returns In Transit.csv */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'meesho_returns_in_transit')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'meesho_returns_in_transit'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Slot 3
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Returns In Transit.csv</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    In-Transit CSV
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Download from: {REPORT_PATHS.meesho.returnsInTransit}
+                </p>
+
+                {/* Status or Upload info */}
+                {currentMonthMsUploads.returnsInTransit ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthMsUploads.returnsInTransit.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthMsUploads.returnsInTransit.date || currentMonthMsUploads.returnsInTransit.uploadedAt?.split('T')[0] || '—'} by {currentMonthMsUploads.returnsInTransit.user || '—'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {getSlotCountDisplay('meesho_returns_in_transit')?.stored ?? currentMonthMsUploads.returnsInTransit.counts.storedCounts?.['ms_returns_in_transit'] ?? currentMonthMsUploads.returnsInTransit.counts.total} of {getSlotCountDisplay('meesho_returns_in_transit')?.expected ?? currentMonthMsUploads.returnsInTransit.counts.total} rows
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('meesho_returns_in_transit')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthMsUploads.returnsInTransit ? 'Replace Returns In Transit.csv' : 'Upload Returns In Transit.csv'}
+                </button>
+              </div>
+            </div>
+
+            {/* Slot 4: Payments to Date.xlsx */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'meesho_payments')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'meesho_payments'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Slot 4
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Payments to Date.xlsx</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    Payments Excel
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Download from: {REPORT_PATHS.meesho.payments}
+                </p>
+
+                {/* Status or Upload info */}
+                {currentMonthMsUploads.payments ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthMsUploads.payments.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthMsUploads.payments.date || currentMonthMsUploads.payments.uploadedAt?.split('T')[0] || '—'} by {currentMonthMsUploads.payments.user || '—'}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {currentMonthMsUploads.payments.counts.paymentsCount ?? 986} payments, {currentMonthMsUploads.payments.counts.adsCount ?? 96} ads, {currentMonthMsUploads.payments.counts.batchesCount ?? 17} batches
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('meesho_payments')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthMsUploads.payments ? 'Replace Payments to Date.xlsx' : 'Upload Payments to Date.xlsx'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Greyed out Meesho GST slots */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 pt-2">
+            <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Tax invoice details</span>
+                  <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Coming in the GST stage
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500">{REPORT_PATHS.meesho.taxInvoice}</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">TCS sales</span>
+                  <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Coming in the GST stage
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500">{REPORT_PATHS.meesho.tcsSales}</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800/60 bg-slate-100/50 dark:bg-slate-900/40 opacity-60 flex flex-col justify-between">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">TCS sales return</span>
+                  <span className="text-[9px] uppercase font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Coming in the GST stage
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500">{REPORT_PATHS.meesho.tcsSalesReturn}</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Staged Upload Preview Modal / Drawer */}
@@ -1681,6 +2417,10 @@ export const UploadCentreScreen: React.FC = () => {
                 setStagedBankReport(null);
                 setStagedAmazonUnified(null);
                 setStagedAmazonMtr(null);
+                setStagedMeeshoOrders(null);
+                setStagedMeeshoReturnsCompleted(null);
+                setStagedMeeshoReturnsInTransit(null);
+                setStagedMeeshoPayments(null);
                 setValidationError(null);
                 setPeriodWarning(null);
                 setSaveError(null);
@@ -1913,6 +2653,122 @@ export const UploadCentreScreen: React.FC = () => {
                     </div>
                   </>
                 )}
+
+                {activeSlot === 'meesho_orders' && meeshoOrdersSummary && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Total Order Lines</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        {meeshoOrdersSummary.rowCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Unique SKUs</span>
+                      <p className="text-lg font-bold text-indigo-600">
+                        {new Set(stagedMeeshoOrders?.map((o) => o.sku)).size}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Top Status</span>
+                      <p className="text-lg font-bold text-emerald-600 truncate">
+                        {Object.keys(meeshoOrdersSummary.statusCounts)[0] || '—'}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Order Dates Range</span>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white mt-1 truncate">
+                        {meeshoOrdersSummary.dateRange}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {activeSlot === 'meesho_returns_completed' && meeshoReturnsCompletedSummary && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Return Items</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        {meeshoReturnsCompletedSummary.rowCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Courier Returns (RTO)</span>
+                      <p className="text-lg font-bold text-indigo-600">
+                        {meeshoReturnsCompletedSummary.rtoCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Customer Returns</span>
+                      <p className="text-lg font-bold text-amber-600">
+                        {meeshoReturnsCompletedSummary.customerCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Return Created Dates</span>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white mt-1 truncate">
+                        {meeshoReturnsCompletedSummary.dateRange}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {activeSlot === 'meesho_returns_in_transit' && meeshoReturnsInTransitSummary && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">In-Transit Returns</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        {meeshoReturnsInTransitSummary.rowCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Courier In-Transit (RTO)</span>
+                      <p className="text-lg font-bold text-indigo-600">
+                        {meeshoReturnsInTransitSummary.rtoCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Customer In-Transit</span>
+                      <p className="text-lg font-bold text-amber-600">
+                        {meeshoReturnsInTransitSummary.customerCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Return Created Dates</span>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white mt-1 truncate">
+                        {meeshoReturnsInTransitSummary.dateRange}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {activeSlot === 'meesho_payments' && meeshoPaymentsSummary && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Order Rows</span>
+                      <p className="text-lg font-bold text-slate-900 dark:text-white">
+                        {meeshoPaymentsSummary.orderRowsCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Transaction Batches</span>
+                      <p className="text-lg font-bold text-indigo-600">
+                        {meeshoPaymentsSummary.batchesCount}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Final Settlement Total</span>
+                      <p className="text-lg font-bold text-emerald-600">
+                        ₹{meeshoPaymentsSummary.totalSettlement.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Expected Bank Total</span>
+                      <p className="text-lg font-bold text-fuchsia-600">
+                        ₹{meeshoPaymentsSummary.expectedBank.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
 
               {activeSlot === 'amazon_unified' && amazonUnifiedSummary && (
@@ -2063,7 +2919,92 @@ export const UploadCentreScreen: React.FC = () => {
                 </div>
               )}
 
-              {/* Unmatched SKUs Box for Flipkart report slots */}
+              {activeSlot === 'meesho_orders' && meeshoOrdersSummary && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 text-xs">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">Status Breakdown:</span>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {Object.entries(meeshoOrdersSummary.statusCounts).map(([status, count]) => (
+                        <span
+                          key={status}
+                          className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono text-[11px] text-slate-700 dark:text-slate-300"
+                        >
+                          {status}: <strong className="text-indigo-600 dark:text-indigo-400">{count}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeSlot === 'meesho_payments' && meeshoPaymentsSummary && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Total Ads Cost</span>
+                      <p className="text-base font-bold text-rose-600 mt-1">
+                        ₹{meeshoPaymentsSummary.totalAds.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Claims Rows</span>
+                      <p className="text-base font-bold text-amber-600 mt-1">
+                        {meeshoPaymentsSummary.claimsCount}
+                      </p>
+                    </div>
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Payment Date Range</span>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white mt-1 truncate">
+                        {meeshoPaymentsSummary.paymentDateRange}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Transaction Batches Table */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        Transaction Batches ({meeshoPaymentsSummary.batches.length})
+                      </span>
+                      <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        Expected Bank Total: ₹{meeshoPaymentsSummary.expectedBank.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-xl">
+                      <table className="w-full text-left text-xs font-mono">
+                        <thead className="bg-slate-50 dark:bg-slate-950 sticky top-0 border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500">
+                          <tr>
+                            <th className="py-2 px-3">Transaction ID</th>
+                            <th className="py-2 px-3">Payment Date</th>
+                            <th className="py-2 px-3 text-right">Orders Total (₹)</th>
+                            <th className="py-2 px-3 text-right">Ads Total (₹)</th>
+                            <th className="py-2 px-3 text-right">Expected Bank (₹)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                          {meeshoPaymentsSummary.batches.map((b) => (
+                            <tr key={b.transactionId} className="hover:bg-slate-50/50">
+                              <td className="py-2 px-3 font-bold text-slate-900 dark:text-white">{b.transactionId}</td>
+                              <td className="py-2 px-3 text-slate-500">{b.paymentDate}</td>
+                              <td className="py-2 px-3 text-right text-slate-900 dark:text-white">
+                                ₹{b.orderRowsTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="py-2 px-3 text-right text-rose-600">
+                                ₹{b.adsTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="py-2 px-3 text-right font-bold text-emerald-600">
+                                ₹{b.expectedBank.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Unmatched SKUs Box */}
               {activeSlot !== 'bank_statement' && (
                 <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3 bg-slate-50/50 dark:bg-slate-950/30">
                 <div className="flex items-center justify-between">
@@ -2178,6 +3119,10 @@ export const UploadCentreScreen: React.FC = () => {
                     setStagedBankReport(null);
                     setStagedAmazonUnified(null);
                     setStagedAmazonMtr(null);
+                    setStagedMeeshoOrders(null);
+                    setStagedMeeshoReturnsCompleted(null);
+                    setStagedMeeshoReturnsInTransit(null);
+                    setStagedMeeshoPayments(null);
                   }}
                   className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl cursor-pointer"
                 >
