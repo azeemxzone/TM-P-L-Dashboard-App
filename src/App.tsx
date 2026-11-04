@@ -15,6 +15,7 @@ import { AverageCostScreen } from './components/AverageCostScreen';
 import { UploadCentreScreen } from './components/UploadCentreScreen';
 import { ReconciliationScreen } from './components/ReconciliationScreen';
 import { TrackingScreen } from './components/TrackingScreen';
+import { PnLDashboardScreen } from './components/PnLDashboardScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { UsersScreen } from './components/UsersScreen';
 import {
@@ -30,9 +31,11 @@ import {
   UploadCloud,
   Scale,
   Activity,
+  PieChart,
 } from 'lucide-react';
 
 type Tab =
+  | 'pnl_dashboard'
   | 'cost_master'
   | 'opening_stock'
   | 'purchases'
@@ -47,7 +50,7 @@ type Tab =
 
 const AppContent: React.FC = () => {
   const { user, loading, isAuthorized, isAdmin, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<Tab>('cost_master');
+  const [activeTab, setActiveTab] = useState<Tab>('pnl_dashboard');
 
   if (loading) {
     return (
@@ -82,15 +85,27 @@ const AppContent: React.FC = () => {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-900 dark:text-white text-base tracking-tight">Tabbymart</span>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                  Stage 2b
+                  Stage 5
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">Inventory &amp; Marketplace Ingestion</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">P&amp;L Financial Master</p>
             </div>
           </div>
 
           {/* Navigation Tabs */}
           <nav className="hidden lg:flex items-center gap-1 bg-slate-100 dark:bg-slate-950/80 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+            <button
+              onClick={() => setActiveTab('pnl_dashboard')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'pnl_dashboard'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
+              }`}
+            >
+              <PieChart className="w-3.5 h-3.5 text-emerald-400" />
+              P&amp;L Dashboard
+            </button>
+
             <button
               onClick={() => setActiveTab('cost_master')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
@@ -240,6 +255,15 @@ const AppContent: React.FC = () => {
         {/* Mobile Navigation */}
         <div className="lg:hidden flex overflow-x-auto border-t border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-950 px-2 py-1.5 gap-1">
           <button
+            onClick={() => setActiveTab('pnl_dashboard')}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
+              activeTab === 'pnl_dashboard' ? 'bg-emerald-600 text-white' : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <PieChart className="w-3.5 h-3.5 text-emerald-400" />
+            P&amp;L
+          </button>
+          <button
             onClick={() => setActiveTab('cost_master')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
               activeTab === 'cost_master' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
@@ -327,6 +351,7 @@ const AppContent: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {activeTab === 'pnl_dashboard' && <PnLDashboardScreen />}
         {activeTab === 'cost_master' && <CostMasterScreen />}
         {activeTab === 'opening_stock' && <OpeningStockScreen />}
         {activeTab === 'purchases' && <PurchasesScreen />}
