@@ -13,10 +13,8 @@ import { OpeningStockScreen } from './components/OpeningStockScreen';
 import { PurchasesScreen } from './components/PurchasesScreen';
 import { AverageCostScreen } from './components/AverageCostScreen';
 import { UploadCentreScreen } from './components/UploadCentreScreen';
-import { FlipkartReconciliationScreen } from './components/FlipkartReconciliationScreen';
-import { FlipkartTrackingScreen } from './components/FlipkartTrackingScreen';
-import { AmazonReconciliationScreen } from './components/AmazonReconciliationScreen';
-import { AmazonTrackingScreen } from './components/AmazonTrackingScreen';
+import { ReconciliationScreen } from './components/ReconciliationScreen';
+import { TrackingScreen } from './components/TrackingScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { UsersScreen } from './components/UsersScreen';
 import {
@@ -156,49 +154,25 @@ const AppContent: React.FC = () => {
             <button
               onClick={() => setActiveTab('reconciliation')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                activeTab === 'reconciliation'
+                activeTab === 'reconciliation' || activeTab === 'amazon_reconciliation'
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
               }`}
             >
               <Scale className="w-3.5 h-3.5" />
-              FK Reconcile
-            </button>
-
-            <button
-              onClick={() => setActiveTab('amazon_reconciliation')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                activeTab === 'amazon_reconciliation'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
-              }`}
-            >
-              <Scale className="w-3.5 h-3.5 text-amber-500" />
-              AZ Reconcile
+              Reconciliation
             </button>
 
             <button
               onClick={() => setActiveTab('tracking')}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                activeTab === 'tracking'
+                activeTab === 'tracking' || activeTab === 'amazon_tracking'
                   ? 'bg-indigo-600 text-white shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
               }`}
             >
               <Activity className="w-3.5 h-3.5" />
-              FK Tracking
-            </button>
-
-            <button
-              onClick={() => setActiveTab('amazon_tracking')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                activeTab === 'amazon_tracking'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5 text-amber-500" />
-              AZ Tracking
+              Tracking
             </button>
 
             <button
@@ -313,38 +287,20 @@ const AppContent: React.FC = () => {
           <button
             onClick={() => setActiveTab('reconciliation')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
-              activeTab === 'reconciliation' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
+              activeTab === 'reconciliation' || activeTab === 'amazon_reconciliation' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
             }`}
           >
             <Scale className="w-3.5 h-3.5" />
-            FK Reconcile
-          </button>
-          <button
-            onClick={() => setActiveTab('amazon_reconciliation')}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
-              activeTab === 'amazon_reconciliation' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            <Scale className="w-3.5 h-3.5 text-amber-500" />
-            AZ Reconcile
+            Reconciliation
           </button>
           <button
             onClick={() => setActiveTab('tracking')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
-              activeTab === 'tracking' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
+              activeTab === 'tracking' || activeTab === 'amazon_tracking' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
             }`}
           >
             <Activity className="w-3.5 h-3.5" />
-            FK Tracking
-          </button>
-          <button
-            onClick={() => setActiveTab('amazon_tracking')}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
-              activeTab === 'amazon_tracking' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5 text-amber-500" />
-            AZ Tracking
+            Tracking
           </button>
           <button
             onClick={() => setActiveTab('settings')}
@@ -376,10 +332,10 @@ const AppContent: React.FC = () => {
         {activeTab === 'purchases' && <PurchasesScreen />}
         {activeTab === 'average_cost' && <AverageCostScreen />}
         {activeTab === 'upload_centre' && <UploadCentreScreen />}
-        {activeTab === 'reconciliation' && <FlipkartReconciliationScreen />}
-        {activeTab === 'amazon_reconciliation' && <AmazonReconciliationScreen />}
-        {activeTab === 'tracking' && <FlipkartTrackingScreen />}
-        {activeTab === 'amazon_tracking' && <AmazonTrackingScreen />}
+        {activeTab === 'reconciliation' && <ReconciliationScreen initialMarketplace="flipkart" />}
+        {activeTab === 'amazon_reconciliation' && <ReconciliationScreen initialMarketplace="amazon" />}
+        {activeTab === 'tracking' && <TrackingScreen initialMarketplace="flipkart" />}
+        {activeTab === 'amazon_tracking' && <TrackingScreen initialMarketplace="amazon" />}
         {activeTab === 'settings' && <SettingsScreen />}
         {activeTab === 'users' && isAdmin && <UsersScreen />}
       </main>
