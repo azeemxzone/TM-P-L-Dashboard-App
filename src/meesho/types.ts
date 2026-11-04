@@ -34,6 +34,7 @@ export interface MeeshoReturnRow {
   dispatchDate: string; // YYYY-MM-DD
   returnCreatedDate: string; // YYYY-MM-DD
   returnType: MeeshoReturnType; // "rto" | "customer"
+  typeOfReturn?: string;
   subType: string; // e.g. "forward_RTO", "FIRST_RET"
   deliveredDate: string; // YYYY-MM-DD
   courier: string;
@@ -51,6 +52,7 @@ export interface MeeshoInTransitReturnRow {
   dispatchDate: string; // YYYY-MM-DD
   returnCreatedDate: string; // YYYY-MM-DD
   returnType: MeeshoReturnType; // "rto" | "customer"
+  typeOfReturn?: string;
   subType: string;
   expectedDeliveryDate: string; // YYYY-MM-DD
   courier: string;
@@ -108,8 +110,11 @@ export interface MeeshoCompensationRow {
 export interface MeeshoPaymentsResult {
   payments: MeeshoPaymentRow[];
   ads: MeeshoAdCostRow[];
-  referrals: MeeshoReferralRow[];
-  compensations: MeeshoCompensationRow[];
+  referrals?: MeeshoReferralRow[];
+  compensations?: MeeshoCompensationRow[];
+  batches?: MeeshoPaymentBatch[];
+  referral?: MeeshoReferralRow[];
+  compensation?: MeeshoCompensationRow[];
 }
 
 export interface MeeshoPaymentBatch {
@@ -151,7 +156,8 @@ export type MeeshoSlotType =
 export interface MsUploadRecord {
   id?: string;
   uploadId?: string;
-  slot: MeeshoSlotType;
+  slot?: MeeshoSlotType;
+  slotType?: string;
   period: string; // e.g. "2026-09"
   originalFileName: string;
   sha256: string;
@@ -169,7 +175,7 @@ export interface MsUploadRecord {
     storedCounts?: Record<string, number>;
     [key: string]: any;
   };
-  date: string; // YYYY-MM-DD
+  date?: string; // YYYY-MM-DD
   uploadedAt: string; // ISO timestamp
   expectedDocIds?: string[];
   [key: string]: any;

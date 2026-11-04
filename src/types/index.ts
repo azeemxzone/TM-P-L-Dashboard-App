@@ -88,7 +88,10 @@ export interface PurchaseRow {
   landed_rate?: number;
   bill_no: string;
   supplier?: string;
+  supplier_name?: string;
+  amount?: number;
   upload_id?: string;
+  uploadId?: string;
   is_void?: boolean;
   void?: boolean;
   createdAt?: string;
@@ -120,7 +123,10 @@ export interface PurchaseItem {
   landed_rate: number;
   bill_no: string;
   supplier?: string;
+  supplier_name?: string;
+  amount?: number;
   upload_id: string;
+  uploadId?: string;
   void: boolean;
   createdAt: string;
   createdBy: string;
@@ -128,13 +134,26 @@ export interface PurchaseItem {
 
 export interface PurchaseUpload {
   id: string;
-  file_name: string;
-  uploaded_at: string;
-  user: string;
-  accepted_count: number;
-  rejected_count: number;
-  skipped_duplicates_count: number;
+  uploadId?: string;
+  slot?: string;
+  period?: string;
+  file_name?: string;
+  originalFileName?: string;
+  sha256?: string;
+  uploaded_at?: string;
+  date?: string;
+  user?: string;
+  accepted_count?: number;
+  rejected_count?: number;
+  skipped_duplicates_count?: number;
+  rowCount?: number;
   total_rows?: number;
+  validCount?: number;
+  addedCount?: number;
+  alreadyExistedCount?: number;
+  duplicateCount?: number;
+  invalidCount?: number;
+  status?: string;
 }
 
 

@@ -461,7 +461,7 @@ export function buildMeeshoImportPayloads(
     expectedCounts[collectionName] = (expectedCounts[collectionName] || 0) + 1;
   };
 
-  let countsObj: Record<string, any> = {};
+  let countsObj: MsUploadRecord['counts'] = { total: 0 };
 
   if (slot === 'meesho_orders' && data.orders) {
     const docIds = buildMsOrderDocIds(data.orders);

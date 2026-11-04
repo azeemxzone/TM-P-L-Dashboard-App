@@ -160,7 +160,7 @@ export const PurchasesScreen: React.FC = () => {
             total_rows: Number(data.total_rows ?? 0),
           });
         });
-        loaded.sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
+        loaded.sort((a, b) => (b.uploaded_at || b.date || '').localeCompare(a.uploaded_at || a.date || ''));
         setUploads(loaded);
       },
       (error) => handleFirestoreError(error, OperationType.GET, 'purchase_uploads')
@@ -868,10 +868,10 @@ export const PurchasesScreen: React.FC = () => {
                     <tr key={up.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                       <td className="px-4 py-3 font-semibold text-slate-900 dark:text-white flex items-center gap-2">
                         <FileSpreadsheet className="w-4 h-4 text-indigo-500 shrink-0" />
-                        <span className="truncate max-w-xs">{up.file_name}</span>
+                        <span className="truncate max-w-xs">{up.file_name || up.originalFileName || 'File'}</span>
                       </td>
                       <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                        {new Date(up.uploaded_at).toLocaleString()}
+                        {up.uploaded_at || up.date ? new Date(up.uploaded_at || up.date || '').toLocaleString() : '—'}
                       </td>
                       <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{up.user}</td>
                       <td className="px-4 py-3 text-right">

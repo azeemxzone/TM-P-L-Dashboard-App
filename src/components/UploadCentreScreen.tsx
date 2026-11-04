@@ -110,9 +110,23 @@ import {
   commitMeeshoImport,
   verifyMeeshoSlotUpload,
   MeeshoVerificationDiffReport,
+  MsUploadRecordWriteError,
 } from '../meesho';
+import { PurchaseItem, PurchaseUpload, PurchaseRow, CostMasterItem } from '../types';
+import { validatePurchaseRow, isDuplicatePurchase } from '../utils/costCalculator';
+import {
+  parseTableFile,
+  extractPurchaseRowsFromTable,
+  planCostMasterImport,
+} from '../utils/csvParser';
 
-export type AppUploadSlot = FlipkartSlotType | AmazonSlotType | MeeshoSlotType;
+export type AppUploadSlot =
+  | FlipkartSlotType
+  | AmazonSlotType
+  | MeeshoSlotType
+  | 'bank_statement'
+  | 'purchases'
+  | 'cost_master';
 
 interface FYMonth {
   key: string; // "2026-04"
@@ -153,6 +167,9 @@ export const UploadCentreScreen: React.FC = () => {
   const [uploads, setUploads] = useState<FkUploadRecord[]>([]);
   const [azUploads, setAzUploads] = useState<AzUploadRecord[]>([]);
   const [msUploads, setMsUploads] = useState<MsUploadRecord[]>([]);
+  const [purchaseUploads, setPurchaseUploads] = useState<PurchaseUpload[]>([]);
+  const [purchases, setPurchases] = useState<PurchaseItem[]>([]);
+  const [costMasterItems, setCostMasterItems] = useState<CostMasterItem[]>([]);
   const [aliases, setAliases] = useState<Map<string, string>>(new Map());
   const [masterCodes, setMasterCodes] = useState<string[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -180,6 +197,17 @@ export const UploadCentreScreen: React.FC = () => {
   const [stagedMeeshoReturnsCompleted, setStagedMeeshoReturnsCompleted] = useState<MeeshoReturnRow[] | null>(null);
   const [stagedMeeshoReturnsInTransit, setStagedMeeshoReturnsInTransit] = useState<MeeshoInTransitReturnRow[] | null>(null);
   const [stagedMeeshoPayments, setStagedMeeshoPayments] = useState<MeeshoPaymentsResult | null>(null);
+  const [stagedPurchaseRows, setStagedPurchaseRows] = useState<{
+    validRows: Partial<PurchaseRow>[];
+    duplicateRows: { row: Partial<PurchaseRow>; reason: string; rowNum: number }[];
+    invalidRows: { row: Partial<PurchaseRow>; errors: string[]; rowNum: number }[];
+  } | null>(null);
+  const [stagedCostMasterPlan, setStagedCostMasterPlan] = useState<{
+    toAdd: any[];
+    addedCount: number;
+    alreadyExistedCount: number;
+    message: string;
+  } | null>(null);
 
   // Validation results
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -209,7 +237,7 @@ export const UploadCentreScreen: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentSlotForBrowse = useRef<AppUploadSlot>('orders');
 
-  // 1. Subscribe to uploads, aliases, and cost master
+  // 1. Subscribe to uploads, aliases, cost master, and purchases
   useEffect(() => {
     // Clear any stale meesho keys from localStorage/sessionStorage
     try {
@@ -245,6 +273,21 @@ export const UploadCentreScreen: React.FC = () => {
       setMsUploads(records);
     });
 
+    const unsubPurchaseUploads = onSnapshot(collection(db, 'purchase_uploads'), (snap) => {
+      const records: PurchaseUpload[] = [];
+      snap.forEach((d) => records.push({ ...(d.data() as PurchaseUpload), id: d.id }));
+      setPurchaseUploads(records);
+    });
+
+    const unsubPurchases = onSnapshot(collection(db, 'purchases'), (snap) => {
+      const loaded: PurchaseItem[] = [];
+      snap.forEach((d) => {
+        const data = d.data();
+        loaded.push({ id: d.id, ...data } as PurchaseItem);
+      });
+      setPurchases(loaded);
+    });
+
     const unsubAliases = onSnapshot(collection(db, 'sku_aliases'), (snap) => {
       const map = new Map<string, string>();
       snap.forEach((d) => {
@@ -257,12 +300,25 @@ export const UploadCentreScreen: React.FC = () => {
     });
 
     const unsubCostMaster = onSnapshot(collection(db, 'cost_master'), (snap) => {
+      const loaded: CostMasterItem[] = [];
       const codes: string[] = [];
       snap.forEach((d) => {
         const data = d.data();
-        if (data.sku_code) codes.push(String(data.sku_code).trim());
-        else if (data.sku) codes.push(String(data.sku).trim());
+        const code = String(data.sku_code || data.sku || '').trim();
+        if (code) codes.push(code);
+        loaded.push({
+          id: d.id,
+          sku_code: code,
+          sku_name: String(data.sku_name || ''),
+          weight_grams: Number(data.weight_grams ?? 0),
+          mfg_cost: Number(data.mfg_cost ?? 0),
+          active: data.active !== false,
+          effective_from: String(data.effective_from || '2026-04-01'),
+          createdAt: String(data.createdAt || ''),
+          createdBy: String(data.createdBy || ''),
+        });
       });
+      setCostMasterItems(loaded);
       setMasterCodes(Array.from(new Set(codes)));
       setLoadingInitial(false);
     });
@@ -271,6 +327,8 @@ export const UploadCentreScreen: React.FC = () => {
       unsubUploads();
       unsubAzUploads();
       unsubMsUploads();
+      unsubPurchaseUploads();
+      unsubPurchases();
       unsubAliases();
       unsubCostMaster();
     };
@@ -334,10 +392,25 @@ export const UploadCentreScreen: React.FC = () => {
     return map;
   }, [msUploads]);
 
+  const purchaseUploadStatusMap = useMemo(() => {
+    const map = new Map<string, { purchases?: PurchaseUpload; costMaster?: PurchaseUpload }>();
+    for (const u of purchaseUploads) {
+      const period = u.period || '';
+      if (!map.has(period)) {
+        map.set(period, {});
+      }
+      const entry = map.get(period)!;
+      if (u.slot === 'purchases' || u.slot === 'purchase_bills') entry.purchases = u;
+      if (u.slot === 'cost_master') entry.costMaster = u;
+    }
+    return map;
+  }, [purchaseUploads]);
+
   // Current month's uploads
   const currentMonthUploads = uploadStatusMap.get(selectedMonth) || {};
   const currentMonthAzUploads = azUploadStatusMap.get(selectedMonth) || {};
   const currentMonthMsUploads = msUploadStatusMap.get(selectedMonth) || {};
+  const currentMonthPurchaseUploads = purchaseUploadStatusMap.get(selectedMonth) || {};
 
   // Re-validate period when selectedMonth changes
   useEffect(() => {
@@ -519,7 +592,8 @@ export const UploadCentreScreen: React.FC = () => {
 
   const meeshoPaymentsSummary = useMemo(() => {
     if (!stagedMeeshoPayments) return null;
-    const { payments, ads, batches } = stagedMeeshoPayments;
+    const { payments, ads } = stagedMeeshoPayments;
+    const batches = stagedMeeshoPayments.batches || [];
     let totalSettlement = 0;
     let claimsCount = 0;
     let minPaymentDate = '';
@@ -532,17 +606,17 @@ export const UploadCentreScreen: React.FC = () => {
         if (!maxPaymentDate || p.paymentDate > maxPaymentDate) maxPaymentDate = p.paymentDate;
       }
     }
-    const totalAds = ads.reduce((sum, a) => sum + (a.totalAdsCost || 0), 0);
-    const expectedBank = batches.reduce((sum, b) => sum + (b.expectedBank || 0), 0);
+    const totalAds = ads.reduce((sum: number, a) => sum + (a.totalAdsCost || 0), 0);
+    const expectedBank = batches.reduce((sum: number, b) => sum + (b.expectedBank || 0), 0);
     return {
       orderRowsCount: payments.length,
       batchesCount: batches.length,
+      batches,
       totalSettlement: Math.round(totalSettlement * 100) / 100,
       totalAds: Math.round(totalAds * 100) / 100,
       expectedBank: Math.round(expectedBank * 100) / 100,
       claimsCount,
       paymentDateRange: minPaymentDate && maxPaymentDate ? `${minPaymentDate} to ${maxPaymentDate}` : '—',
-      batches,
     };
   }, [stagedMeeshoPayments]);
 
@@ -584,6 +658,12 @@ export const UploadCentreScreen: React.FC = () => {
           setValidationError(`Refused: Byte-identical Amazon file already uploaded and completed (${file.name}).`);
           return;
         }
+      } else if (targetSlot === 'purchases' || targetSlot === 'cost_master') {
+        const isDup = purchaseUploads.some((u) => u.sha256 === sha256);
+        if (isDup) {
+          setValidationError(`Refused: Byte-identical file already uploaded (${file.name}).`);
+          return;
+        }
       } else if (!targetSlot.startsWith('meesho_')) {
         const dupCheck = isDuplicateUpload(sha256, uploads);
         if (dupCheck.isDuplicate) {
@@ -604,6 +684,77 @@ export const UploadCentreScreen: React.FC = () => {
         // text only
       }
       setStagedWorkbook(wb);
+
+      // 0. Purchases & Cost Master Slots
+      if (targetSlot === 'purchases') {
+        setStagedDetectedType('purchases');
+        setStagedAmazonUnified(null);
+        setStagedAmazonMtr(null);
+        setStagedOrders(null);
+        setStagedReturns(null);
+        setStagedSettled(null);
+        setStagedBankReport(null);
+        setStagedMeeshoOrders(null);
+        setStagedMeeshoReturnsCompleted(null);
+        setStagedMeeshoReturnsInTransit(null);
+        setStagedMeeshoPayments(null);
+        setStagedCostMasterPlan(null);
+
+        const tableRows = await parseTableFile(file);
+        const extracted = extractPurchaseRowsFromTable(tableRows);
+        if (!extracted.isValidContent) {
+          setValidationError(
+            extracted.error || `Invalid purchase file format. Missing headers: ${extracted.missingHeaders.join(', ')}`
+          );
+          return;
+        }
+
+        const validRows: Partial<PurchaseRow>[] = [];
+        const duplicateRows: { row: Partial<PurchaseRow>; reason: string; rowNum: number }[] = [];
+        const invalidRows: { row: Partial<PurchaseRow>; errors: string[]; rowNum: number }[] = [];
+
+        extracted.rows.forEach((row, idx) => {
+          const rowNum = idx + 2;
+          const vResult = validatePurchaseRow(row);
+          if (!vResult.valid) {
+            invalidRows.push({ row, errors: vResult.errors, rowNum });
+          } else if (isDuplicatePurchase(row as PurchaseRow, purchases)) {
+            duplicateRows.push({ row, reason: 'Duplicate bill_no + sku_code + date', rowNum });
+          } else {
+            validRows.push(row);
+          }
+        });
+
+        setStagedPurchaseRows({ validRows, duplicateRows, invalidRows });
+        return;
+      }
+
+      if (targetSlot === 'cost_master') {
+        setStagedDetectedType('cost_master');
+        setStagedAmazonUnified(null);
+        setStagedAmazonMtr(null);
+        setStagedOrders(null);
+        setStagedReturns(null);
+        setStagedSettled(null);
+        setStagedBankReport(null);
+        setStagedMeeshoOrders(null);
+        setStagedMeeshoReturnsCompleted(null);
+        setStagedMeeshoReturnsInTransit(null);
+        setStagedMeeshoPayments(null);
+        setStagedPurchaseRows(null);
+
+        const existingDocIds = new Set(costMasterItems.map((c) => `${c.sku_code}_${c.effective_from}`));
+        let plan;
+        try {
+          plan = planCostMasterImport(rawText, existingDocIds);
+        } catch {
+          const tableRows = await parseTableFile(file);
+          plan = planCostMasterImport(tableRows, existingDocIds);
+        }
+
+        setStagedCostMasterPlan(plan);
+        return;
+      }
 
       // Detect Amazon report
       let azDetected = detectAmazonReport(rawText);
@@ -1039,6 +1190,18 @@ export const UploadCentreScreen: React.FC = () => {
       const stored = upload.counts?.storedCounts?.['ms_returns_in_transit'] ?? upload.counts?.total ?? 0;
       return { stored, expected: upload.counts?.total ?? stored };
     }
+    if (slotType === 'purchases') {
+      const upload = currentMonthPurchaseUploads.purchases;
+      if (!upload) return null;
+      const stored = upload.rowCount || upload.validCount || 0;
+      return { stored, expected: stored };
+    }
+    if (slotType === 'cost_master') {
+      const upload = currentMonthPurchaseUploads.costMaster;
+      if (!upload) return null;
+      const stored = upload.rowCount || upload.addedCount || 0;
+      return { stored, expected: stored };
+    }
     if (slotType === 'meesho_payments') {
       const upload = currentMonthMsUploads.payments;
       if (!upload) return null;
@@ -1176,6 +1339,134 @@ export const UploadCentreScreen: React.FC = () => {
   // Commit Import to Firestore with BATCH_SIZE = 400 and post-commit count verification
   const handleConfirmCommit = async () => {
     if (!activeSlot || !isAdmin || periodWarning) return;
+
+    if (activeSlot === 'purchases') {
+      if (!stagedPurchaseRows || stagedPurchaseRows.validRows.length === 0) return;
+      setIsSaving(true);
+      setSaveError(null);
+      setSaveProgress(`Saving ${stagedPurchaseRows.validRows.length} purchase records to Firestore...`);
+
+      const upId = currentUploadId || `upload_purchases_${selectedMonth}_${Date.now()}`;
+      setCurrentUploadId(upId);
+
+      try {
+        let savedCount = 0;
+        for (let i = 0; i < stagedPurchaseRows.validRows.length; i++) {
+          const r = stagedPurchaseRows.validRows[i];
+          const date = String(r.date || selectedMonth + '-01').trim();
+          const sku = String(r.sku_code || '').trim();
+          const billNo = String(r.bill_no || 'BILL').trim();
+          const docId = `purchase_${date}_${sku}_${billNo}_${i}`;
+
+          const docData = stripUndefined({
+            date,
+            sku_code: sku,
+            sku_name: String(r.sku_name || sku),
+            qty: Number(r.qty || 0),
+            mfg_rate: Number(r.mfg_rate || 0),
+            bill_no: billNo,
+            supplier_name: String(r.supplier_name || ''),
+            amount: Number(r.amount || Number(r.qty || 0) * Number(r.mfg_rate || 0)),
+            createdAt: new Date().toISOString(),
+            createdBy: user?.email || 'admin',
+            uploadId: upId,
+          });
+
+          await setDoc(doc(db, 'purchases', docId), docData, { merge: true });
+          savedCount++;
+          if (savedCount % 50 === 0 || savedCount === stagedPurchaseRows.validRows.length) {
+            setSaveProgress(`Saved ${savedCount} of ${stagedPurchaseRows.validRows.length} purchase records...`);
+          }
+        }
+
+        const uploadDoc = stripUndefined({
+          id: upId,
+          uploadId: upId,
+          slot: 'purchases',
+          period: selectedMonth,
+          originalFileName: stagedFileName,
+          sha256: stagedSha256,
+          date: new Date().toISOString().split('T')[0],
+          user: user?.email || 'admin',
+          rowCount: savedCount,
+          validCount: savedCount,
+          duplicateCount: stagedPurchaseRows.duplicateRows.length,
+          invalidCount: stagedPurchaseRows.invalidRows.length,
+          status: 'complete',
+          createdAt: new Date().toISOString(),
+        });
+        await setDoc(doc(db, 'purchase_uploads', upId), uploadDoc);
+
+        setIsSaving(false);
+        setSaveProgress(null);
+        setCurrentUploadId(null);
+        setActiveSlot(null);
+        setStagedPurchaseRows(null);
+        setStagedWorkbook(null);
+      } catch (err: any) {
+        setIsSaving(false);
+        setSaveError(err.message || 'Import failed for purchases.');
+      }
+      return;
+    }
+
+    if (activeSlot === 'cost_master') {
+      if (!stagedCostMasterPlan || stagedCostMasterPlan.toAdd.length === 0) return;
+      setIsSaving(true);
+      setSaveError(null);
+      setSaveProgress(`Saving ${stagedCostMasterPlan.toAdd.length} cost master items to Firestore...`);
+
+      const upId = currentUploadId || `upload_cost_master_${selectedMonth}_${Date.now()}`;
+      setCurrentUploadId(upId);
+
+      try {
+        let savedCount = 0;
+        for (const item of stagedCostMasterPlan.toAdd) {
+          const docData = stripUndefined({
+            sku_code: item.sku_code,
+            sku_name: item.sku_name,
+            weight_grams: item.weight_grams,
+            mfg_cost: item.mfg_cost,
+            active: item.active !== false,
+            effective_from: item.effective_from,
+            createdAt: new Date().toISOString(),
+            createdBy: user?.email || 'admin',
+            uploadId: upId,
+          });
+
+          await setDoc(doc(db, 'cost_master', item.docId), docData, { merge: true });
+          savedCount++;
+        }
+
+        const uploadDoc = stripUndefined({
+          id: upId,
+          uploadId: upId,
+          slot: 'cost_master',
+          period: selectedMonth,
+          originalFileName: stagedFileName,
+          sha256: stagedSha256,
+          date: new Date().toISOString().split('T')[0],
+          user: user?.email || 'admin',
+          rowCount: savedCount,
+          addedCount: savedCount,
+          alreadyExistedCount: stagedCostMasterPlan.alreadyExistedCount,
+          status: 'complete',
+          createdAt: new Date().toISOString(),
+        });
+        await setDoc(doc(db, 'purchase_uploads', upId), uploadDoc);
+
+        setIsSaving(false);
+        setSaveProgress(null);
+        setCurrentUploadId(null);
+        setActiveSlot(null);
+        setStagedCostMasterPlan(null);
+        setStagedWorkbook(null);
+      } catch (err: any) {
+        setIsSaving(false);
+        setSaveError(err.message || 'Import failed for cost master.');
+      }
+      return;
+    }
 
     if (activeSlot.startsWith('meesho_')) {
       if (activeSlot === 'meesho_orders' && !stagedMeeshoOrders) return;
@@ -1371,7 +1662,7 @@ export const UploadCentreScreen: React.FC = () => {
     try {
       const res = await commitFlipkartImport(
         db,
-        activeSlot,
+        activeSlot as FlipkartSlotType,
         {
           orders: stagedOrders || undefined,
           returns: stagedReturns || undefined,
@@ -2329,9 +2620,14 @@ export const UploadCentreScreen: React.FC = () => {
                     </span>
                     <span className="text-sm font-bold text-slate-900 dark:text-white">Returns In Transit.csv</span>
                   </div>
-                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                    In-Transit CSV
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                      In-Transit CSV
+                    </span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800 uppercase tracking-wider">
+                      OPTIONAL
+                    </span>
+                  </div>
                 </div>
 
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -2473,6 +2769,145 @@ export const UploadCentreScreen: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-[10px] text-slate-500">{REPORT_PATHS.meesho.tcsSalesReturn}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Category 5: Purchases & Cost Master Slots Section */}
+        <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+              Purchases &amp; Cost Master Slots for Period:{' '}
+              <span className="text-indigo-600 dark:text-indigo-400">{selectedMonth}</span>
+            </h2>
+            <span className="text-xs text-slate-500">
+              (Inbound Inventory Bills &amp; SKU Manufacturing Cost Master)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Purchase Bills Slot */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'purchases')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'purchases'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Purchases
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Purchase Bills</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    Purchase CSV/Excel
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Upload purchase invoices containing date, sku_code, qty, mfg_rate, bill_no
+                </p>
+
+                {currentMonthPurchaseUploads.purchases ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthPurchaseUploads.purchases.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthPurchaseUploads.purchases.date} by {currentMonthPurchaseUploads.purchases.user}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {getSlotCountDisplay('purchases')?.stored ?? currentMonthPurchaseUploads.purchases.rowCount} rows
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('purchases')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthPurchaseUploads.purchases ? 'Replace Purchase Bills' : 'Upload Purchase Bills'}
+                </button>
+              </div>
+            </div>
+
+            {/* Cost Master Slot */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => handleFileDrop(e, 'cost_master')}
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all bg-white dark:bg-slate-900 ${
+                activeSlot === 'cost_master'
+                  ? 'border-indigo-500 ring-2 ring-indigo-500/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Cost Master
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">Cost Master CSV</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    Cost CSV
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Upload SKU manufacturing cost master with effective dates
+                </p>
+
+                {currentMonthPurchaseUploads.costMaster ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      Uploaded
+                    </div>
+                    <p className="text-[11px] font-mono truncate">
+                      File: {currentMonthPurchaseUploads.costMaster.originalFileName}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Date: {currentMonthPurchaseUploads.costMaster.date} by {currentMonthPurchaseUploads.costMaster.user}
+                    </p>
+                    <p className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
+                      Stored: {getSlotCountDisplay('cost_master')?.stored ?? currentMonthPurchaseUploads.costMaster.rowCount} items
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-dashed border-slate-300 dark:border-slate-700 text-xs text-slate-500 text-center">
+                    Not uploaded for {selectedMonth}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => triggerBrowse('cost_master')}
+                  disabled={!isAdmin}
+                  className="w-full py-2 px-3 text-xs font-semibold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  {currentMonthPurchaseUploads.costMaster ? 'Replace Cost Master CSV' : 'Upload Cost Master CSV'}
+                </button>
               </div>
             </div>
           </div>
@@ -2920,6 +3355,51 @@ export const UploadCentreScreen: React.FC = () => {
                     </div>
                   </>
                 )}
+
+                {activeSlot === 'purchases' && stagedPurchaseRows && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Valid Rows to Import</span>
+                      <p className="text-lg font-bold text-emerald-600">{stagedPurchaseRows.validRows.length}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Duplicate Rows (Skipped)</span>
+                      <p className="text-lg font-bold text-amber-600">{stagedPurchaseRows.duplicateRows.length}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Invalid Rows (Errors)</span>
+                      <p className="text-lg font-bold text-rose-600">{stagedPurchaseRows.invalidRows.length}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Total Purchase Amount</span>
+                      <p className="text-lg font-bold text-indigo-600 font-mono">
+                        ₹
+                        {stagedPurchaseRows.validRows
+                          .reduce((sum, r) => sum + Number(r.amount || Number(r.qty || 0) * Number(r.mfg_rate || 0)), 0)
+                          .toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {activeSlot === 'cost_master' && stagedCostMasterPlan && (
+                  <>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">New Items to Add</span>
+                      <p className="text-lg font-bold text-emerald-600">{stagedCostMasterPlan.addedCount}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                      <span className="text-[11px] text-slate-500">Already Existed (Skipped)</span>
+                      <p className="text-lg font-bold text-amber-600">{stagedCostMasterPlan.alreadyExistedCount}</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 col-span-2">
+                      <span className="text-[11px] text-slate-500">Status Message</span>
+                      <p className="text-sm font-bold text-slate-900 dark:text-white mt-1">
+                        {stagedCostMasterPlan.message}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
 
               {activeSlot === 'amazon_unified' && amazonUnifiedSummary && (
@@ -3115,7 +3595,7 @@ export const UploadCentreScreen: React.FC = () => {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-bold text-slate-900 dark:text-white">
-                        Transaction Batches ({meeshoPaymentsSummary.batches.length})
+                        Transaction Batches ({(meeshoPaymentsSummary.batches || []).length})
                       </span>
                       <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
                         Expected Bank Total: ₹{meeshoPaymentsSummary.expectedBank.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
@@ -3133,7 +3613,7 @@ export const UploadCentreScreen: React.FC = () => {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                          {meeshoPaymentsSummary.batches.map((b) => (
+                          {(meeshoPaymentsSummary.batches || []).map((b) => (
                             <tr key={b.transactionId} className="hover:bg-slate-50/50">
                               <td className="py-2 px-3 font-bold text-slate-900 dark:text-white">{b.transactionId}</td>
                               <td className="py-2 px-3 text-slate-500">{b.paymentDate}</td>
