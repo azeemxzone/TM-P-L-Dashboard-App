@@ -88,6 +88,14 @@ import {
   parseMeeshoPayments,
   groupMeeshoBatches,
   getMeeshoReturnsDateRange,
+  buildMsOrderDocIds,
+  buildMsReturnCompletedDocIds,
+  buildMsReturnInTransitDocIds,
+  buildMsPaymentDocIds,
+  buildMsAdsDocIds,
+  buildMsBatchDocIds,
+  verifyExistingMsUploadDocs,
+  ShaRefusalMetadata,
   MeeshoSlotType,
   MsUploadRecord,
   MeeshoOrderRow,
@@ -175,6 +183,12 @@ export const UploadCentreScreen: React.FC = () => {
 
   // Validation results
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [shaRefusalInfo, setShaRefusalInfo] = useState<ShaRefusalMetadata | null>(null);
+  const [incompleteImportNotice, setIncompleteImportNotice] = useState<{
+    storedCount: number;
+    totalCount: number;
+    previousUploadId: string;
+  } | null>(null);
   const [periodWarning, setPeriodWarning] = useState<{ message: string; targetMonth: string } | null>(null);
 
   // Saving state
@@ -197,6 +211,22 @@ export const UploadCentreScreen: React.FC = () => {
 
   // 1. Subscribe to uploads, aliases, and cost master
   useEffect(() => {
+    // Clear any stale meesho keys from localStorage/sessionStorage
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && (k.startsWith('ms_') || k.startsWith('meesho_'))) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+      }
+    } catch {
+      // ignore
+    }
+
     const unsubUploads = onSnapshot(collection(db, 'fk_uploads'), (snap) => {
       const records: FkUploadRecord[] = [];
       snap.forEach((d) => records.push({ id: d.id, ...(d.data() as FkUploadRecord) }));
@@ -536,6 +566,8 @@ export const UploadCentreScreen: React.FC = () => {
     setActiveSlot(targetSlot);
     setStagedFileName(file.name);
     setValidationError(null);
+    setShaRefusalInfo(null);
+    setIncompleteImportNotice(null);
     setPeriodWarning(null);
     setSaveError(null);
     setSaveProgress(null);
@@ -552,13 +584,7 @@ export const UploadCentreScreen: React.FC = () => {
           setValidationError(`Refused: Byte-identical Amazon file already uploaded and completed (${file.name}).`);
           return;
         }
-      } else if (targetSlot.startsWith('meesho_')) {
-        const isDup = isDuplicateMsUpload(msUploads, sha256);
-        if (isDup) {
-          setValidationError(`Refused: Byte-identical Meesho file already uploaded and completed (${file.name}).`);
-          return;
-        }
-      } else {
+      } else if (!targetSlot.startsWith('meesho_')) {
         const dupCheck = isDuplicateUpload(sha256, uploads);
         if (dupCheck.isDuplicate) {
           setValidationError(`Refused: ${dupCheck.message} (${dupCheck.duplicateRecord?.originalFileName || file.name}).`);
@@ -621,8 +647,16 @@ export const UploadCentreScreen: React.FC = () => {
         setStagedSettled(null);
         setStagedBankReport(null);
 
+        let orderDocIds: string[] = [];
+        let returnsDocIds: string[] = [];
+        let inTransitDocIds: string[] = [];
+        let paymentDocIds: string[] = [];
+        let adsDocIds: string[] = [];
+        let batchDocIds: string[] = [];
+
         if (targetSlot === 'meesho_orders') {
           const rows = parseMeeshoOrders(rawText);
+          orderDocIds = buildMsOrderDocIds(rows);
           setStagedMeeshoOrders(rows);
           setStagedMeeshoReturnsCompleted(null);
           setStagedMeeshoReturnsInTransit(null);
@@ -635,30 +669,34 @@ export const UploadCentreScreen: React.FC = () => {
               targetMonth: pCheck.detectedMonth,
             });
           }
-          return;
-        }
-
-        if (targetSlot === 'meesho_returns_completed') {
+        } else if (targetSlot === 'meesho_returns_completed') {
           const rows = parseMeeshoReturns(rawText);
+          returnsDocIds = buildMsReturnCompletedDocIds(rows);
           setStagedMeeshoReturnsCompleted(rows);
           setStagedMeeshoOrders(null);
           setStagedMeeshoReturnsInTransit(null);
           setStagedMeeshoPayments(null);
-          return;
-        }
-
-        if (targetSlot === 'meesho_returns_in_transit') {
+        } else if (targetSlot === 'meesho_returns_in_transit') {
           const rows = parseMeeshoInTransitReturns(rawText);
+          inTransitDocIds = buildMsReturnInTransitDocIds(rows);
           setStagedMeeshoReturnsInTransit(rows);
           setStagedMeeshoOrders(null);
           setStagedMeeshoReturnsCompleted(null);
           setStagedMeeshoPayments(null);
-          return;
-        }
-
-        if (targetSlot === 'meesho_payments') {
+        } else if (targetSlot === 'meesho_payments') {
           const parsed = parseMeeshoPayments(wb || buffer);
-          setStagedMeeshoPayments(parsed);
+          const batches = groupMeeshoBatches(parsed.payments, parsed.ads, parsed.referral, parsed.compensation);
+          paymentDocIds = buildMsPaymentDocIds(parsed.payments);
+          adsDocIds = buildMsAdsDocIds(parsed.ads);
+          batchDocIds = buildMsBatchDocIds(batches);
+
+          setStagedMeeshoPayments({
+            payments: parsed.payments,
+            ads: parsed.ads,
+            referral: parsed.referral,
+            compensation: parsed.compensation,
+            batches,
+          });
           setStagedMeeshoOrders(null);
           setStagedMeeshoReturnsCompleted(null);
           setStagedMeeshoReturnsInTransit(null);
@@ -670,8 +708,56 @@ export const UploadCentreScreen: React.FC = () => {
               targetMonth: pCheck.detectedMonth,
             });
           }
-          return;
         }
+
+        // Before refusing duplicate, verify whether the Firestore documents actually exist
+        const dupCheck = isDuplicateMsUpload(msUploads, sha256);
+        if (dupCheck.isDuplicate && dupCheck.duplicateRecord) {
+          const match = dupCheck.duplicateRecord;
+          setSaveProgress('Verifying existing documents in Firestore...');
+          const docVerification = await verifyExistingMsUploadDocs(db, targetSlot as MeeshoSlotType, {
+            orders: orderDocIds,
+            returnsCompleted: returnsDocIds,
+            returnsInTransit: inTransitDocIds,
+            payments: paymentDocIds,
+            ads: adsDocIds,
+            batches: batchDocIds,
+          });
+          setSaveProgress(null);
+
+          if (docVerification.allPresent) {
+            // All documents exist in Firestore -> REFUSE with complete metadata
+            const countsStr = match.counts?.storedCounts
+              ? Object.entries(match.counts.storedCounts)
+                  .map(([col, cnt]) => `${col}: ${cnt}`)
+                  .join(', ')
+              : `${match.counts?.total ?? docVerification.expectedCount} rows`;
+
+            const refusalInfo: ShaRefusalMetadata = {
+              collection: 'ms_uploads',
+              documentId: match.id || match.uploadId || 'unknown',
+              status: match.status || 'complete',
+              uploader: match.user || 'unknown',
+              date: match.date || match.uploadedAt || 'unknown',
+              storedCounts: countsStr,
+            };
+
+            setShaRefusalInfo(refusalInfo);
+            setValidationError(
+              `Refused: Byte-identical Meesho file already uploaded and verified complete (${file.name}). ` +
+              `Matching record in collection: ms_uploads | Document ID: ${refusalInfo.documentId} | Status: ${refusalInfo.status} | Uploader: ${refusalInfo.uploader} | Date: ${refusalInfo.date} | Stored counts: ${refusalInfo.storedCounts}`
+            );
+            return;
+          } else {
+            // Some or all documents are missing in Firestore -> do NOT block re-upload!
+            setIncompleteImportNotice({
+              storedCount: docVerification.storedCount,
+              totalCount: docVerification.expectedCount,
+              previousUploadId: match.id || match.uploadId || 'unknown',
+            });
+          }
+        }
+        return;
       }
 
       // If targetSlot is NOT Meesho, but a Meesho report was dropped:
@@ -1142,6 +1228,8 @@ export const UploadCentreScreen: React.FC = () => {
         setStagedMeeshoReturnsInTransit(null);
         setStagedMeeshoPayments(null);
         setMismatchReport(null);
+        setIncompleteImportNotice(null);
+        setShaRefusalInfo(null);
 
         setVerifiedSlotCounts((prev) => ({
           ...prev,
@@ -1152,7 +1240,9 @@ export const UploadCentreScreen: React.FC = () => {
         }));
       } catch (err: any) {
         setIsSaving(false);
-        setSaveError(err.message || 'Import failed for Meesho report.');
+        const errCode = err.code || (err instanceof MsUploadRecordWriteError ? err.errorCode : '');
+        const errorMsg = errCode ? `[${errCode}] ${err.message}` : (err.message || 'Import failed for Meesho report.');
+        setSaveError(errorMsg);
         if (err.diffReport) {
           setMismatchReport(err.diffReport);
         }
@@ -2422,6 +2512,8 @@ export const UploadCentreScreen: React.FC = () => {
                 setStagedMeeshoReturnsInTransit(null);
                 setStagedMeeshoPayments(null);
                 setValidationError(null);
+                setShaRefusalInfo(null);
+                setIncompleteImportNotice(null);
                 setPeriodWarning(null);
                 setSaveError(null);
                 setSaveProgress(null);
@@ -2433,14 +2525,73 @@ export const UploadCentreScreen: React.FC = () => {
             </button>
           </div>
 
-          {/* Validation Error (e.g. wrong slot or duplicate file) */}
+          {/* Validation Error / SHA Refusal Details */}
           {validationError && (
-            <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-xs text-red-800 dark:text-red-300 flex items-start gap-3">
-              <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-bold text-sm">Upload Rejected</h4>
-                <p className="mt-1">{validationError}</p>
+            <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-xs text-red-800 dark:text-red-300 space-y-3">
+              <div className="flex items-start gap-3">
+                <XCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="font-bold text-sm">
+                    {shaRefusalInfo ? 'Duplicate File Refused: Verified Complete in Firestore' : 'Upload Rejected'}
+                  </h4>
+                  <p>{validationError}</p>
+                </div>
               </div>
+
+              {shaRefusalInfo && (
+                <div className="mt-2 pt-3 border-t border-red-200 dark:border-red-800/60 grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] font-mono">
+                  <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-900/60 border border-red-200 dark:border-red-900">
+                    <span className="text-slate-500 block text-[10px] font-sans uppercase font-bold tracking-wider">Collection</span>
+                    <span className="font-bold text-red-900 dark:text-red-200">{shaRefusalInfo.collection}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-900/60 border border-red-200 dark:border-red-900">
+                    <span className="text-slate-500 block text-[10px] font-sans uppercase font-bold tracking-wider">Document ID</span>
+                    <span className="font-bold text-red-900 dark:text-red-200 truncate block" title={shaRefusalInfo.documentId}>
+                      {shaRefusalInfo.documentId}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-900/60 border border-red-200 dark:border-red-900">
+                    <span className="text-slate-500 block text-[10px] font-sans uppercase font-bold tracking-wider">Status</span>
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400">{shaRefusalInfo.status}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-900/60 border border-red-200 dark:border-red-900">
+                    <span className="text-slate-500 block text-[10px] font-sans uppercase font-bold tracking-wider">Uploader</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200 truncate block">{shaRefusalInfo.uploader}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-900/60 border border-red-200 dark:border-red-900">
+                    <span className="text-slate-500 block text-[10px] font-sans uppercase font-bold tracking-wider">Date</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{shaRefusalInfo.date}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white/70 dark:bg-slate-900/60 border border-red-200 dark:border-red-900">
+                    <span className="text-slate-500 block text-[10px] font-sans uppercase font-bold tracking-wider">Stored Counts</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{shaRefusalInfo.storedCounts}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Previous Import Incomplete Notice */}
+          {incompleteImportNotice && !validationError && (
+            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <h4 className="font-bold text-sm text-amber-900 dark:text-amber-200">
+                    Previous import incomplete: {incompleteImportNotice.storedCount} of {incompleteImportNotice.totalCount} documents present
+                  </h4>
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    A previous upload record ({incompleteImportNotice.previousUploadId}) was found in ms_uploads, but {incompleteImportNotice.totalCount - incompleteImportNotice.storedCount} documents are missing in Firestore. You can re-import to write all {incompleteImportNotice.totalCount} documents with deterministic IDs and write a new audit record.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleConfirmCommit}
+                disabled={isSaving || !isAdmin || Boolean(periodWarning)}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-colors cursor-pointer shrink-0 disabled:opacity-50"
+              >
+                {isSaving ? 'Re-importing...' : 'Re-import'}
+              </button>
             </div>
           )}
 
@@ -3113,6 +3264,8 @@ export const UploadCentreScreen: React.FC = () => {
                     setStagedSettled(null);
                     setPeriodWarning(null);
                     setValidationError(null);
+                    setShaRefusalInfo(null);
+                    setIncompleteImportNotice(null);
                     setSaveError(null);
                     setSaveProgress(null);
                     setCurrentUploadId(null);
@@ -3140,6 +3293,8 @@ export const UploadCentreScreen: React.FC = () => {
                     ? 'Import Blocked (Period Mismatch)'
                     : isSaving
                     ? 'Saving to Firestore...'
+                    : incompleteImportNotice
+                    ? 'Re-import & Ingest Report'
                     : 'Confirm & Ingest Report'}
                 </button>
               </div>

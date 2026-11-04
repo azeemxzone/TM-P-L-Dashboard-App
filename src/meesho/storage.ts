@@ -364,6 +364,15 @@ export class MsUploadRecordWriteError extends Error {
   }
 }
 
+export interface ShaRefusalMetadata {
+  collection: string;
+  documentId: string;
+  status: string;
+  uploader: string;
+  date: string;
+  storedCounts: string;
+}
+
 /**
  * Sanitizes an object by removing any forbidden customer/supplier fields.
  * Only customerState is allowed.
@@ -679,6 +688,17 @@ export async function fetchFirestoreDocsByIds(
   const result = new Map<string, Record<string, any>>();
   if (!ids || ids.length === 0) return result;
 
+  // Support in-memory mock collections for deterministic headless testing
+  if ((db as any)?._inMemoryCollections) {
+    const colMap = (db as any)._inMemoryCollections.get(collectionName) || new Map<string, any>();
+    for (const id of ids) {
+      if (colMap.has(id)) {
+        result.set(id, colMap.get(id));
+      }
+    }
+    return result;
+  }
+
   const CHUNK_SIZE = 30;
   for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
     const chunk = ids.slice(i, i + CHUNK_SIZE);
@@ -704,6 +724,64 @@ export async function fetchFirestoreDocsByIds(
   }
 
   return result;
+}
+
+/**
+ * Reads back the expected document IDs in chunks of at most 30 to verify if an existing
+ * 'complete' upload's documents actually exist in Firestore.
+ * Refuse ONLY if ALL expected documents exist.
+ * If some or all are missing, returns allPresent: false so the upload is allowed to re-import.
+ */
+export async function verifyExistingMsUploadDocs(
+  db: Firestore,
+  slot: MeeshoSlotType,
+  expectedDocIds: {
+    orders?: string[];
+    returnsCompleted?: string[];
+    returnsInTransit?: string[];
+    payments?: string[];
+    ads?: string[];
+    batches?: string[];
+  }
+): Promise<{
+  allPresent: boolean;
+  storedCount: number;
+  expectedCount: number;
+  collectionBreakdown: Record<string, { stored: number; expected: number }>;
+}> {
+  const collectionBreakdown: Record<string, { stored: number; expected: number }> = {};
+  let totalStored = 0;
+  let totalExpected = 0;
+
+  const checkCollection = async (colName: string, ids: string[] | undefined) => {
+    if (!ids || ids.length === 0) return;
+    totalExpected += ids.length;
+    const storedDocs = await fetchFirestoreDocsByIds(db, colName, ids);
+    const count = storedDocs.size;
+    totalStored += count;
+    collectionBreakdown[colName] = { stored: count, expected: ids.length };
+  };
+
+  if (slot === 'meesho_orders') {
+    await checkCollection('ms_orders', expectedDocIds.orders);
+  } else if (slot === 'meesho_returns_completed') {
+    await checkCollection('ms_returns_completed', expectedDocIds.returnsCompleted);
+  } else if (slot === 'meesho_returns_in_transit') {
+    await checkCollection('ms_returns_in_transit', expectedDocIds.returnsInTransit);
+  } else if (slot === 'meesho_payments') {
+    await checkCollection('ms_payments', expectedDocIds.payments);
+    await checkCollection('ms_ads', expectedDocIds.ads);
+    await checkCollection('ms_batches', expectedDocIds.batches);
+  }
+
+  const allPresent = totalExpected > 0 && totalStored === totalExpected;
+
+  return {
+    allPresent,
+    storedCount: totalStored,
+    expectedCount: totalExpected,
+    collectionBreakdown,
+  };
 }
 
 /**
