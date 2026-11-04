@@ -4,6 +4,37 @@
  */
 
 import { stripUndefined } from './stripUndefined';
+import { parseAliasCsv } from './skuResolver';
+import { DEFAULT_SKU_ALIASES_V2_CSV, DEFAULT_SKU_MASTER_V2_CSV } from '../data/defaultData';
+
+const defaultAliasMap = parseAliasCsv(DEFAULT_SKU_ALIASES_V2_CSV);
+const defaultCostMasterMap: Record<string, number> = {};
+for (const line of DEFAULT_SKU_MASTER_V2_CSV.trim().split('\n').slice(1)) {
+  const parts = line.split(',');
+  if (parts[0] && parts[3]) {
+    defaultCostMasterMap[parts[0].trim()] = parseFloat(parts[3]);
+  }
+}
+
+export function getSkuCost(sku: string, costMap: Record<string, number> = {}): number {
+  if (!sku) return 100;
+  const clean = sku.trim();
+  if (costMap[clean] !== undefined) return costMap[clean];
+  const upper = clean.toUpperCase();
+  if (costMap[upper] !== undefined) return costMap[upper];
+
+  // Try alias
+  const master = defaultAliasMap.get(clean) || defaultAliasMap.get(upper);
+  if (master) {
+    if (costMap[master] !== undefined) return costMap[master];
+    if (defaultCostMasterMap[master] !== undefined) return defaultCostMasterMap[master];
+  }
+
+  if (defaultCostMasterMap[clean] !== undefined) return defaultCostMasterMap[clean];
+  if (defaultCostMasterMap[upper] !== undefined) return defaultCostMasterMap[upper];
+
+  return 100;
+}
 
 export interface PnLChannelSummary {
   marketplace: 'Flipkart' | 'Amazon' | 'Meesho';
@@ -51,20 +82,56 @@ export interface FlipkartPnLInput {
     collectionFee?: number;
     shippingFee?: number;
     reverseShippingFee?: number;
+    gstOnMpFees?: number;
+    marketplaceFee?: number;
     bankSettlementValue?: number;
+    bankSettlement?: number;
     qty?: number;
     sku?: string;
+    sellerSku?: string;
     isReturn?: boolean;
     type?: string;
+    returnType?: string | null;
+    itemReturnStatus?: string | null;
+    orderItemId?: string;
+    orderDate?: string | null;
+    paymentDate?: string | null;
+    paymentMonth?: string;
+    refund?: number;
+  }>;
+  orderItems?: Array<{
+    orderItemId?: string;
+    orderDate?: string | null;
+    orderMonth?: string;
+    status?: string;
+    sku?: string;
+    qty?: number;
+    dispatchedDate?: string | null;
+  }>;
+  returns?: Array<{
+    returnId?: string;
+    orderItemId?: string;
+    returnType?: string;
+    returnStatus?: string;
+    sku?: string;
+    qty?: number;
+    approvalDate?: string | null;
+    requestedDate?: string | null;
   }>;
   batches?: Array<{
     expectedBank?: number;
     orderRowsTotal?: number;
     adjustmentsTotal?: number;
+    paymentDate?: string | null;
+    paymentMonth?: string;
+    neftId?: string;
   }>;
   adjustments?: Array<{
     amount?: number;
     sheet?: string;
+    paymentDate?: string | null;
+    paymentMonth?: string;
+    neftId?: string;
   }>;
   pipelineOrders?: Array<{
     orderItemValue?: number;
@@ -139,8 +206,23 @@ export function calculateFlipkartPnL(
   const adjs = input.adjustments || [];
   const pipeline = input.pipelineOrders || [];
 
+  // Lookup maps for order items and returns
+  const orderItemMap = new Map<string, any>();
+  if (input.orderItems) {
+    for (const oi of input.orderItems) {
+      if (oi.orderItemId) orderItemMap.set(oi.orderItemId, oi);
+    }
+  }
+  const returnMap = new Map<string, any>();
+  if (input.returns) {
+    for (const r of input.returns) {
+      if (r.orderItemId) returnMap.set(r.orderItemId, r);
+    }
+  }
+
   let grossRevenue = 0;
-  let marketplaceFees = 0;
+  let rowFees = 0;
+  let rowGst = 0;
   let claimsCredit = 0;
   let settledUnits = 0;
   let customerReturnUnits = 0;
@@ -148,9 +230,14 @@ export function calculateFlipkartPnL(
   let customerReturnCogs = 0;
 
   for (const r of rows) {
-    const isRet = r.isReturn || (r.type || '').toLowerCase().includes('return');
-    const q = r.qty || 1;
-    const itemCost = costMap[r.sku || ''] || 100;
+    const isRet =
+      r.isReturn === true ||
+      (r.type || '').toLowerCase().includes('return') ||
+      (r.saleAmount === 0 && (r.customerPaid || 0) === 0);
+
+    const q = r.qty != null && r.qty > 0 ? r.qty : 1;
+    const rawSku = r.sku || r.sellerSku || orderItemMap.get(r.orderItemId || '')?.sku || returnMap.get(r.orderItemId || '')?.sku || '';
+    const itemCost = getSkuCost(rawSku, costMap);
 
     if (isRet) {
       customerReturnUnits += q;
@@ -162,36 +249,52 @@ export function calculateFlipkartPnL(
     }
 
     const fees =
-      Math.abs(r.commission || 0) +
-      Math.abs(r.fixedFee || 0) +
-      Math.abs(r.collectionFee || 0) +
-      Math.abs(r.shippingFee || 0) +
-      Math.abs(r.reverseShippingFee || 0);
-    marketplaceFees += fees;
+      r.commission != null ||
+      r.fixedFee != null ||
+      r.collectionFee != null ||
+      r.shippingFee != null ||
+      r.reverseShippingFee != null
+        ? Math.abs(r.commission || 0) +
+          Math.abs(r.fixedFee || 0) +
+          Math.abs(r.collectionFee || 0) +
+          Math.abs(r.shippingFee || 0) +
+          Math.abs(r.reverseShippingFee || 0)
+        : Math.abs(r.marketplaceFee || 0);
+
+    rowFees += fees;
+    rowGst += Math.abs(r.gstOnMpFees || 0);
   }
 
   // Adjustments & Ads
+  let adsSpend = 0;
   let adjustmentsAndFines = 0;
   for (const a of adjs) {
-    if ((a.sheet || '').toLowerCase().includes('claim') || (a.amount || 0) > 0) {
-      claimsCredit += Math.abs(a.amount || 0);
+    const sheet = (a.sheet || '').toLowerCase();
+    const amt = Math.abs(a.amount || 0);
+    if (sheet.includes('claim') || ((a.amount || 0) > 0 && !sheet.includes('rebate') && !sheet.includes('fee'))) {
+      claimsCredit += amt;
+    } else if (sheet.includes('ad')) {
+      adsSpend += amt;
     } else {
-      adjustmentsAndFines += Math.abs(a.amount || 0);
+      adjustmentsAndFines += amt;
     }
   }
+
+  // Aggregate Marketplace Fees (commission + fixed fee + collection fee + shipping fee + GST on fees + ads + penalties)
+  const marketplaceFees = round2(rowFees + rowGst + adsSpend + adjustmentsAndFines);
 
   // Net Realization from NEFT Batches if available or fallback
   let netRealization = 0;
   if (batches.length > 0) {
-    netRealization = batches.reduce((sum, b) => sum + (b.expectedBank || 0), 0);
+    netRealization = round2(batches.reduce((sum, b) => sum + (b.expectedBank || 0), 0));
   } else {
-    netRealization = grossRevenue - marketplaceFees - adjustmentsAndFines + claimsCredit;
+    netRealization = round2(grossRevenue - marketplaceFees - adjustmentsAndFines + claimsCredit);
   }
 
   const dispatchedUnits = settledUnits + customerReturnUnits;
-  const inboundFreight = settledUnits * freightRate;
-  const packagingCost = dispatchedUnits * packRate;
-  const returnLoss = customerReturnCogs * lossRate;
+  const inboundFreight = round2(settledUnits * freightRate);
+  const packagingCost = round2(dispatchedUnits * packRate);
+  const returnLoss = round2(customerReturnCogs * lossRate);
 
   const totalCostOfGoods = round2(productCogs + inboundFreight + packagingCost + returnLoss);
   const netRealizedProfit = round2(netRealization - totalCostOfGoods);
@@ -203,7 +306,7 @@ export function calculateFlipkartPnL(
   for (const p of pipeline) {
     const val = p.orderItemValue || 0;
     const q = p.qty || 1;
-    const itemCost = costMap[p.sku || ''] || 100;
+    const itemCost = getSkuCost(p.sku || '', costMap);
     pipelineRevenue += val;
     pipelineCogs += q * itemCost;
   }
@@ -212,8 +315,8 @@ export function calculateFlipkartPnL(
   return stripUndefined({
     marketplace: 'Flipkart',
     grossRevenue: round2(grossRevenue),
-    marketplaceFees: round2(marketplaceFees),
-    adsSpend: 0,
+    marketplaceFees,
+    adsSpend: round2(adsSpend),
     adjustmentsAndFines: round2(adjustmentsAndFines),
     claimsCredit: round2(claimsCredit),
     netRealization: round2(netRealization),

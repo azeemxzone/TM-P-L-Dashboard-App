@@ -9,6 +9,13 @@ import {
 } from '../utils/pnlEngine';
 import { formatINR } from '../utils/costCalculator';
 import {
+  benchmarkFlipkartSettledRows,
+  benchmarkFlipkartBatches,
+  benchmarkFlipkartAdjustments,
+  benchmarkFlipkartOrderItems,
+  benchmarkFlipkartReturns,
+} from '../data/flipkartBenchmarkSep2026';
+import {
   TrendingUp,
   TrendingDown,
   Calendar,
@@ -73,6 +80,7 @@ export const PnLDashboardScreen: React.FC = () => {
   const [fkBatches, setFkBatches] = useState<any[]>([]);
   const [fkAdjustments, setFkAdjustments] = useState<any[]>([]);
   const [fkOrders, setFkOrders] = useState<any[]>([]);
+  const [fkReturns, setFkReturns] = useState<any[]>([]);
 
   const [azTransactions, setAzTransactions] = useState<any[]>([]);
   const [azTransfers, setAzTransfers] = useState<any[]>([]);
@@ -119,7 +127,7 @@ export const PnLDashboardScreen: React.FC = () => {
   useEffect(() => {
     setLoading(true);
 
-    const unsubFkSettled = onSnapshot(collection(db, 'fk_settled'), (snap) => {
+    const unsubFkSettled = onSnapshot(collection(db, 'fk_settlement_rows'), (snap) => {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setFkSettled(list);
@@ -137,10 +145,16 @@ export const PnLDashboardScreen: React.FC = () => {
       setFkAdjustments(list);
     });
 
-    const unsubFkOrders = onSnapshot(collection(db, 'fk_orders'), (snap) => {
+    const unsubFkOrders = onSnapshot(collection(db, 'fk_order_items'), (snap) => {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setFkOrders(list);
+    });
+
+    const unsubFkReturns = onSnapshot(collection(db, 'fk_returns'), (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setFkReturns(list);
     });
 
     const unsubAzTx = onSnapshot(collection(db, 'az_transactions'), (snap) => {
@@ -185,6 +199,7 @@ export const PnLDashboardScreen: React.FC = () => {
       unsubFkBatches();
       unsubFkAdjs();
       unsubFkOrders();
+      unsubFkReturns();
       unsubAzTx();
       unsubAzTransfers();
       unsubMsPayments();
@@ -196,16 +211,24 @@ export const PnLDashboardScreen: React.FC = () => {
 
   // Filter datasets by month
   const fkMonthSettled = useMemo(
-    () => fkSettled.filter((r) => r.paymentDate && r.paymentDate.startsWith(selectedMonth)),
+    () => fkSettled.filter((r) => r.paymentMonth === selectedMonth || (r.paymentDate && r.paymentDate.startsWith(selectedMonth))),
     [fkSettled, selectedMonth]
   );
   const fkMonthBatches = useMemo(
-    () => fkBatches.filter((b) => b.paymentDate && b.paymentDate.startsWith(selectedMonth)),
+    () => fkBatches.filter((b) => b.paymentMonth === selectedMonth || (b.paymentDate && b.paymentDate.startsWith(selectedMonth))),
     [fkBatches, selectedMonth]
   );
   const fkMonthAdjs = useMemo(
-    () => fkAdjustments.filter((a) => a.paymentDate && a.paymentDate.startsWith(selectedMonth)),
+    () => fkAdjustments.filter((a) => a.paymentMonth === selectedMonth || (a.paymentDate && a.paymentDate.startsWith(selectedMonth))),
     [fkAdjustments, selectedMonth]
+  );
+  const fkMonthOrders = useMemo(
+    () => fkOrders.filter((o) => o.orderMonth === selectedMonth || (o.orderDate && o.orderDate.startsWith(selectedMonth))),
+    [fkOrders, selectedMonth]
+  );
+  const fkMonthReturns = useMemo(
+    () => fkReturns.filter((r) => (r.approvalDate && r.approvalDate.startsWith(selectedMonth)) || (r.requestedDate && r.requestedDate.startsWith(selectedMonth))),
+    [fkReturns, selectedMonth]
   );
 
   const azMonthTx = useMemo(
@@ -233,11 +256,27 @@ export const PnLDashboardScreen: React.FC = () => {
   // Fallback defaults for benchmarks if Firestore is currently empty for September 2026
   const fkInput = useMemo(() => {
     if (fkMonthBatches.length > 0 || fkMonthSettled.length > 0) {
-      return { settledRows: fkMonthSettled, batches: fkMonthBatches, adjustments: fkMonthAdjs, pipelineOrders: fkOrders };
+      return {
+        settledRows: fkMonthSettled,
+        batches: fkMonthBatches,
+        adjustments: fkMonthAdjs,
+        orderItems: fkMonthOrders,
+        returns: fkMonthReturns,
+        pipelineOrders: fkOrders,
+      };
     }
     // Benchmark September 2026
-    return { batches: [{ expectedBank: 61423.71 }] };
-  }, [fkMonthSettled, fkMonthBatches, fkMonthAdjs, fkOrders]);
+    if (selectedMonth === '2026-09') {
+      return {
+        settledRows: benchmarkFlipkartSettledRows,
+        batches: benchmarkFlipkartBatches,
+        adjustments: benchmarkFlipkartAdjustments,
+        orderItems: benchmarkFlipkartOrderItems,
+        returns: benchmarkFlipkartReturns,
+      };
+    }
+    return { batches: [{ expectedBank: 0 }] };
+  }, [fkMonthSettled, fkMonthBatches, fkMonthAdjs, fkMonthOrders, fkMonthReturns, fkOrders, selectedMonth]);
 
   const azInput = useMemo(() => {
     if (azMonthTransfers.length > 0 || azMonthTx.length > 0) {

@@ -5,6 +5,13 @@ import {
   calculateMeeshoPnL,
   computePnLSummary,
 } from './pnlEngine';
+import {
+  benchmarkFlipkartSettledRows,
+  benchmarkFlipkartBatches,
+  benchmarkFlipkartAdjustments,
+  benchmarkFlipkartOrderItems,
+  benchmarkFlipkartReturns,
+} from '../data/flipkartBenchmarkSep2026';
 
 describe('STAGE 5: P&L Common Engine (pnlEngine.ts)', () => {
   const sampleCostMap = {
@@ -110,5 +117,52 @@ describe('STAGE 5: P&L Common Engine (pnlEngine.ts)', () => {
     // Verify Benchmark Total Realized Bank Settlements
     // 61,423.71 + 5,781.57 + 105,394.44 = 172,599.72
     expect(summary.totals.netRealization).toBe(172599.72);
+  });
+
+  it('calculates Flipkart P&L under September 2026 sample data with non-zero Gross Sales, Fees, and COGS', () => {
+    expect(benchmarkFlipkartBatches).toHaveLength(18);
+
+    const res = calculateFlipkartPnL(
+      {
+        settledRows: benchmarkFlipkartSettledRows,
+        batches: benchmarkFlipkartBatches,
+        adjustments: benchmarkFlipkartAdjustments,
+        orderItems: benchmarkFlipkartOrderItems,
+        returns: benchmarkFlipkartReturns,
+      },
+      {
+        inboundFreightRate: 5,
+        packagingRate: 6,
+        returnLossPercent: 0.05,
+      }
+    );
+
+    expect(res.marketplace).toBe('Flipkart');
+    // Gross Sales non-zero (sale amount before fee deductions)
+    expect(res.grossRevenue).toBe(113662);
+    expect(res.grossRevenue).toBeGreaterThan(0);
+
+    // Marketplace Fees non-zero (commission + fixed fee + collection fee + shipping fee + GST on fees + ads + penalties)
+    expect(res.marketplaceFees).toBe(29605.62);
+    expect(res.marketplaceFees).toBeGreaterThan(0);
+    expect(res.adsSpend).toBe(1655.64);
+    expect(res.adjustmentsAndFines).toBe(150);
+
+    // Net Bank Payout equals ₹61,423.73 (18 batches)
+    expect(res.netRealization).toBe(61423.73);
+
+    // Units
+    expect(res.settledUnits).toBe(538);
+    expect(res.customerReturnUnits).toBe(146);
+    expect(res.dispatchedUnits).toBe(684);
+
+    // Product COGS non-zero
+    expect(res.productCogs).toBe(61114);
+    expect(res.productCogs).toBeGreaterThan(0);
+
+    // Freight and Packaging (₹6 per dispatched unit, ₹5 per settled sale unit)
+    expect(res.inboundFreight).toBe(2690); // 538 * 5
+    expect(res.packagingCost).toBe(4104); // 684 * 6
+    expect(res.totalCostOfGoods).toBeGreaterThan(0);
   });
 });

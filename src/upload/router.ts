@@ -120,7 +120,7 @@ export function normalizeFileInput(
   }
 
   // 3. ArrayBuffer, Uint8Array or Buffer
-  let buffer: ArrayBuffer | Uint8Array = content;
+  const buffer: ArrayBuffer | Uint8Array = content as ArrayBuffer | Uint8Array;
   let rawText = '';
   let wb: XLSX.WorkBook | null = null;
 
