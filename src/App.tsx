@@ -18,6 +18,7 @@ import { TrackingScreen } from './components/TrackingScreen';
 import { PnLDashboardScreen } from './components/PnLDashboardScreen';
 import { PipelineTrackerScreen } from './components/PipelineTrackerScreen';
 import { SkuPerformanceScreen } from './components/SkuPerformanceScreen';
+import { ReturnPerformanceScreen } from './components/ReturnPerformanceScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { UsersScreen } from './components/UsersScreen';
 import {
@@ -36,11 +37,13 @@ import {
   PieChart,
   Clock,
   Layers,
+  RotateCcw,
 } from 'lucide-react';
 
 type Tab =
   | 'pnl_dashboard'
   | 'sku_performance'
+  | 'return_performance'
   | 'pipeline_tracker'
   | 'cost_master'
   | 'opening_stock'
@@ -90,8 +93,8 @@ const AppContent: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-900 dark:text-white text-base tracking-tight">Tabbymart</span>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                  Stage 7
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                  Stage 8
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">P&amp;L Financial Master</p>
@@ -122,6 +125,18 @@ const AppContent: React.FC = () => {
             >
               <Layers className="w-3.5 h-3.5 text-indigo-300" />
               SKU Performance
+            </button>
+
+            <button
+              onClick={() => setActiveTab('return_performance')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'return_performance'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
+              }`}
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-rose-300" />
+              Return Loss Analysis
             </button>
 
             <button
@@ -303,6 +318,15 @@ const AppContent: React.FC = () => {
             SKU
           </button>
           <button
+            onClick={() => setActiveTab('return_performance')}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
+              activeTab === 'return_performance' ? 'bg-rose-600 text-white' : 'text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-rose-300" />
+            Returns
+          </button>
+          <button
             onClick={() => setActiveTab('pipeline_tracker')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1 shrink-0 ${
               activeTab === 'pipeline_tracker' ? 'bg-amber-600 text-white' : 'text-slate-600 dark:text-slate-400'
@@ -401,6 +425,7 @@ const AppContent: React.FC = () => {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'pnl_dashboard' && <PnLDashboardScreen />}
         {activeTab === 'sku_performance' && <SkuPerformanceScreen />}
+        {activeTab === 'return_performance' && <ReturnPerformanceScreen />}
         {activeTab === 'pipeline_tracker' && <PipelineTrackerScreen />}
         {activeTab === 'cost_master' && <CostMasterScreen />}
         {activeTab === 'opening_stock' && <OpeningStockScreen />}
@@ -417,7 +442,7 @@ const AppContent: React.FC = () => {
 
       {/* Footer */}
       <footer className="border-t border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-950 py-4 text-center text-xs text-slate-500 dark:text-slate-400 transition-colors">
-        <p>Tabbymart Internal P&amp;L App • Stage 7 Platform-Wise SKU Performance &amp; Channel Profitability</p>
+        <p>Tabbymart Internal P&amp;L App • Stage 8 Return Performance &amp; Loss Analysis</p>
       </footer>
     </div>
   );

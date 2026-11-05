@@ -10,6 +10,7 @@ import {
 import { formatINR } from '../utils/costCalculator';
 import { PipelineTrackerScreen } from './PipelineTrackerScreen';
 import { SkuPerformanceScreen } from './SkuPerformanceScreen';
+import { ReturnPerformanceScreen } from './ReturnPerformanceScreen';
 import {
   benchmarkFlipkartSettledRows,
   benchmarkFlipkartBatches,
@@ -70,7 +71,7 @@ export const PnLDashboardScreen: React.FC = () => {
   const [selectedFY, setSelectedFY] = useState<string>('2026-27');
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-09');
   const [selectedChannel, setSelectedChannel] = useState<'all' | 'Flipkart' | 'Amazon' | 'Meesho'>('all');
-  const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline' | 'sku_performance'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline' | 'sku_performance' | 'return_performance'>('overview');
 
   // Operational cost overrides from Settings
   const [inboundFreightRate, setInboundFreightRate] = useState<number>(5);
@@ -382,6 +383,17 @@ export const PnLDashboardScreen: React.FC = () => {
               }`}
             >
               <Layers className="w-3.5 h-3.5" /> SKU Performance
+            </button>
+
+            <button
+              onClick={() => setViewMode('return_performance')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                viewMode === 'return_performance'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Return Loss
             </button>
           </div>
 
@@ -802,8 +814,10 @@ export const PnLDashboardScreen: React.FC = () => {
         </div>
       ) : viewMode === 'pipeline' ? (
         <PipelineTrackerScreen initialMonth={selectedMonth} initialFY={selectedFY} />
-      ) : (
+      ) : viewMode === 'sku_performance' ? (
         <SkuPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
+      ) : (
+        <ReturnPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
       )}
     </div>
   );
