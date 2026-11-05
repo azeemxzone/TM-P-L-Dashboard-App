@@ -9,6 +9,7 @@ import {
 } from '../utils/pnlEngine';
 import { formatINR } from '../utils/costCalculator';
 import { PipelineTrackerScreen } from './PipelineTrackerScreen';
+import { SkuPerformanceScreen } from './SkuPerformanceScreen';
 import {
   benchmarkFlipkartSettledRows,
   benchmarkFlipkartBatches,
@@ -69,7 +70,7 @@ export const PnLDashboardScreen: React.FC = () => {
   const [selectedFY, setSelectedFY] = useState<string>('2026-27');
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-09');
   const [selectedChannel, setSelectedChannel] = useState<'all' | 'Flipkart' | 'Amazon' | 'Meesho'>('all');
-  const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline' | 'sku_performance'>('overview');
 
   // Operational cost overrides from Settings
   const [inboundFreightRate, setInboundFreightRate] = useState<number>(5);
@@ -370,6 +371,17 @@ export const PnLDashboardScreen: React.FC = () => {
               }`}
             >
               <Clock className="w-3.5 h-3.5" /> Pipeline Carry-Forward
+            </button>
+
+            <button
+              onClick={() => setViewMode('sku_performance')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                viewMode === 'sku_performance'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" /> SKU Performance
             </button>
           </div>
 
@@ -788,8 +800,10 @@ export const PnLDashboardScreen: React.FC = () => {
             </table>
           </div>
         </div>
-      ) : (
+      ) : viewMode === 'pipeline' ? (
         <PipelineTrackerScreen initialMonth={selectedMonth} initialFY={selectedFY} />
+      ) : (
+        <SkuPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
       )}
     </div>
   );
