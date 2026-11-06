@@ -219,6 +219,28 @@ describe('Stage 5R-1 Fix 3: Golden Test, Packing & Meesho Units Suite', () => {
     expect(Math.abs(az.returnLoss - ref.Amazon.returnLoss)).toBeLessThanOrEqual(1.00);
     expect(Math.abs(az.tdsTotal - ref.Amazon.tds)).toBeLessThanOrEqual(1.00);
 
+    // Amazon TCS: Released -28.02 and Deferred -8.62 (read dynamically from parsed unified CSV, not literals)
+    // and assert Released + Deferred equals the workbook Summary C13 within 0.01
+    let azReleasedTcs = 0;
+    let azDeferredTcs = 0;
+    for (const r of azUnified) {
+      if (r.type === 'Transfer') continue;
+      const tcs = (r.tcsCgst || 0) + (r.tcsSgst || 0) + (r.tcsIgst || 0);
+      if (r.status === 'Released') {
+        azReleasedTcs += tcs;
+      } else if (r.status === 'Deferred') {
+        azDeferredTcs += tcs;
+      }
+    }
+    azReleasedTcs = Math.round(azReleasedTcs * 100) / 100;
+    azDeferredTcs = Math.round(azDeferredTcs * 100) / 100;
+    const azTotalTcs = Math.round((azReleasedTcs + azDeferredTcs) * 100) / 100;
+
+    expect(azReleasedTcs).toBe(-28.02);
+    expect(azDeferredTcs).toBe(-8.62);
+    expect(az.tcsTotal).toBe(azReleasedTcs);
+    expect(Math.abs(azTotalTcs - ref.Amazon.tcs)).toBeLessThanOrEqual(0.01);
+
     // Meesho Golden Assertions (tolerance 1.00)
     expect(Math.abs(ms.netSettlement - ref.Meesho.revenue)).toBeLessThanOrEqual(1.00);
     expect(ms.units).toBe(561);
