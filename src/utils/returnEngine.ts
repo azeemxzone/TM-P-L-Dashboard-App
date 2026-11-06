@@ -356,7 +356,7 @@ export function computeReturnPerformance(input: ReturnEngineInput): ReturnEngine
     const rDate = ret.approvalDate || ret.requestedDate || '';
     if (!isDateInScope(rDate, input.period, input.fy)) continue;
 
-    const itemId = ret.orderItemId || ret.returnId || String(Math.random());
+    const itemId = ret.orderItemId || ret.returnId || `FK_RET_${ret.trackingId || ret.sku || 'ITEM'}_${processedFkItems.size}`;
     processedFkItems.add(itemId);
 
     const q = Math.max(Number(ret.qty) || 1, 1);
@@ -516,7 +516,7 @@ export function computeReturnPerformance(input: ReturnEngineInput): ReturnEngine
     fkSummary.grossReturnLoss = round2(fkSummary.grossReturnLoss + grossLoss);
 
     claimsList.push({
-      id: `FK_SETTLED_${rowId || String(Math.random())}`,
+      id: `FK_SETTLED_${rowId || sRow.orderId || sRow.orderItemId || claimsList.length}`,
       orderId: sRow.orderId || rowId,
       orderItemId: sRow.orderItemId,
       marketplace: 'Flipkart',
@@ -630,7 +630,7 @@ export function computeReturnPerformance(input: ReturnEngineInput): ReturnEngine
     azSummary.grossReturnLoss = round2(azSummary.grossReturnLoss + grossLoss);
 
     claimsList.push({
-      id: `AZ_${t.orderId || t.id || String(Math.random())}`,
+      id: `AZ_${t.orderId || t.id || claimsList.length}`,
       orderId: t.orderId || 'Amazon Order',
       marketplace: 'Amazon',
       rawSku,
@@ -752,7 +752,7 @@ export function computeReturnPerformance(input: ReturnEngineInput): ReturnEngine
     msSummary.grossReturnLoss = round2(msSummary.grossReturnLoss + grossLoss);
 
     claimsList.push({
-      id: `MS_${p.subOrderNo || p.orderId || String(Math.random())}`,
+      id: `MS_${p.subOrderNo || p.orderId || claimsList.length}`,
       orderId: p.subOrderNo || p.orderId || 'Meesho Order',
       marketplace: 'Meesho',
       rawSku,

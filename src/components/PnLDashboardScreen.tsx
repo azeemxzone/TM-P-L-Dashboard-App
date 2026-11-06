@@ -11,14 +11,6 @@ import { formatINR } from '../utils/costCalculator';
 import { PipelineTrackerScreen } from './PipelineTrackerScreen';
 import { SkuPerformanceScreen } from './SkuPerformanceScreen';
 import { ReturnPerformanceScreen } from './ReturnPerformanceScreen';
-import { TaxReconciliationScreen } from './TaxReconciliationScreen';
-import {
-  benchmarkFlipkartSettledRows,
-  benchmarkFlipkartBatches,
-  benchmarkFlipkartAdjustments,
-  benchmarkFlipkartOrderItems,
-  benchmarkFlipkartReturns,
-} from '../data/flipkartBenchmarkSep2026';
 import {
   TrendingUp,
   TrendingDown,
@@ -29,7 +21,6 @@ import {
   Coins,
   DollarSign,
   Package,
-  Receipt,
   Truck,
   RotateCcw,
   CheckCircle2,
@@ -73,7 +64,7 @@ export const PnLDashboardScreen: React.FC = () => {
   const [selectedFY, setSelectedFY] = useState<string>('2026-27');
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-09');
   const [selectedChannel, setSelectedChannel] = useState<'all' | 'Flipkart' | 'Amazon' | 'Meesho'>('all');
-  const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline' | 'sku_performance' | 'return_performance' | 'tax_reconciliation'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline' | 'sku_performance' | 'return_performance'>('overview');
 
   // Operational cost overrides from Settings
   const [inboundFreightRate, setInboundFreightRate] = useState<number>(5);
@@ -88,7 +79,6 @@ export const PnLDashboardScreen: React.FC = () => {
   const [fkReturns, setFkReturns] = useState<any[]>([]);
 
   const [azTransactions, setAzTransactions] = useState<any[]>([]);
-  const [azTransfers, setAzTransfers] = useState<any[]>([]);
 
   const [msPayments, setMsPayments] = useState<any[]>([]);
   const [msAds, setMsAds] = useState<any[]>([]);
@@ -168,12 +158,6 @@ export const PnLDashboardScreen: React.FC = () => {
       setAzTransactions(list);
     });
 
-    const unsubAzTransfers = onSnapshot(collection(db, 'az_transfers'), (snap) => {
-      const list: any[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      setAzTransfers(list);
-    });
-
     const unsubMsPayments = onSnapshot(collection(db, 'ms_payments'), (snap) => {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
@@ -206,7 +190,6 @@ export const PnLDashboardScreen: React.FC = () => {
       unsubFkOrders();
       unsubFkReturns();
       unsubAzTx();
-      unsubAzTransfers();
       unsubMsPayments();
       unsubMsAds();
       unsubMsBatches();
@@ -240,10 +223,6 @@ export const PnLDashboardScreen: React.FC = () => {
     () => azTransactions.filter((t) => t.postedDateIST && t.postedDateIST.startsWith(selectedMonth)),
     [azTransactions, selectedMonth]
   );
-  const azMonthTransfers = useMemo(
-    () => azTransfers.filter((t) => t.date && t.date.startsWith(selectedMonth)),
-    [azTransfers, selectedMonth]
-  );
 
   const msMonthPayments = useMemo(
     () => msPayments.filter((p) => p.paymentDate && p.paymentDate.startsWith(selectedMonth)),
@@ -258,45 +237,23 @@ export const PnLDashboardScreen: React.FC = () => {
     [msBatches, selectedMonth]
   );
 
-  // Fallback defaults for benchmarks if Firestore is currently empty for September 2026
   const fkInput = useMemo(() => {
-    if (fkMonthBatches.length > 0 || fkMonthSettled.length > 0) {
-      return {
-        settledRows: fkMonthSettled,
-        batches: fkMonthBatches,
-        adjustments: fkMonthAdjs,
-        orderItems: fkMonthOrders,
-        returns: fkMonthReturns,
-        pipelineOrders: fkOrders,
-      };
-    }
-    // Benchmark September 2026
-    if (selectedMonth === '2026-09') {
-      return {
-        settledRows: benchmarkFlipkartSettledRows,
-        batches: benchmarkFlipkartBatches,
-        adjustments: benchmarkFlipkartAdjustments,
-        orderItems: benchmarkFlipkartOrderItems,
-        returns: benchmarkFlipkartReturns,
-      };
-    }
-    return { batches: [{ expectedBank: 0 }] };
-  }, [fkMonthSettled, fkMonthBatches, fkMonthAdjs, fkMonthOrders, fkMonthReturns, fkOrders, selectedMonth]);
+    return {
+      settledRows: fkMonthSettled,
+      batches: fkMonthBatches,
+      adjustments: fkMonthAdjs,
+      orderItems: fkMonthOrders,
+      returns: fkMonthReturns,
+      pipelineOrders: fkOrders,
+    };
+  }, [fkMonthSettled, fkMonthBatches, fkMonthAdjs, fkMonthOrders, fkMonthReturns, fkOrders]);
 
   const azInput = useMemo(() => {
-    if (azMonthTransfers.length > 0 || azMonthTx.length > 0) {
-      return { transactions: azMonthTx, transfers: azMonthTransfers };
-    }
-    // Benchmark September 2026
-    return { transfers: [{ amount: 5781.57 }] };
-  }, [azMonthTx, azMonthTransfers]);
+    return { transactions: azMonthTx };
+  }, [azMonthTx]);
 
   const msInput = useMemo(() => {
-    if (msMonthBatches.length > 0 || msMonthPayments.length > 0) {
-      return { payments: msMonthPayments, ads: msMonthAds, batches: msMonthBatches, pipelineOrders: msOrders };
-    }
-    // Benchmark September 2026
-    return { batches: [{ expectedBank: 105394.44 }] };
+    return { payments: msMonthPayments, ads: msMonthAds, batches: msMonthBatches, pipelineOrders: msOrders };
   }, [msMonthPayments, msMonthAds, msMonthBatches, msOrders]);
 
   // Compute Overall P&L Summary
@@ -396,17 +353,6 @@ export const PnLDashboardScreen: React.FC = () => {
               }`}
             >
               <RotateCcw className="w-3.5 h-3.5" /> Return Loss
-            </button>
-
-            <button
-              onClick={() => setViewMode('tax_reconciliation')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'tax_reconciliation'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Receipt className="w-3.5 h-3.5" /> Tax Reconciliation
             </button>
           </div>
 
@@ -568,15 +514,15 @@ export const PnLDashboardScreen: React.FC = () => {
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">
-                  In-Pipeline Revenue
+                  In-Pipeline Order Value
                 </span>
                 <Clock className="w-4 h-4 text-sky-500" />
               </div>
               <div className="text-2xl font-bold font-mono text-slate-900 dark:text-white">
                 {formatINR(totals.pipelineRevenue)}
               </div>
-              <div className="text-xs text-sky-600 dark:text-sky-400 font-mono pt-1 border-t border-slate-100 dark:border-slate-800">
-                Est. Pipeline Profit: {formatINR(totals.pipelineProfit)}
+              <div className="text-xs text-slate-500 dark:text-slate-400 font-mono pt-1 border-t border-slate-100 dark:border-slate-800">
+                Pipeline Orders: {(fkOrders.length + msOrders.length).toLocaleString()}
               </div>
             </div>
           </div>
@@ -829,10 +775,8 @@ export const PnLDashboardScreen: React.FC = () => {
         <PipelineTrackerScreen initialMonth={selectedMonth} initialFY={selectedFY} />
       ) : viewMode === 'sku_performance' ? (
         <SkuPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
-      ) : viewMode === 'return_performance' ? (
-        <ReturnPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
       ) : (
-        <TaxReconciliationScreen initialMonth={selectedMonth} initialFY={selectedFY} />
+        <ReturnPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
       )}
     </div>
   );

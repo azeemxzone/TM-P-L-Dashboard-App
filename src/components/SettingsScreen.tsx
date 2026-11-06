@@ -198,8 +198,9 @@ export const SettingsScreen: React.FC = () => {
       }));
 
       // Write each change to create-only audit log in settings collection
-      for (const ch of changes) {
-        const auditDocId = `audit_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      for (let i = 0; i < changes.length; i++) {
+        const ch = changes[i];
+        const auditDocId = `audit_${Date.now()}_${i}`;
         const auditRef = doc(db, 'settings', auditDocId);
         await setDoc(auditRef, stripUndefined({
           type: 'audit',

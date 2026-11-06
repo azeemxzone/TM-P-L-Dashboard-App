@@ -55,7 +55,6 @@ export interface PnLChannelSummary {
   netRealizedProfit: number;
   netProfitMarginPercent: number;
   pipelineRevenue: number;
-  pipelineProfit: number;
 }
 
 export interface PnLOverallSummary {
@@ -310,7 +309,6 @@ export function calculateFlipkartPnL(
     pipelineRevenue += val;
     pipelineCogs += q * itemCost;
   }
-  const pipelineProfit = round2(pipelineRevenue * 0.7 - pipelineCogs);
 
   return stripUndefined({
     marketplace: 'Flipkart',
@@ -331,7 +329,6 @@ export function calculateFlipkartPnL(
     netRealizedProfit,
     netProfitMarginPercent,
     pipelineRevenue: round2(pipelineRevenue),
-    pipelineProfit: round2(pipelineProfit),
   });
 }
 
@@ -361,6 +358,11 @@ export function calculateAmazonPnL(
   let pipelineCogs = 0;
 
   for (const t of txs) {
+    // Exclude Transfer rows from revenue and order fee processing (transfers are bank payout transfers, not sales or fee rows)
+    if ((t.type || '').toLowerCase() === 'transfer') {
+      continue;
+    }
+
     const isReleased = (t.status || 'Released').toLowerCase() === 'released';
     const isReturn = (t.type || '').toLowerCase().includes('refund') || (t.productSales || 0) < 0;
     const q = Math.abs(t.quantity || 1);
@@ -398,7 +400,7 @@ export function calculateAmazonPnL(
     netRealization = transfers.reduce((sum, tr) => sum + (tr.amount || 0), 0);
   } else {
     netRealization = txs
-      .filter((t) => (t.status || 'Released').toLowerCase() === 'released')
+      .filter((t) => (t.status || 'Released').toLowerCase() === 'released' && (t.type || '').toLowerCase() !== 'transfer')
       .reduce((sum, t) => sum + (t.total || 0), 0);
   }
 
@@ -410,7 +412,6 @@ export function calculateAmazonPnL(
   const totalCostOfGoods = round2(productCogs + inboundFreight + packagingCost + returnLoss);
   const netRealizedProfit = round2(netRealization - totalCostOfGoods);
   const netProfitMarginPercent = grossRevenue > 0 ? round2((netRealizedProfit / grossRevenue) * 100) : 0;
-  const pipelineProfit = round2(pipelineRevenue * 0.7 - pipelineCogs);
 
   return stripUndefined({
     marketplace: 'Amazon',
@@ -431,7 +432,6 @@ export function calculateAmazonPnL(
     netRealizedProfit,
     netProfitMarginPercent,
     pipelineRevenue: round2(pipelineRevenue),
-    pipelineProfit: round2(pipelineProfit),
   });
 }
 
@@ -511,7 +511,6 @@ export function calculateMeeshoPnL(
     pipelineRevenue += val;
     pipelineCogs += q * itemCost;
   }
-  const pipelineProfit = round2(pipelineRevenue * 0.7 - pipelineCogs);
 
   return stripUndefined({
     marketplace: 'Meesho',
@@ -532,7 +531,6 @@ export function calculateMeeshoPnL(
     netRealizedProfit,
     netProfitMarginPercent,
     pipelineRevenue: round2(pipelineRevenue),
-    pipelineProfit: round2(pipelineProfit),
   });
 }
 
@@ -578,7 +576,6 @@ export function computePnLSummary(
     netRealizedProfit: round2(filteredChannels.reduce((s, c) => s + c.netRealizedProfit, 0)),
     netProfitMarginPercent: 0,
     pipelineRevenue: round2(filteredChannels.reduce((s, c) => s + c.pipelineRevenue, 0)),
-    pipelineProfit: round2(filteredChannels.reduce((s, c) => s + c.pipelineProfit, 0)),
   };
 
   if (totals.grossRevenue > 0) {

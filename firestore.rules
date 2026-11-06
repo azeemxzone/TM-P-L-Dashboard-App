@@ -232,6 +232,77 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update, delete: if false;
     }
+
+    // Meesho Orders (Stage 4)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /ms_orders/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Meesho Returns Completed (Stage 4)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /ms_returns_completed/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Meesho Returns In-Transit (Stage 4)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /ms_returns_in_transit/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Meesho Payments (Stage 4)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /ms_payments/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Meesho Ads Cost (Stage 4)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /ms_ads/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Meesho Batches (Stage 4)
+    // Read: Allowed users
+    // Create & Update: Admin only
+    // Delete: denied
+    match /ms_batches/{docId} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Meesho Uploads audit log (Stage 4)
+    // Read: Allowed users
+    // Create: Admin only (create-only)
+    // Update, Delete: denied
+    match /ms_uploads/{docId} {
+      allow read: if isAllowedUser();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
   }
 }
+
 
