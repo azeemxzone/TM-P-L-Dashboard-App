@@ -487,39 +487,36 @@ export function buildLedger(
       msDispatchedSeen.add(r.subOrderNo);
     }
 
-    let kind: LedgerKind;
-    let units: number;
-    let productCost: number;
-    let packing: number;
-    let returnLoss: number;
+    // Meesho unit rule (owner decision, same as Flipkart):
+    // per payment row: units = +qty if sale amount > 0; -qty if sale return < 0 (both nets to 0).
+    // Applies to net units, MFG cost and inbound freight.
+    // Return-loss and packing logic unchanged.
+    const saleAmt = r.amounts?.['B'] || 0;
+    const returnAmt = r.amounts?.['C'] || 0;
+    let units = 0;
+    if (saleAmt > 0 && returnAmt < 0) {
+      units = 0; // a row with both nets to 0
+    } else if (saleAmt > 0) {
+      units = r.qty;
+    } else if (returnAmt < 0) {
+      units = -r.qty;
+    }
 
+    const productCost = round2(landedCostToUse * units);
+    const packing = isNewDispatch ? round2(packingRate * r.qty) : 0;
+    const returnLoss = isReturn && costInfo ? round2(msLossRate * mfgCostToUse * r.qty) : 0;
+
+    let kind: LedgerKind;
     if (isReturn) {
       kind = 'customer_return';
-      // Revenue in payments file is already net of refunds; do not net returns against it a second time.
-      units = 0;
-      productCost = 0; // Inventory was returned to stock
-      packing = isNewDispatch ? round2(packingRate * r.qty) : 0;
-      returnLoss = costInfo ? round2(msLossRate * mfgCostToUse * r.qty) : 0;
     } else if (isRto) {
       kind = 'rto';
-      // RTO units returned unopened; finalSettlement is 0
-      units = 0;
-      productCost = 0;
-      packing = isNewDispatch ? round2(packingRate * r.qty) : 0;
-      returnLoss = 0;
     } else if (isClaim) {
       kind = 'claim';
-      units = 0;
-      productCost = 0;
-      packing = 0;
-      returnLoss = 0;
+    } else if (units < 0) {
+      kind = 'customer_return';
     } else {
-      // Delivered or Shipped: sales that were fulfilled and kept by buyers
       kind = 'sale';
-      units = r.qty;
-      productCost = round2(landedCostToUse * r.qty);
-      packing = isNewDispatch ? round2(packingRate * r.qty) : 0;
-      returnLoss = 0;
     }
 
     const commissionVal = r.amounts?.['G'] || 0;
