@@ -100,16 +100,19 @@ ms_batches, ms_uploads. (sku_variants unused.)
   emails, admins, roles (lowercase).
 
 ## Open decisions
-- (none) Settlement month = headline basis: CONFIRMED 6 Nov 2026.
-  Store settlementMonth and orderMonth both.
+- (none) Settlement month headline: CONFIRMED. Packing includes RTO: CONFIRMED
+  6 Nov 2026.
 
 ## Last result (6 Nov 2026)
-- Prompt A: NOT approved. No proof supplied; Stage 9 Tax Reconciliation
-  module added out of scope (commit 3283ff7) -> remove (Prompt A-2).
-  Dashboard still shows Amazon -868.72 and invented pipeline profit.
-- 5R-1 Fix 2: reference workbook not on disk, golden diff used typed
-  numbers -> not accepted. Gap after tax: FK -815.54, AZ -18.35, MS -428.81,
-  total -1,262.70. Fix 3 queue: workbook in /samples (test fails if
-  missing); Amazon 23.77 unexplained; return-loss base landed not MFG;
-  confirm FK net units deduct 60 customer returns; FK TDS 10x TCS check.
-- Next: Prompt A-2 -> 5R-1 Fix 3 -> 5R-2 -> 5R-3.
+- Prompt A-2: approved conditional on green Actions run + fresh dashboard
+  screenshot. Stage 9 module removed, benchmark/az_transfers/genai/0.7
+  removed, ms_* rules written (owner to publish inside documents block;
+  compare ms_uploads with fk_uploads rule). Open: Settings audit IDs must be
+  append-only.
+- Reference workbook reviewed. Gap ledger vs reference -1,263.01 = FK packing
+  816 + AZ packing 18 + MS 4 net units 429. Return loss base = MFG cost of
+  customer-returned units (ledger correct). Reference packing = sale rows
+  only; owner rule includes RTO, so golden test adjusts for it.
+- Packing rule: per dispatched unit, once per order-item ID ever, in the month
+  of first settlement row. FK Sep 3,588; MS 5,862; AZ units TBD.
+- Next: 5R-1 Fix 3 -> 5R-2 -> 5R-3. Fix 4 queue: FK TDS ~10x TCS parser check.
