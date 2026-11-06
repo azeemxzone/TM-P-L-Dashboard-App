@@ -104,15 +104,12 @@ ms_batches, ms_uploads. (sku_variants unused.)
   6 Nov 2026.
 
 ## Last result (6 Nov 2026)
-- Prompt A-2: approved conditional on green Actions run + fresh dashboard
-  screenshot. Stage 9 module removed, benchmark/az_transfers/genai/0.7
-  removed, ms_* rules written (owner to publish inside documents block;
-  compare ms_uploads with fk_uploads rule). Open: Settings audit IDs must be
-  append-only.
-- Reference workbook reviewed. Gap ledger vs reference -1,263.01 = FK packing
-  816 + AZ packing 18 + MS 4 net units 429. Return loss base = MFG cost of
-  customer-returned units (ledger correct). Reference packing = sale rows
-  only; owner rule includes RTO, so golden test adjusts for it.
-- Packing rule: per dispatched unit, once per order-item ID ever, in the month
-  of first settlement row. FK Sep 3,588; MS 5,862; AZ units TBD.
-- Next: 5R-1 Fix 3 -> 5R-2 -> 5R-3. Fix 4 queue: FK TDS ~10x TCS parser check.
+- Prompt A-2: APPROVED. Actions #44 green; screenshot shows Amazon
+  4,912.85, no pipeline profit, no Stage 9. Dashboard profit still old
+  engine (FK -6,028.57, AZ -2,206.60, MS 22,618.59, total 14,383.42): wrong
+  until 5R-3 rewires to ledger. Open: Settings audit IDs append-only;
+  firestore.rules ms_* to be published by owner (compare ms_uploads with
+  fk_uploads).
+- 5R-1 Fix 3: not approved (see Fix 4 prompt: Meesho unit rule, test counts,
+  bun.lock, Amazon TCS report).
+- Next: Fix 4 -> 5R-2 -> 5R-3. Queue: FK TDS ~10x TCS parser check.
