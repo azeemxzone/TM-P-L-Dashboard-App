@@ -19,6 +19,7 @@ import { PnLDashboardScreen } from './components/PnLDashboardScreen';
 import { PipelineTrackerScreen } from './components/PipelineTrackerScreen';
 import { SkuPerformanceScreen } from './components/SkuPerformanceScreen';
 import { ReturnPerformanceScreen } from './components/ReturnPerformanceScreen';
+import { TaxReconciliationScreen } from './components/TaxReconciliationScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { UsersScreen } from './components/UsersScreen';
 import {
@@ -38,12 +39,14 @@ import {
   Clock,
   Layers,
   RotateCcw,
+  Receipt,
 } from 'lucide-react';
 
 type Tab =
   | 'pnl_dashboard'
   | 'sku_performance'
   | 'return_performance'
+  | 'tax_reconciliation'
   | 'pipeline_tracker'
   | 'cost_master'
   | 'opening_stock'
@@ -93,11 +96,11 @@ const AppContent: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-900 dark:text-white text-base tracking-tight">Tabbymart</span>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                  Stage 8
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+                  Stage 9
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">P&amp;L Financial Master</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">P&amp;L &amp; Tax Financial Master</p>
             </div>
           </div>
 
@@ -113,6 +116,18 @@ const AppContent: React.FC = () => {
             >
               <PieChart className="w-3.5 h-3.5 text-emerald-400" />
               P&amp;L Dashboard
+            </button>
+
+            <button
+              onClick={() => setActiveTab('tax_reconciliation')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                activeTab === 'tax_reconciliation'
+                  ? 'bg-violet-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-900'
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5 text-violet-300" />
+              Tax Reconciliation
             </button>
 
             <button

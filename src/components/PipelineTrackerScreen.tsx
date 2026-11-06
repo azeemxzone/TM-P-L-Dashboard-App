@@ -900,13 +900,13 @@ export const PipelineTrackerScreen: React.FC<PipelineTrackerScreenProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-                {filteredTableList.map((o) => {
+                {filteredTableList.map((o, idx) => {
                   const ageDays = getDaysDiff(o.orderDate, asOfDate);
                   const isRed = !o.isSettled && ageDays >= redThreshold;
                   const isAmber = !o.isSettled && !isRed && ageDays >= amberThreshold;
 
                   return (
-                    <tr key={`${o.marketplace}-${o.orderId}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                    <tr key={`${o.marketplace}-${o.orderItemId || o.orderId}-${o.sku}-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
                       <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
                         {o.orderId}
                       </td>

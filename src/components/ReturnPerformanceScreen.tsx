@@ -965,10 +965,10 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                     </td>
                   </tr>
                 ) : (
-                  displayClaims.map((c) => {
+                  displayClaims.map((c, idx) => {
                     return (
                       <tr
-                        key={c.id}
+                        key={`${c.id}_${idx}`}
                         className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
                       >
                         <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">

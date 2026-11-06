@@ -11,6 +11,7 @@ import { formatINR } from '../utils/costCalculator';
 import { PipelineTrackerScreen } from './PipelineTrackerScreen';
 import { SkuPerformanceScreen } from './SkuPerformanceScreen';
 import { ReturnPerformanceScreen } from './ReturnPerformanceScreen';
+import { TaxReconciliationScreen } from './TaxReconciliationScreen';
 import {
   benchmarkFlipkartSettledRows,
   benchmarkFlipkartBatches,
@@ -28,6 +29,7 @@ import {
   Coins,
   DollarSign,
   Package,
+  Receipt,
   Truck,
   RotateCcw,
   CheckCircle2,
@@ -71,7 +73,7 @@ export const PnLDashboardScreen: React.FC = () => {
   const [selectedFY, setSelectedFY] = useState<string>('2026-27');
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-09');
   const [selectedChannel, setSelectedChannel] = useState<'all' | 'Flipkart' | 'Amazon' | 'Meesho'>('all');
-  const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline' | 'sku_performance' | 'return_performance'>('overview');
+  const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline' | 'sku_performance' | 'return_performance' | 'tax_reconciliation'>('overview');
 
   // Operational cost overrides from Settings
   const [inboundFreightRate, setInboundFreightRate] = useState<number>(5);
@@ -394,6 +396,17 @@ export const PnLDashboardScreen: React.FC = () => {
               }`}
             >
               <RotateCcw className="w-3.5 h-3.5" /> Return Loss
+            </button>
+
+            <button
+              onClick={() => setViewMode('tax_reconciliation')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                viewMode === 'tax_reconciliation'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5" /> Tax Reconciliation
             </button>
           </div>
 
@@ -816,8 +829,10 @@ export const PnLDashboardScreen: React.FC = () => {
         <PipelineTrackerScreen initialMonth={selectedMonth} initialFY={selectedFY} />
       ) : viewMode === 'sku_performance' ? (
         <SkuPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
-      ) : (
+      ) : viewMode === 'return_performance' ? (
         <ReturnPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
+      ) : (
+        <TaxReconciliationScreen initialMonth={selectedMonth} initialFY={selectedFY} />
       )}
     </div>
   );
