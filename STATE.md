@@ -104,12 +104,13 @@ ms_batches, ms_uploads. (sku_variants unused.)
   6 Nov 2026.
 
 ## Last result (6 Nov 2026)
-- Prompt A-2: APPROVED. Actions #44 green; screenshot shows Amazon
-  4,912.85, no pipeline profit, no Stage 9. Dashboard profit still old
-  engine (FK -6,028.57, AZ -2,206.60, MS 22,618.59, total 14,383.42): wrong
-  until 5R-3 rewires to ledger. Open: Settings audit IDs append-only;
-  firestore.rules ms_* to be published by owner (compare ms_uploads with
-  fk_uploads).
-- 5R-1 Fix 3: not approved (see Fix 4 prompt: Meesho unit rule, test counts,
-  bun.lock, Amazon TCS report).
-- Next: Fix 4 -> 5R-2 -> 5R-3. Queue: FK TDS ~10x TCS parser check.
+- Prompt A-2: APPROVED.
+- 5R-1 Fix 4: ledger logic ACCEPTED. Meesho units rule = reference (561 /
+  77,512 / 2,805 / profit 18,089.19, diff 0.00). FK and AZ match after owner
+  packing rule (FK 3,588, AZ 210, MS 5,862). Amazon TCS ledger -28.02
+  Released + -8.62 Deferred = ref -36.64 (pipeline, not an error).
+- NOT approved: test integrity. Per-file test counts differ between runs
+  (flipkart/storage 51 vs 11, router 12 vs 1). Agent workspace has no
+  origin/main. Proof only from GitHub Actions log with per-file counts.
+- Next: Fix 5 (test integrity + Amazon TCS assert) -> audit-ID fix (needs
+  read-only export) -> 5R-2 -> 5R-3 -> FK TDS ~10x TCS parser check.
