@@ -100,19 +100,16 @@ ms_batches, ms_uploads. (sku_variants unused.)
   emails, admins, roles (lowercase).
 
 ## Open decisions
-- Settlement month as headline (recommended; pending owner yes/no).
+- (none) Settlement month = headline basis: CONFIRMED 6 Nov 2026.
+  Store settlementMonth and orderMonth both.
 
 ## Last result (6 Nov 2026)
-- Prompt A: NOT reported (confirm run or re-issue).
-- 5R-1 fix 1: partly accepted. Meesho net units 565 (returns separate rows);
-  freight line removed; Flipkart 462 units = 460 x1 + 1 x2.
-- Ledger after-tax profit vs reference: Flipkart 26,130.46 vs 27,462;
-  Amazon 2,281.65 vs 2,324; Meesho 17,636.19 vs 18,089; total 46,048.30 vs
-  47,875 (gap -1,826.70). Gaps UNEXPLAINED.
-- Open defects: packing counted by rows not unique dispatches (FK 684, AZ 39,
-  MS 986 incl. 5 claims rows); Flipkart return-loss base 8,225 / 222 suspect
-  (customer return vs RTO mix); unit cost source not shown; Meesho bridge text
-  17,606.19 vs table 17,636.19; no settlementMonth/orderMonth fields.
-- Next: 5R-1 fix 2 (diagnostic diff vs reference workbook). Then 5R-2, 5R-3.
-- Open decisions: settlement-month headline (owner cannot confirm yet; store
-  both month fields meanwhile).
+- Prompt A: NOT approved. No proof supplied; Stage 9 Tax Reconciliation
+  module added out of scope (commit 3283ff7) -> remove (Prompt A-2).
+  Dashboard still shows Amazon -868.72 and invented pipeline profit.
+- 5R-1 Fix 2: reference workbook not on disk, golden diff used typed
+  numbers -> not accepted. Gap after tax: FK -815.54, AZ -18.35, MS -428.81,
+  total -1,262.70. Fix 3 queue: workbook in /samples (test fails if
+  missing); Amazon 23.77 unexplained; return-loss base landed not MFG;
+  confirm FK net units deduct 60 customer returns; FK TDS 10x TCS check.
+- Next: Prompt A-2 -> 5R-1 Fix 3 -> 5R-2 -> 5R-3.
