@@ -11,6 +11,9 @@ import { parseAliasCsv } from '../utils/skuResolver';
 import { parseCSV } from '../utils/csvParser';
 import { CostMasterItem } from '../types';
 import { parseFirestoreAliases, parseFirestoreCostMaster } from '../components/PnLDashboardScreen';
+import { db } from '../firebase';
+import { collection, getDocs } from 'firebase/firestore';
+import { cleanSku } from '../flipkart/normalizers';
 
 function findRealSampleFile(token: string): string {
   const dirs = [
@@ -286,114 +289,73 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     expect(unresolvedItem?.reason).toBe('MISSING_EFFECTIVE_DATE');
   });
 
-  it('fails if the screen loader and golden path produce different unit costs for any SKU', () => {
-    // 1. Load golden test data
-    const { aliasMap: goldenAliasMap, masterCodes: goldenMasterCodes, costMasterItems: goldenCostItems } = loadCostMasterAndAliases();
+  it('compares cost_master and sku_aliases documents as loaded by screen with sku_master_v3.csv and sku_aliases_v2.csv and fails on any mismatch', async () => {
+    // 1. Read live Firestore docs (or export) as loaded by the screen
+    const cmSnap = await getDocs(collection(db, 'cost_master'));
+    const saSnap = await getDocs(collection(db, 'sku_aliases'));
 
-    // 2. Load through screen's loader functions from raw sample files
-    const aliasPath = findRealSampleFile('sku_aliases_v2');
-    const aliasText = fs.readFileSync(aliasPath, 'utf8');
-    const aliasLines = aliasText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-    const mockAliasDocs: any[] = [];
-    for (let i = 1; i < aliasLines.length; i++) {
-      const parts = aliasLines[i].split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
-      if (parts.length >= 2) {
-        mockAliasDocs.push({
-          id: parts[0],
-          data: () => ({ alias: parts[0], master_sku: parts[1] }),
-        });
-      }
-    }
-    const screenAliasMap = parseFirestoreAliases(mockAliasDocs);
+    const { items: screenCostItems } = parseFirestoreCostMaster(cmSnap.docs as any);
+    const screenAliasMap = parseFirestoreAliases(saSnap.docs as any);
 
+    // 2. Load golden sku_master_v3.csv
     const masterPath = findRealSampleFile('sku_master_v3');
-    const masterText = fs.readFileSync(masterPath, 'utf8');
-    const masterRows = parseCSV(masterText);
-    const mockCostDocs: any[] = [];
+    const masterRows = parseCSV(fs.readFileSync(masterPath, 'utf8'));
+    const goldenCosts = new Map<string, number>();
     for (let i = 1; i < masterRows.length; i++) {
-      const code = (masterRows[i][0] || '').trim();
-      const name = (masterRows[i][1] || '').trim();
-      const weight = Number(masterRows[i][2]) || 0;
-      const mfg = Number(masterRows[i][3]) || 0;
-      if (code) {
-        mockCostDocs.push({
-          id: `${code}_2026-04-01`,
-          data: () => ({
-            sku_code: code,
-            sku_name: name,
-            weight_grams: weight,
-            mfg_cost: mfg,
-            active: true,
-            effective_from: '2026-04-01',
-          }),
-        });
-      }
+      const code = cleanSku(masterRows[i][0] || '');
+      const cost = Number(masterRows[i][3]) || 0;
+      if (code) goldenCosts.set(code, cost);
     }
-    const { items: screenCostItems, codes: screenMasterCodes } = parseFirestoreCostMaster(mockCostDocs);
 
-    // 3. Compare landed unit cost for every master SKU
-    const freightRate = 5;
-    const mismatches: Array<{ sku: string; screenCost: number; goldenCost: number }> = [];
+    // 3. Load golden sku_aliases_v2.csv
+    const aliasPath = findRealSampleFile('sku_aliases_v2');
+    const aliasRows = parseCSV(fs.readFileSync(aliasPath, 'utf8'));
+    const goldenAliases = new Map<string, string>();
+    for (let i = 1; i < aliasRows.length; i++) {
+      const alias = cleanSku(aliasRows[i][0] || '');
+      const master = cleanSku(aliasRows[i][1] || '');
+      if (alias && master) goldenAliases.set(alias, master);
+    }
 
-    for (const goldenItem of goldenCostItems) {
-      const sku = goldenItem.sku_code;
-      // Golden path ledger run on 1 unit
-      const goldenLedger = buildLedger({
-        settlementMonth: '2026-09',
-        aliasMap: goldenAliasMap,
-        costLookup: goldenCostItems,
-        masterCodes: goldenMasterCodes,
-        settings: { freight: freightRate, packing: 6, returnLoss: 0.05 },
-        flipkart: {
-          orders: [
-            {
-              orderItemId: `item-${sku}`,
-              sellerSku: sku,
-              paymentDate: '2026-09-10',
-              orderDate: '2026-09-05',
-              qty: 1,
-              refund: 0,
-              bankSettlement: 500,
-            } as any,
-          ],
-        },
-      });
-
-      // Screen path ledger run on 1 unit
-      const screenLedger = buildLedger({
-        settlementMonth: '2026-09',
-        aliasMap: screenAliasMap,
-        costLookup: screenCostItems,
-        masterCodes: screenMasterCodes,
-        settings: { freight: freightRate, packing: 6, returnLoss: 0.05 },
-        flipkart: {
-          orders: [
-            {
-              orderItemId: `item-${sku}`,
-              sellerSku: sku,
-              paymentDate: '2026-09-10',
-              orderDate: '2026-09-05',
-              qty: 1,
-              refund: 0,
-              bankSettlement: 500,
-            } as any,
-          ],
-        },
-      });
-
-      const goldenProductCost = goldenLedger.totals.byPlatform.Flipkart.productCost;
-      const screenProductCost = screenLedger.totals.byPlatform.Flipkart.productCost;
-
-      if (Math.abs(goldenProductCost - screenProductCost) > 0.001) {
-        mismatches.push({
+    // 4. Compare mfg_cost for every SKU
+    const costVariances: Array<{ sku: string; screenMfgCost: number; goldenMfgCost: number; delta: number }> = [];
+    for (const [sku, goldenCost] of goldenCosts.entries()) {
+      const screenItem = screenCostItems.find((item) => item.sku_code === sku);
+      const screenCost = screenItem ? screenItem.mfg_cost : NaN;
+      if (screenItem === undefined || Math.abs(screenCost - goldenCost) > 0.001) {
+        costVariances.push({
           sku,
-          screenCost: screenProductCost,
-          goldenCost: goldenProductCost,
+          screenMfgCost: screenCost,
+          goldenMfgCost: goldenCost,
+          delta: Number((screenCost - goldenCost).toFixed(2)),
         });
       }
     }
 
-    expect(mismatches).toEqual([]);
-    expect(screenCostItems.length).toBe(goldenCostItems.length);
+    // 5. Compare alias target for every alias
+    const aliasVariances: Array<{ alias: string; screenMaster: string | undefined; goldenMaster: string }> = [];
+    for (const [alias, goldenMaster] of goldenAliases.entries()) {
+      const screenMaster = screenAliasMap.get(alias);
+      if (screenMaster !== goldenMaster) {
+        aliasVariances.push({
+          alias,
+          screenMaster,
+          goldenMaster,
+        });
+      }
+    }
+
+    if (costVariances.length > 0 || aliasVariances.length > 0) {
+      console.log('\n--- SKU / COST VARIANCES FOUND (Screen vs Golden CSV) ---');
+      if (costVariances.length > 0) {
+        console.table(costVariances);
+      }
+      if (aliasVariances.length > 0) {
+        console.table(aliasVariances);
+      }
+    }
+
+    expect(costVariances).toEqual([]);
+    expect(aliasVariances).toEqual([]);
   });
 });

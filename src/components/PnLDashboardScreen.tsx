@@ -73,8 +73,6 @@ import {
   AlertTriangle,
   RotateCcw,
   RefreshCw,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
 
 interface FYMonth {
@@ -134,14 +132,6 @@ export const PnLDashboardScreen: React.FC = () => {
   const [azMtr, setAzMtr] = useState<any[]>([]);
   const [msPayments, setMsPayments] = useState<any[]>([]);
   const [msAds, setMsAds] = useState<any[]>([]);
-
-  // Pipeline collection counts for temporary diagnostic panel (Stage 5R-3e)
-  const [fkOrderItemsCount, setFkOrderItemsCount] = useState<number>(0);
-  const [fkReturnsCount, setFkReturnsCount] = useState<number>(0);
-  const [msOrdersCount, setMsOrdersCount] = useState<number>(0);
-  const [msReturnsCompletedCount, setMsReturnsCompletedCount] = useState<number>(0);
-  const [msReturnsInTransitCount, setMsReturnsInTransitCount] = useState<number>(0);
-  const [isLedgerInputsOpen, setIsLedgerInputsOpen] = useState<boolean>(true);
 
   const [queryError, setQueryError] = useState<QueryErrorState | null>(null);
   const [retryTrigger, setRetryTrigger] = useState<number>(0);
@@ -248,13 +238,6 @@ export const PnLDashboardScreen: React.FC = () => {
       (err) => setQueryError({ code: err.code, collection: 'ms_ads' })
     );
 
-    // Diagnostics listeners for temporary panel (Stage 5R-3e)
-    const unsubFkOrderItems = onSnapshot(collection(db, 'fk_order_items'), (snap) => setFkOrderItemsCount(snap.size), () => {});
-    const unsubFkReturns = onSnapshot(collection(db, 'fk_returns'), (snap) => setFkReturnsCount(snap.size), () => {});
-    const unsubMsOrders = onSnapshot(collection(db, 'ms_orders'), (snap) => setMsOrdersCount(snap.size), () => {});
-    const unsubMsReturnsComp = onSnapshot(collection(db, 'ms_returns_completed'), (snap) => setMsReturnsCompletedCount(snap.size), () => {});
-    const unsubMsReturnsInTrans = onSnapshot(collection(db, 'ms_returns_in_transit'), (snap) => setMsReturnsInTransitCount(snap.size), () => {});
-
     return () => {
       unsubSettings();
       unsubAliases();
@@ -265,11 +248,6 @@ export const PnLDashboardScreen: React.FC = () => {
       unsubAzMtr();
       unsubMsPayments();
       unsubMsAds();
-      unsubFkOrderItems();
-      unsubFkReturns();
-      unsubMsOrders();
-      unsubMsReturnsComp();
-      unsubMsReturnsInTrans();
     };
   }, [retryTrigger]);
 
@@ -455,171 +433,6 @@ export const PnLDashboardScreen: React.FC = () => {
         </div>
       </div>
 
-      {/* TEMPORARY Collapsible Ledger Inputs Panel (Stage 5R-3e) */}
-      <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700/60 rounded-2xl p-5 shadow-xs space-y-4">
-        <button
-          onClick={() => setIsLedgerInputsOpen(!isLedgerInputsOpen)}
-          className="w-full flex items-center justify-between text-left cursor-pointer focus:outline-none"
-        >
-          <div className="flex items-center gap-2.5">
-            <span className="text-[10px] uppercase tracking-wider font-extrabold bg-amber-500 text-white px-2 py-0.5 rounded shadow-xs">
-              TEMPORARY
-            </span>
-            <span className="text-sm font-bold text-amber-950 dark:text-amber-200">
-              Ledger Inputs Diagnostic (Stage 5R-3e) — Screen vs Golden Test Row Counts
-            </span>
-          </div>
-          <div className="flex items-center gap-1 text-xs font-semibold text-amber-800 dark:text-amber-300 bg-amber-200/60 dark:bg-amber-900/40 px-2.5 py-1 rounded-lg">
-            <span>{isLedgerInputsOpen ? 'Collapse' : 'Expand'}</span>
-            {isLedgerInputsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </div>
-        </button>
-
-        {isLedgerInputsOpen && (
-          <div className="overflow-x-auto border border-amber-200 dark:border-amber-800/60 rounded-xl bg-white dark:bg-slate-900">
-            <table className="min-w-full divide-y divide-amber-200 dark:divide-amber-800/60 text-xs">
-              <thead className="bg-amber-100/70 dark:bg-amber-950/60 font-semibold text-slate-800 dark:text-slate-200">
-                <tr>
-                  <th className="px-3 py-2.5 text-left">Input / Collection</th>
-                  <th className="px-3 py-2.5 text-right">Screen: Passed to buildLedger</th>
-                  <th className="px-3 py-2.5 text-right">Screen: Firestore Docs</th>
-                  <th className="px-3 py-2.5 text-right">Golden Test: Passed to buildLedger</th>
-                  <th className="px-3 py-2.5 text-right">Golden Test: Parsed Sample</th>
-                  <th className="px-3 py-2.5 text-center">Status / Comparison</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
-                {/* 1. fk orders */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">fk orders (fk_order_items / 7 Orders)</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">{fkOrderItemsCount}</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">493</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (0 passed)</td>
-                </tr>
-                {/* 2. fk settlement rows */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">fk settlement rows (fk_settlement_rows / 2 Settled)</td>
-                  <td className="px-3 py-2 text-right">{fkOrders.length}</td>
-                  <td className="px-3 py-2 text-right">{fkOrders.length}</td>
-                  <td className="px-3 py-2 text-right">683</td>
-                  <td className="px-3 py-2 text-right">683</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (683)</td>
-                </tr>
-                {/* 3. fk returns */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">fk returns (fk_returns / 3 Return)</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">{fkReturnsCount}</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">204</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (0 passed)</td>
-                </tr>
-                {/* 4. fk adjustments */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">fk adjustments (fk_adjustments / 2 Settled)</td>
-                  <td className="px-3 py-2 text-right">{fkAdjustments.length}</td>
-                  <td className="px-3 py-2 text-right">{fkAdjustments.length}</td>
-                  <td className="px-3 py-2 text-right">9</td>
-                  <td className="px-3 py-2 text-right">9</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (9)</td>
-                </tr>
-                {/* 5. az unified */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">az unified (az_transactions / 1-2026SepMonthlyUnified)</td>
-                  <td className="px-3 py-2 text-right">{azUnified.length}</td>
-                  <td className="px-3 py-2 text-right">{azUnified.length}</td>
-                  <td className="px-3 py-2 text-right">94</td>
-                  <td className="px-3 py-2 text-right">94</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (94)</td>
-                </tr>
-                {/* 6. az MTR */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">az MTR (az_mtr_rows / 2-MTR_B2C-SEPTEMBER-2026)</td>
-                  <td className="px-3 py-2 text-right">{azMtr.length}</td>
-                  <td className="px-3 py-2 text-right">{azMtr.length}</td>
-                  <td className="px-3 py-2 text-right">60</td>
-                  <td className="px-3 py-2 text-right">60</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (60)</td>
-                </tr>
-                {/* 7. ms orders */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">ms orders (ms_orders / Orders_2026-09...csv)</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">{msOrdersCount}</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">1,426</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (0 passed)</td>
-                </tr>
-                {/* 8. ms returns completed */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">ms returns completed (ms_returns_completed / Return completed...csv)</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">{msReturnsCompletedCount}</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">544</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (0 passed)</td>
-                </tr>
-                {/* 9. ms returns in-transit */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">ms returns in-transit (ms_returns_in_transit / intransit...csv)</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">{msReturnsInTransitCount}</td>
-                  <td className="px-3 py-2 text-right">0 (pipeline)</td>
-                  <td className="px-3 py-2 text-right">62</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (0 passed)</td>
-                </tr>
-                {/* 10. ms payments */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">ms payments (ms_payments / previous_payment...xlsx)</td>
-                  <td className="px-3 py-2 text-right">{msPayments.length}</td>
-                  <td className="px-3 py-2 text-right">{msPayments.length}</td>
-                  <td className="px-3 py-2 text-right">986</td>
-                  <td className="px-3 py-2 text-right">986</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (986)</td>
-                </tr>
-                {/* 11. ms ads */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">ms ads (ms_ads / previous_payment...xlsx)</td>
-                  <td className="px-3 py-2 text-right">{msAds.length}</td>
-                  <td className="px-3 py-2 text-right">{msAds.length}</td>
-                  <td className="px-3 py-2 text-right">96</td>
-                  <td className="px-3 py-2 text-right">96</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (96)</td>
-                </tr>
-                {/* 12. cost_master */}
-                <tr className="bg-amber-100/40 dark:bg-amber-950/40 hover:bg-amber-100/70 dark:hover:bg-amber-900/50">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">cost_master (cost_master / sku_master_v3.csv)</td>
-                  <td className="px-3 py-2 text-right font-bold">{costLookup.length}</td>
-                  <td className="px-3 py-2 text-right">{costLookup.length}</td>
-                  <td className="px-3 py-2 text-right font-bold">34</td>
-                  <td className="px-3 py-2 text-right">34</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-amber-700 dark:text-amber-400">DIFFERS: Unit costs differ across SKUs</td>
-                </tr>
-                {/* 13. sku_aliases */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">sku_aliases (sku_aliases / sku_aliases_v2.csv)</td>
-                  <td className="px-3 py-2 text-right">{aliasMap.size}</td>
-                  <td className="px-3 py-2 text-right">{aliasMap.size}</td>
-                  <td className="px-3 py-2 text-right">67</td>
-                  <td className="px-3 py-2 text-right">67</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match (67)</td>
-                </tr>
-                {/* 14. settings */}
-                <tr className="hover:bg-amber-50/50 dark:hover:bg-slate-800/40">
-                  <td className="px-3 py-2 font-medium font-sans text-slate-900 dark:text-white">settings (settings/config / Default: F:5, P:6, L:5%)</td>
-                  <td className="px-3 py-2 text-right">1 (F:5, P:6, L:5%)</td>
-                  <td className="px-3 py-2 text-right">1</td>
-                  <td className="px-3 py-2 text-right">1 (F:5, P:6, L:5%)</td>
-                  <td className="px-3 py-2 text-right">1</td>
-                  <td className="px-3 py-2 text-center font-sans font-bold text-emerald-600 dark:text-emerald-400">Match</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
 
       {/* Platform Filter Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl">
