@@ -285,4 +285,115 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     expect(unresolvedItem).toBeDefined();
     expect(unresolvedItem?.reason).toBe('MISSING_EFFECTIVE_DATE');
   });
+
+  it('fails if the screen loader and golden path produce different unit costs for any SKU', () => {
+    // 1. Load golden test data
+    const { aliasMap: goldenAliasMap, masterCodes: goldenMasterCodes, costMasterItems: goldenCostItems } = loadCostMasterAndAliases();
+
+    // 2. Load through screen's loader functions from raw sample files
+    const aliasPath = findRealSampleFile('sku_aliases_v2');
+    const aliasText = fs.readFileSync(aliasPath, 'utf8');
+    const aliasLines = aliasText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    const mockAliasDocs: any[] = [];
+    for (let i = 1; i < aliasLines.length; i++) {
+      const parts = aliasLines[i].split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
+      if (parts.length >= 2) {
+        mockAliasDocs.push({
+          id: parts[0],
+          data: () => ({ alias: parts[0], master_sku: parts[1] }),
+        });
+      }
+    }
+    const screenAliasMap = parseFirestoreAliases(mockAliasDocs);
+
+    const masterPath = findRealSampleFile('sku_master_v3');
+    const masterText = fs.readFileSync(masterPath, 'utf8');
+    const masterRows = parseCSV(masterText);
+    const mockCostDocs: any[] = [];
+    for (let i = 1; i < masterRows.length; i++) {
+      const code = (masterRows[i][0] || '').trim();
+      const name = (masterRows[i][1] || '').trim();
+      const weight = Number(masterRows[i][2]) || 0;
+      const mfg = Number(masterRows[i][3]) || 0;
+      if (code) {
+        mockCostDocs.push({
+          id: `${code}_2026-04-01`,
+          data: () => ({
+            sku_code: code,
+            sku_name: name,
+            weight_grams: weight,
+            mfg_cost: mfg,
+            active: true,
+            effective_from: '2026-04-01',
+          }),
+        });
+      }
+    }
+    const { items: screenCostItems, codes: screenMasterCodes } = parseFirestoreCostMaster(mockCostDocs);
+
+    // 3. Compare landed unit cost for every master SKU
+    const freightRate = 5;
+    const mismatches: Array<{ sku: string; screenCost: number; goldenCost: number }> = [];
+
+    for (const goldenItem of goldenCostItems) {
+      const sku = goldenItem.sku_code;
+      // Golden path ledger run on 1 unit
+      const goldenLedger = buildLedger({
+        settlementMonth: '2026-09',
+        aliasMap: goldenAliasMap,
+        costLookup: goldenCostItems,
+        masterCodes: goldenMasterCodes,
+        settings: { freight: freightRate, packing: 6, returnLoss: 0.05 },
+        flipkart: {
+          orders: [
+            {
+              orderItemId: `item-${sku}`,
+              sellerSku: sku,
+              paymentDate: '2026-09-10',
+              orderDate: '2026-09-05',
+              qty: 1,
+              refund: 0,
+              bankSettlement: 500,
+            } as any,
+          ],
+        },
+      });
+
+      // Screen path ledger run on 1 unit
+      const screenLedger = buildLedger({
+        settlementMonth: '2026-09',
+        aliasMap: screenAliasMap,
+        costLookup: screenCostItems,
+        masterCodes: screenMasterCodes,
+        settings: { freight: freightRate, packing: 6, returnLoss: 0.05 },
+        flipkart: {
+          orders: [
+            {
+              orderItemId: `item-${sku}`,
+              sellerSku: sku,
+              paymentDate: '2026-09-10',
+              orderDate: '2026-09-05',
+              qty: 1,
+              refund: 0,
+              bankSettlement: 500,
+            } as any,
+          ],
+        },
+      });
+
+      const goldenProductCost = goldenLedger.totals.byPlatform.Flipkart.productCost;
+      const screenProductCost = screenLedger.totals.byPlatform.Flipkart.productCost;
+
+      if (Math.abs(goldenProductCost - screenProductCost) > 0.001) {
+        mismatches.push({
+          sku,
+          screenCost: screenProductCost,
+          goldenCost: goldenProductCost,
+        });
+      }
+    }
+
+    expect(mismatches).toEqual([]);
+    expect(screenCostItems.length).toBe(goldenCostItems.length);
+  });
 });
