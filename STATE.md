@@ -54,15 +54,16 @@
   Summary cells B5:D14; independent dispatch counts FK 598, AZ 35, MS 977).
   CI #52, #53 green.
 - Next: 
-- cost_master reloaded from sku_master_v3.csv (34 SKUs, 9 Nov). Screen
-  after-tax FK 27,829.96 / AZ 2,268.65 / MS 16,741.89 vs golden
-  26,646.46 / 2,305.65 / 18,089.19. 5R-3e diagnostic accepted: all 14
-  input counts match between screen and golden path (683 settled rows,
-  986 payments, 94/60 Amazon, 67 aliases, 34 cost_master, settings
-  F5/P6/L5%); dispatched units and packing identical (598/35/977).
-  Only unit cost differs. Counts and units ruled out as cause.
-- Next: 5R-3f (unit-cost path tables pasted, same function and date as
-  golden) -> close 5R -> other module.
+- 5R-3f (9 Nov): NOT APPROVED as a fix; diagnosis valid. Both paths use
+  resolveItemCost with +5 freight, order date, so rules match. Firestore
+  cost_master still differs from sku_master_v3.csv: TM-MA-001 260 vs 230,
+  TM-CA-004 100 vs 120, TM-PC-007 25 vs 185, TM-ST-002 125 vs 120; alias
+  TM-PC-004New maps TM-PC-003 vs TM-PC-004. Cost Master screenshot shows
+  TM-CA-004 = 100 (not v3). Suspect the "Load Sample sku_master_v2.csv"
+  button or a non-overwriting upload was used.
+- Next: owner deletes cost_master, uploads v3 via Upload CSV, checks alias
+  TM-PC-004New, sends P&L screenshot -> if 47,041.30 approve 5R-3 -> 5R-3g
+  (real parity test, remove temp panel) -> close 5R -> other module.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17);
@@ -125,13 +126,13 @@ CLOSED: circular golden test (5b-2).
 19. effective_from default '2020-01-01' in parseFirestoreCostMaster (remove
     in 5R-3d).
 20. cost_master reset to 34 SKUs (CSV). CLOSED as cause of the gap.
-23. Screen unit cost differs from golden despite equal inputs (FK product
-    cost 29,603 vs 30,778; AZ 2,395 vs 2,355; MS 81,691 vs 80,317; return
-    loss FK 402.75 vs 411.25). Suspects: freight handling, lookup date.
-    Per-SKU table due in 5R-3f. fk_returns 204 vs 222 CLOSED (different
-    measures: Returns.xlsx records vs settled return rows).
-24. Temporary "Ledger inputs" panel on PnLDashboardScreen: remove after
-    5R closes.
+23. Firestore cost_master/alias data differs from v3/v2 CSVs (see Stage
+    status). Owner reload pending verification.
+24. Temporary "Ledger inputs" panel on PnLDashboardScreen: remove in 5R-3g.
+25. Parity test (5R-3f) passes while 5 SKU variances exist: likely not
+    reading Firestore data. Rewrite in 5R-3g.
+26. Cost Master "Load Sample sku_master_v2.csv" button can load the wrong
+    file; relabel or remove later.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -153,6 +154,6 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - Correct mfg_cost for TM-ST-002 (125 Firestore vs 120 CSV).
 
 ## Last result (9 Nov 2026)
-- 5R-3e accepted as diagnostic. Cause narrowed to unit-cost resolution.
-  Top-10 SKU variance table not shown by agent. 5R-3f issued. Awaiting
-  SUMMARY with pasted tables, Cost Master screenshot, CI screenshot.
+- 5R-3f reported; cause = Firestore cost data not v3. Awaiting owner
+  re-upload via Upload CSV, Export CSV comparison, alias check, new P&L
+  screenshot, CI screenshot.
