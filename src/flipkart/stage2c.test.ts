@@ -177,10 +177,10 @@ describe('STAGE 2c: Bank Statement, Flipkart Reconciliation & Flipkart Tracking'
       expect(summary.missingBatchCount).toBe(0);
       expect(summary.matchRatePct).toBe(100);
 
-      // Total difference is exactly 0.08 INR
-      expect(summary.totalExpectedBank).toBe(61423.71);
+      // Total difference is exactly 0.06 INR
+      expect(summary.totalExpectedBank).toBe(61423.73);
       expect(summary.totalActualBank).toBe(61423.79);
-      expect(summary.difference).toBe(0.08);
+      expect(summary.difference).toBe(0.06);
 
       // Every individual match is within tolerance (<= 0.05)
       for (const item of items) {

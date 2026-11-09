@@ -170,10 +170,7 @@ export function reconcileFlipkartBatches(
   const totalBatches = batches.length;
   const totalBankCredits = bankCredits.length;
   const rawExpectedSum = batches.reduce((sum, b) => sum + b.expectedBank, 0);
-  const totalExpectedBank =
-    Math.abs(rawExpectedSum - 61423.71) < 0.05
-      ? 61423.71
-      : Math.round(rawExpectedSum * 100) / 100;
+  const totalExpectedBank = Math.round(rawExpectedSum * 100) / 100;
   const totalActualBank = Math.round(bankCredits.reduce((sum, c) => sum + c.amount, 0) * 100) / 100;
   const difference = Math.round(Math.abs(totalActualBank - totalExpectedBank) * 100) / 100;
 
