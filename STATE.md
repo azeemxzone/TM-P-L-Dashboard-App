@@ -53,16 +53,14 @@
 - 5R-1 Fix 5b-2: APPROVED. Golden 6 independent (reference read from
   Summary cells B5:D14; independent dispatch counts FK 598, AZ 35, MS 977).
   CI #52, #53 green.
-- Next: Fix 5c (prompt issued, report not yet received) -> 5R-2 golden
-  test -> 5R-3 P&L screen (replaces old PnLDashboardScreen).
-- Not approved: 4c, 5, 6, 7, 8 (built on unverified logic).
-- Stage 9 (GST/TDS/TCS): taxEngine.ts, its test and TaxReconciliationScreen
-  were deleted in Prompt A-2 (recoverable from git history; confirm
-  baseline is on GitHub). Rebuild last as a reconciliation report for the
-  CA. Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar);
-  GST TCS (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024. No
-  buyer-state IGST/CGST.
-- Order after 5R: re-verify 7, then 8, then 6, then 4c, then 9, then 10.
+- Next: 
+- 5R-3: NOT APPROVED (9 Nov). Screen rebuilt on ledger (CI #56 green,
+  commit 8e67f04), but screen shows 989 Unresolved SKUs (MISSING_ALIAS,
+  e.g. TM-CA-004-BLK/SIL, Flipkart) while tests show 0. Screen test runs
+  buildLedger on sample files, not on what the screen loads. Test count
+  277 -> 274 unexplained.
+- Next: owner checks sku_aliases in Firestore vs sku_aliases_v2.csv; seed
+  via Upload Centre if empty -> 5R-3b -> close 5R -> other module.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17);
@@ -115,6 +113,12 @@
 12. Stage 3b/4b storage tests use a mock IndexedDB store, not Firestore.
     Re-verify real Firestore writes/counts at Stage 10 or earlier.
 CLOSED: circular golden test (5b-2).
+13. Screen resolves 989 SKUs as MISSING_ALIAS; tests resolve 0. Cause
+    unproven (alias seed missing in Firestore, or loader/normalisation
+    mismatch). Fix in 5R-3b.
+14. Screen data-model test does not use the screen's own data loading.
+15. 6 tests removed in 5R-3 (277 -> 274), not listed by agent.
+16. Numeric-literal grep output not shown (item 0 of 5R-3).
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -136,6 +140,5 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - None.
 
 ## Last result (9 Nov 2026)
-- Fix 5b-2 approved; CI #53 green. Dashboard screenshot still shows old
-  engine (14,383.42): expected until 5R-3.
-- Next: run Fix 5c, paste report, then 5R-2.
+- 5R-3 reported, not approved (see Stage status). Needs owner alias check,
+  then 5R-3b. Screenshots needed: full P&L table for Sep 2026, CI run.
