@@ -54,13 +54,15 @@
   Summary cells B5:D14; independent dispatch counts FK 598, AZ 35, MS 977).
   CI #52, #53 green.
 - Next: 
-- 5R-3: NOT APPROVED (9 Nov). Screen rebuilt on ledger (CI #56 green,
-  commit 8e67f04), but screen shows 989 Unresolved SKUs (MISSING_ALIAS,
-  e.g. TM-CA-004-BLK/SIL, Flipkart) while tests show 0. Screen test runs
-  buildLedger on sample files, not on what the screen loads. Test count
-  277 -> 274 unexplained.
-- Next: owner checks sku_aliases in Firestore vs sku_aliases_v2.csv; seed
-  via Upload Centre if empty -> 5R-3b -> close 5R -> other module.
+- 5R-3b (9 Nov): unresolved SKUs fixed (alias loader parseFirestoreAliases;
+  Firestore sku_aliases = 67 docs; SKU Performance shows 0 unmatched).
+  NOT APPROVED: screen totals differ from golden ledger (product cost FK
+  29,603 / AZ 2,395 / MS 81,691 vs ledger; return loss FK 402.75 / AZ 39.20
+  / MS 1,099.55 vs 411.25 / 42.20 / 1,126.25). Revenue, packing, TCS, TDS
+  match. Suspected cause: Firestore cost_master differs from
+  sku_master_v3.csv.
+- Next: owner compares cost_master vs sku_master_v3.csv (3 SKUs) -> 5R-3c
+  -> close 5R -> other module.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17);
@@ -113,12 +115,13 @@
 12. Stage 3b/4b storage tests use a mock IndexedDB store, not Firestore.
     Re-verify real Firestore writes/counts at Stage 10 or earlier.
 CLOSED: circular golden test (5b-2).
-13. Screen resolves 989 SKUs as MISSING_ALIAS; tests resolve 0. Cause
-    unproven (alias seed missing in Firestore, or loader/normalisation
-    mismatch). Fix in 5R-3b.
-14. Screen data-model test does not use the screen's own data loading.
-15. 6 tests removed in 5R-3 (277 -> 274), not listed by agent.
-16. Numeric-literal grep output not shown (item 0 of 5R-3).
+13. Screen vs golden mismatch on product cost and return loss (5R-3c).
+14. Screen data-model test does not use the screen's own loader (5R-3c).
+15. 6 tests removed in 5R-3 (old pnlEngine unit tests); count 275 now.
+16. Numeric-literal grep output still not shown in reports.
+17. Upload Centre has no Unmatched SKUs box (spec says it should);
+    SKU Performance has a drawer. Defer.
+18. SKU Performance (Stage 7) still on old engine (total -41,326.30).
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -140,5 +143,5 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - None.
 
 ## Last result (9 Nov 2026)
-- 5R-3 reported, not approved (see Stage status). Needs owner alias check,
-  then 5R-3b. Screenshots needed: full P&L table for Sep 2026, CI run.
+- 5R-3b reported; alias issue solved, cost/return-loss mismatch open.
+  CI screenshot for this commit missing.
