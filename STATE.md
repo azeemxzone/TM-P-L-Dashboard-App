@@ -116,23 +116,18 @@
 12. Stage 3b/4b storage tests use a mock IndexedDB store, not Firestore.
     Re-verify real Firestore writes/counts at Stage 10 or earlier.
 CLOSED: circular golden test (5b-2).
-13. Screen vs golden mismatch on product cost and return loss (5R-3c).
-14. Screen data-model test does not use the screen's own loader (5R-3c).
-15. 6 tests removed in 5R-3 (old pnlEngine unit tests); count 275 now.
-16. Numeric-literal grep output still not shown in reports.
-17. Upload Centre has no Unmatched SKUs box (spec says it should);
-    SKU Performance has a drawer. Defer.
-18. SKU Performance (Stage 7) still on old engine (total -41,326.30).
-19. effective_from default '2020-01-01' in parseFirestoreCostMaster (remove
-    in 5R-3d).
-20. cost_master reset to 34 SKUs (CSV). CLOSED as cause of the gap.
-23. Firestore cost_master/alias data differs from v3/v2 CSVs (see Stage
-    status). Owner reload pending verification.
-24. Temporary "Ledger inputs" panel on PnLDashboardScreen: remove in 5R-3g.
-25. Parity test (5R-3f) passes while 5 SKU variances exist: likely not
-    reading Firestore data. Rewrite in 5R-3g.
+13-20, 23, 25 CLOSED (alias loader, cost source, screen vs golden).
+21. Flipkart screen product cost mismatch: CLOSED (was data).
+22. Reports omit pasted tables and understate deviations: keep requiring
+    pasted tables and the SUMMARY block.
+24. Temporary Ledger inputs panel: reported removed; confirm by screenshot.
 26. Cost Master "Load Sample sku_master_v2.csv" button can load the wrong
     file; relabel or remove later.
+27. Upload Centre has no Unmatched SKUs box (spec); SKU Performance has a
+    drawer. Defer.
+28. SKU Performance (Stage 7) still on old engine (total -41,326.30).
+    Re-verify next on the ledger.
+29. Alias TM-PC-004New target (TM-PC-004) set by owner; not verified.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -151,9 +146,9 @@ ms_batches, ms_uploads. (sku_variants unused.)
   emails, admins, roles (lowercase).
 
 ## Open decisions
-- Correct mfg_cost for TM-ST-002 (125 Firestore vs 120 CSV).
+- None.
 
 ## Last result (9 Nov 2026)
-- 5R-3f reported; cause = Firestore cost data not v3. Awaiting owner
-  re-upload via Upload CSV, Export CSV comparison, alias check, new P&L
-  screenshot, CI screenshot.
+- 5R-3 approved: P&L screen equals golden (47,041.30). 5R-3g reported
+  (panel removed, parity test). Awaiting CI screenshot and panel-gone
+  confirmation, then close 5R.
