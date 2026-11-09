@@ -1,4 +1,4 @@
-# TM-P&L STATE (updated 6 Nov 2026)
+# TM-P&L STATE (updated 9 Nov 2026)
 
 ## Rules (frozen)
 - Indian FY April-March. Marketplaces: Flipkart, Amazon India, Meesho.
@@ -15,10 +15,11 @@
   inbound freight added at purchase entry) x NET units (sold minus
   returned/refunded). Freight is NOT charged again. No stock events:
   calculateStandardCost(cost_master mfg_cost, freight setting).
-- Packing per dispatched unit (sold, customer return, RTO, replacement).
-  Customer return: return-loss % of landed cost on customer-returned units
-  only (default 5%, editable per marketplace). RTO = packing + shipping
-  fees only.
+- Packing per DISPATCHED unit (sold, customer return, RTO, replacement).
+  OWNER CONFIRMED 6 Nov 2026. Reference workbook charges sold units only;
+  the ledger intentionally differs. Customer return: return-loss % of
+  landed cost on customer-returned units only (default 5%, editable per
+  marketplace). RTO = packing + shipping fees only.
 - Settings keys (settings/config), admin-editable, audit-logged:
   packing_per_dispatched_unit (default 6),
   inbound_freight_per_purchased_unit (default 5). Read from settings; no
@@ -40,24 +41,27 @@
 - Every write via stripUndefined. Counts verified by reading expected IDs.
 - Proof = green GitHub Actions + real screenshots + golden test.
   The agent's own "N tests passing" is not proof. A test that adjusts its
-  expected value using the code under test is not proof.
+  expected value using the code under test is not proof. Reference values
+  are read from the workbook cells, never from ledger output.
 - Repo stays private. No customer/supplier personal data, GSTIN, city,
   postal code.
 
 ## Stage status
 - Verified: 1, 1.1, 1.2, 1.3, 2, 2b, 2c, 3a, 3b, 3c, 4a, 4b.
-- Prompt A: APPROVED on code evidence (genai removed, benchmark file
-  deleted, ms_* rules +71 lines, tsc 0, 277 tests, CI #50 green). Grep
-  proofs (literals, az_transfers, Math.random, rules block) due in Fix 5b.
-- Next: 5R-1 Fix 5b -> 5R-2 golden test -> 5R-3 P&L screen (replaces old
-  PnLDashboardScreen, which still runs the old engine).
+- Prompt A: APPROVED. Greps: az_transfers 0, Math.random 0, genai 0,
+  benchmark file deleted. One numeric literal found (see defect 1).
+- 5R-1 Fix 5b-2: APPROVED. Golden 6 independent (reference read from
+  Summary cells B5:D14; independent dispatch counts FK 598, AZ 35, MS 977).
+  CI #52, #53 green.
+- Next: Fix 5c (prompt issued, report not yet received) -> 5R-2 golden
+  test -> 5R-3 P&L screen (replaces old PnLDashboardScreen).
 - Not approved: 4c, 5, 6, 7, 8 (built on unverified logic).
 - Stage 9 (GST/TDS/TCS): taxEngine.ts, its test and TaxReconciliationScreen
-  were deleted in Prompt A-2 (recoverable from git history; confirm baseline
-  is on GitHub). Rebuild last as a reconciliation report for the CA.
-  Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS
-  (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024. No buyer-state
-  IGST/CGST.
+  were deleted in Prompt A-2 (recoverable from git history; confirm
+  baseline is on GitHub). Rebuild last as a reconciliation report for the
+  CA. Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar);
+  GST TCS (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024. No
+  buyer-state IGST/CGST.
 - Order after 5R: re-verify 7, then 8, then 6, then 4c, then 9, then 10.
 
 ## Verified targets (Sep 2026, regression)
@@ -66,44 +70,51 @@
 - Settlements: Flipkart 61,423.71; Meesho 105,394.44 (incl. ads -3,582.46);
   Amazon Released activity 4,912.85 (transfers -5,781.57; released
   movement -868.72 is NOT revenue; Deferred 1,765.78).
-- Reference after-tax profit (September_2026_Reference_PnL.xlsx):
-  Flipkart 27,462.47; Amazon 2,323.65; Meesho 18,089.19; total 47,875.31.
-- Ledger after-tax (6 Nov): Flipkart 26,646.46; Amazon 2,305.65; Meesho
-  18,089.19; total 47,041.30. Gap -834.01 = packing basis only
-  (FK 136 units x 6 = 816; AZ 3 units x 6 = 18). Reference charges packing
-  on sold units; spec charges all dispatched. Expected golden after owner
-  confirms: reference minus documented packing delta, tolerance +/-1.00.
-- Ledger lines match reference: revenue, net units (FK 240, AZ 25, MS 561),
-  MFG cost, freight, return loss (FK 411.25, AZ 42.20, MS 1,126.25),
-  TCS/TDS. Amazon TCS: Released -28.02 in P&L, Deferred -8.62 pipeline
-  (reference -36.64 includes deferred; its pre-tax line is inconsistent).
-- Flipkart: 683 settled rows (461 sale / 222 return), 18 batches, 204 returns.
-  Meesho: 1,426 orders, 544 returns delivered, 986 payment order rows,
-  96 ads rows, 17 batches. Amazon: unified 94 rows (84 Released /
-  10 Deferred), MTR 60 rows. Flipkart orders: STATE said 493, test parses
-  476 rows: to reconcile.
+- Reference (Summary sheet): packing FK 2,772 / AZ 192 / MS 5,862;
+  after-tax profit FK 27,462.47 / AZ 2,323.65 / MS 18,089.19 (total
+  47,875.31); TCS FK -286.67 / AZ -36.64 / MS -687.20; TDS FK -2,866.54 /
+  AZ 0 / MS -137.29.
+- Ledger after-tax: FK 26,646.46; AZ 2,305.65; MS 18,089.19; total
+  47,041.30. Gap -834.01 = packing basis only (FK 598 dispatched vs 462
+  sold = 816; AZ 35 vs 32 = 18; MS 977 vs 977 = 0).
+- Amazon TCS: Released -28.02 in P&L, Deferred -8.62 pipeline (reference
+  -36.64 includes deferred).
+- Dispatch detail: FK 410 sale items + 187 return-only items = 597 items,
+  one item qty 2 = 598 units; customer returns 60 units, RTO 162 units.
+  AZ 32 shipment orders = 35 units; customer returns 7 units. MS 565 sale
+  + 412 return-only = 977 (5 claims rows excluded: claimsReason present,
+  no sale amount); customer returns 159, RTO 257 (payment rows).
+- Counts: Flipkart 683 settled rows (461 sale / 222 return), 18 batches,
+  204 returns. Meesho 1,426 orders, 544 returns delivered, 986 payment
+  rows, 96 ads rows, 17 batches. Amazon unified 94 rows (84 Released /
+  10 Deferred), MTR 60 rows. Flipkart orders: diagnostic 493 rows, 493
+  distinct item ids, 474 order ids; old test says 476: UNRECONCILED.
 
 ## Known code defects
-1. PnLDashboardScreen: benchmark file deleted; literal grep proof pending.
-   Screen still on old engine (FK -6,028.57, AZ -2,206.60, MS 22,618.59,
-   total 14,383.42; FK COGS 59,739 = 2x). Replaced by 5R-3.
-2. az_transfers listener: removal not yet proven by grep.
-3. Old pnlEngine still double counts Flipkart returns/freight; ledger
-   fixed. Remove old path in 5R-3.
+1. src/bank/reconciliation.ts:174-175 hardcodes 61423.71 snap. Fix in 5c.
+2. PnLDashboardScreen still on old engine (FK -6,028.57, AZ -2,206.60,
+   MS 22,618.59, total 14,383.42; FK COGS 59,739 = 2x double count).
+   Replaced by 5R-3. Old pnlEngine path to be removed there.
+3. Unit cost is standard cost only (0 stock-event lines): cumulative
+   average path untested on real data. Unresolved SKUs 0 on all three.
 4. Amazon/Meesho alias resolution and silent default cost 100 in skuEngine
-   and returnEngine: not yet proven fixed.
-5. Pipeline profit 0.7 factor: not yet proven removed.
-6. firestore.rules: ms_* added in repo (+71); block print pending.
-7. pnl/sku/return/pipeline engine tests use no real samples (only
+   and returnEngine: not yet proven fixed. Pipeline 0.7 factor: not yet
+   proven removed.
+5. Flipkart orders status parses as UNKNOWN for all 493 rows; 476 vs 493
+   unreconciled. Check whether tracking states depend on it.
+6. Meesho: 544 completed returns vs 416 payment return rows; the 128
+   without a September payment row unexplained.
+7. firestore.rules: ms_* (7 collections) added in repo; enclosing
+   "documents" block not yet shown. Owner checks before publishing.
+8. pnl/sku/return/pipeline engine tests use no real samples (only
    ledger.test does).
-8. Stage 8 invented "damaged/lost = 100% COGS" (not a decision).
-9. genai removed; Math.random removal unproven; UploadCentreScreen 3,787
-   lines.
-10. Flipkart TDS 2,866.54 about 10x TCS 286.67: check parser column
-    mapping (reference shows same figures), then raise with the CA.
-11. Stage 3b/4b storage tests use a mock IndexedDB store, not Firestore.
+9. Stage 8 invented "damaged/lost = 100% COGS" (not a decision).
+10. UploadCentreScreen 3,787 lines.
+11. Flipkart TDS 2,866.54 about 10x TCS 286.67 (parser maps cols 36/37;
+    reference shows same). No code fix; ask the CA.
+12. Stage 3b/4b storage tests use a mock IndexedDB store, not Firestore.
     Re-verify real Firestore writes/counts at Stage 10 or earlier.
-12. Golden test 6 circular (expected adjusted by ledger packing): fix in 5b.
+CLOSED: circular golden test (5b-2).
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -122,14 +133,9 @@ ms_batches, ms_uploads. (sku_variants unused.)
   emails, admins, roles (lowercase).
 
 ## Open decisions
-- Packing on all dispatched units (spec) vs sold units (reference
-  workbook): recommended = spec; awaiting owner yes/no.
+- None.
 
-## Last result (6 Nov 2026)
-- Prompt A approved (see Stage status). Fix 4/5 landed: settlement/order
-  month fields asserted, packing by dispatch, Meesho net units 561.
-- Remaining gap explained (-834.01, packing basis). Golden test must be
-  made independent (Fix 5b).
-- Next: Fix 5b (prompt issued): grep proofs, independent dispatch counts,
-  rewritten golden 6, return-loss and cost-source proof, TDS/TCS and
-  Flipkart orders diagnostics.
+## Last result (9 Nov 2026)
+- Fix 5b-2 approved; CI #53 green. Dashboard screenshot still shows old
+  engine (14,383.42): expected until 5R-3.
+- Next: run Fix 5c, paste report, then 5R-2.
