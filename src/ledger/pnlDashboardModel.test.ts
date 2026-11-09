@@ -10,6 +10,7 @@ import { parseMeeshoPayments } from '../meesho';
 import { parseAliasCsv } from '../utils/skuResolver';
 import { parseCSV } from '../utils/csvParser';
 import { CostMasterItem } from '../types';
+import { parseFirestoreAliases } from '../components/PnLDashboardScreen';
 
 function findRealSampleFile(token: string): string {
   const dirs = [
@@ -123,5 +124,48 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     expect(Math.abs(az.profitAfterTcsTds - 2305.65)).toBeLessThanOrEqual(1.00);
     expect(Math.abs(ms.profitAfterTcsTds - 18089.19)).toBeLessThanOrEqual(1.00);
     expect(Math.abs(totalProfit - 47041.30)).toBeLessThanOrEqual(1.00);
+  });
+
+  it('asserts Unresolved SKUs = 0 for Sep 2026 samples when loading aliases through screen parseFirestoreAliases function', () => {
+    const aliasPath = findRealSampleFile('sku_aliases_v2');
+    const aliasText = fs.readFileSync(aliasPath, 'utf8');
+    const aliasLines = aliasText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    const mockFirestoreDocs: any[] = [];
+    for (let i = 1; i < aliasLines.length; i++) {
+      const parts = aliasLines[i].split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
+      if (parts.length >= 2) {
+        mockFirestoreDocs.push({
+          id: parts[0],
+          data: () => ({ alias: parts[0], master_sku: parts[1] }),
+        });
+      }
+    }
+
+    const aliasMap = parseFirestoreAliases(mockFirestoreDocs);
+    const { masterCodes, costMasterItems } = loadCostMasterAndAliases();
+
+    const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
+    const azUnified = parseAmazonUnified(
+      fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
+    );
+    const azMtr = parseAmazonMtr(
+      fs.readFileSync(findRealSampleFile('2-MTR_B2C-SEPTEMBER-2026'), 'utf8')
+    );
+    const msReport = parseMeeshoPayments(
+      XLSX.readFile(findRealSampleFile('previous_payment'))
+    );
+
+    const ledgerResult = buildLedger({
+      settlementMonth: '2026-09',
+      aliasMap,
+      costLookup: costMasterItems,
+      masterCodes,
+      settings: { freight: 5, packing: 6, returnLoss: 0.05 },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      amazon: { unifiedRows: azUnified, mtrRows: azMtr },
+      meesho: { payments: msReport.payments, ads: msReport.ads },
+    });
+
+    expect(ledgerResult.unresolved.length).toBe(0);
   });
 });

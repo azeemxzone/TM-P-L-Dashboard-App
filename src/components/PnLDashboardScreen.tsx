@@ -9,6 +9,23 @@ import { PipelineTrackerScreen } from './PipelineTrackerScreen';
 import { SkuPerformanceScreen } from './SkuPerformanceScreen';
 import { ReturnPerformanceScreen } from './ReturnPerformanceScreen';
 import { CostMasterItem } from '../types';
+import { cleanSku } from '../flipkart/normalizers';
+
+export function parseFirestoreAliases(
+  docs: Array<{ id?: string; data: () => Record<string, any> }> | Record<string, any>[]
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const item of docs) {
+    const data = typeof item.data === 'function' ? item.data() : item;
+    const docId = item.id || '';
+    const aliasKey = data.alias || data.seller_sku || data.marketplace_sku || data.alias_sku || docId;
+    const masterVal = data.master_sku || data.master_code || data.sku_code;
+    if (aliasKey && masterVal) {
+      map.set(cleanSku(aliasKey), cleanSku(masterVal));
+    }
+  }
+  return map;
+}
 import {
   TrendingUp,
   Calendar,
@@ -106,14 +123,8 @@ export const PnLDashboardScreen: React.FC = () => {
     const unsubAliases = onSnapshot(
       collection(db, 'sku_aliases'),
       (snap) => {
-        const map = new Map<string, string>();
-        snap.forEach((d) => {
-          const data = d.data();
-          if (data.seller_sku && data.master_sku) {
-            map.set(String(data.seller_sku).trim().toUpperCase(), String(data.master_sku).trim());
-          }
-        });
-        setAliasMap(map);
+        const docs = snap.docs.map((d) => ({ id: d.id, data: () => d.data() }));
+        setAliasMap(parseFirestoreAliases(docs));
       },
       (err) => setQueryError({ code: err.code, collection: 'sku_aliases' })
     );
@@ -125,8 +136,9 @@ export const PnLDashboardScreen: React.FC = () => {
         const codes = new Set<string>();
         snap.forEach((d) => {
           const data = d.data() as CostMasterItem;
-          if (data && data.sku_code) {
-            const code = data.sku_code.trim();
+          const skuCode = data.sku_code || data.id || (data as any).master_sku;
+          if (skuCode) {
+            const code = cleanSku(skuCode);
             codes.add(code);
             items.push({ ...data, sku_code: code });
           }
