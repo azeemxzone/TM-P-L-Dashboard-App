@@ -54,14 +54,13 @@
   Summary cells B5:D14; independent dispatch counts FK 598, AZ 35, MS 977).
   CI #52, #53 green.
 - Next: 
-- 5R-3c (9 Nov): NOT APPROVED. Added parseFirestoreCostMaster (CI #59
-  green, commit 7340e43). Screenshot still shows old figures: product cost
-  FK 29,603 / AZ 2,395 / MS 81,691, return loss 402.75 / 39.20 / 1,099.55.
-  Agent default effective_from 2020-01-01 conflicts with no-defaults rule.
-- Data finding: Firestore cost_master TM-ST-002 mfg_cost 125 vs
-  sku_master_v3.csv 120 (TM-CA-001 120/120, TM-PC-006 110/110 match).
-- Next: owner decides correct cost for TM-ST-002, hard-refreshes screen,
-  sends full table screenshot -> 5R-3d -> close 5R -> other module.
+- cost_master reloaded from sku_master_v3.csv (34 SKUs, 9 Nov). Screen
+  after-tax FK still 27,829.96 / AZ 2,268.65 / MS 16,741.89 vs golden
+  26,646.46 / 2,305.65 / 18,089.19. Cost data ruled out; gap is in the
+  screen's ledger inputs. Suspect: fk_returns stored 204 vs 222 parsed
+  (unproven).
+- Next: 5R-3e read-only input diagnostic -> fix mismatch -> close 5R ->
+  other module.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17);
@@ -123,8 +122,11 @@ CLOSED: circular golden test (5b-2).
 18. SKU Performance (Stage 7) still on old engine (total -41,326.30).
 19. effective_from default '2020-01-01' in parseFirestoreCostMaster (remove
     in 5R-3d).
-20. Firestore cost_master differs from sku_master_v3.csv (TM-ST-002 125 vs
-    120). Owner decision needed; golden reference built on CSV.
+20. cost_master reset to 34 SKUs (CSV). CLOSED as cause of the gap.
+23. Screen vs golden mismatch persists (product cost FK 29,603 vs 30,778,
+    AZ 2,395 vs 2,355, MS 81,691 vs 80,317; return loss FK 402.75 vs
+    411.25). Likely input difference (fk_returns 204 vs 222). Diagnose in
+    5R-3e.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -146,5 +148,6 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - Correct mfg_cost for TM-ST-002 (125 Firestore vs 120 CSV).
 
 ## Last result (9 Nov 2026)
-- 5R-3c reported, not approved: screen figures unchanged. Needs fresh
-  screenshot (hard refresh), cost_master rows for TM-ST-002, 5R-3d.
+- Cost reset done by owner; screen figures unchanged. 5R-3e diagnostic
+  prompt issued. Awaiting SUMMARY, Ledger inputs panel screenshot, Firestore
+  collection counts, CI screenshot.
