@@ -54,15 +54,14 @@
   Summary cells B5:D14; independent dispatch counts FK 598, AZ 35, MS 977).
   CI #52, #53 green.
 - Next: 
-- 5R-3b (9 Nov): unresolved SKUs fixed (alias loader parseFirestoreAliases;
-  Firestore sku_aliases = 67 docs; SKU Performance shows 0 unmatched).
-  NOT APPROVED: screen totals differ from golden ledger (product cost FK
-  29,603 / AZ 2,395 / MS 81,691 vs ledger; return loss FK 402.75 / AZ 39.20
-  / MS 1,099.55 vs 411.25 / 42.20 / 1,126.25). Revenue, packing, TCS, TDS
-  match. Suspected cause: Firestore cost_master differs from
-  sku_master_v3.csv.
-- Next: owner compares cost_master vs sku_master_v3.csv (3 SKUs) -> 5R-3c
-  -> close 5R -> other module.
+- 5R-3c (9 Nov): NOT APPROVED. Added parseFirestoreCostMaster (CI #59
+  green, commit 7340e43). Screenshot still shows old figures: product cost
+  FK 29,603 / AZ 2,395 / MS 81,691, return loss 402.75 / 39.20 / 1,099.55.
+  Agent default effective_from 2020-01-01 conflicts with no-defaults rule.
+- Data finding: Firestore cost_master TM-ST-002 mfg_cost 125 vs
+  sku_master_v3.csv 120 (TM-CA-001 120/120, TM-PC-006 110/110 match).
+- Next: owner decides correct cost for TM-ST-002, hard-refreshes screen,
+  sends full table screenshot -> 5R-3d -> close 5R -> other module.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17);
@@ -122,6 +121,10 @@ CLOSED: circular golden test (5b-2).
 17. Upload Centre has no Unmatched SKUs box (spec says it should);
     SKU Performance has a drawer. Defer.
 18. SKU Performance (Stage 7) still on old engine (total -41,326.30).
+19. effective_from default '2020-01-01' in parseFirestoreCostMaster (remove
+    in 5R-3d).
+20. Firestore cost_master differs from sku_master_v3.csv (TM-ST-002 125 vs
+    120). Owner decision needed; golden reference built on CSV.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -140,8 +143,8 @@ ms_batches, ms_uploads. (sku_variants unused.)
   emails, admins, roles (lowercase).
 
 ## Open decisions
-- None.
+- Correct mfg_cost for TM-ST-002 (125 Firestore vs 120 CSV).
 
 ## Last result (9 Nov 2026)
-- 5R-3b reported; alias issue solved, cost/return-loss mismatch open.
-  CI screenshot for this commit missing.
+- 5R-3c reported, not approved: screen figures unchanged. Needs fresh
+  screenshot (hard refresh), cost_master rows for TM-ST-002, 5R-3d.
