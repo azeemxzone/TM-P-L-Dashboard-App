@@ -29,9 +29,10 @@ export function parseFirestoreAliases(
 
 export function parseFirestoreCostMaster(
   docs: Array<{ id?: string; data: () => Record<string, any> }> | Record<string, any>[]
-): { items: CostMasterItem[]; codes: Set<string> } {
+): { items: CostMasterItem[]; codes: Set<string>; missingEffectiveDateSkus: string[] } {
   const items: CostMasterItem[] = [];
   const codes = new Set<string>();
+  const missingEffectiveDateSkus: string[] = [];
   for (const item of docs) {
     const data = typeof item.data === 'function' ? item.data() : item;
     const docId = item.id || '';
@@ -41,7 +42,10 @@ export function parseFirestoreCostMaster(
       codes.add(code);
       const mfgCostRaw = data.mfg_cost ?? data.mfgCost ?? data.mfg_rate ?? data.unit_cost ?? data.cost;
       const mfgCostNum = typeof mfgCostRaw === 'number' ? mfgCostRaw : parseFloat(mfgCostRaw);
-      const effFrom = data.effective_from || '2020-01-01';
+      const effFrom = data.effective_from ? String(data.effective_from).trim() : '';
+      if (!effFrom) {
+        missingEffectiveDateSkus.push(code);
+      }
       items.push({
         ...data,
         id: docId || code,
@@ -56,7 +60,7 @@ export function parseFirestoreCostMaster(
       });
     }
   }
-  return { items, codes };
+  return { items, codes, missingEffectiveDateSkus };
 }
 import {
   TrendingUp,
@@ -120,6 +124,7 @@ export const PnLDashboardScreen: React.FC = () => {
   const [aliasMap, setAliasMap] = useState<Map<string, string>>(new Map());
   const [masterCodes, setMasterCodes] = useState<Set<string>>(new Set());
   const [costLookup, setCostLookup] = useState<CostMasterItem[]>([]);
+  const [missingEffectiveDateSkus, setMissingEffectiveDateSkus] = useState<string[]>([]);
 
   const [fkOrders, setFkOrders] = useState<any[]>([]);
   const [fkAdjustments, setFkAdjustments] = useState<any[]>([]);
@@ -165,9 +170,10 @@ export const PnLDashboardScreen: React.FC = () => {
       collection(db, 'cost_master'),
       (snap) => {
         const docs = snap.docs.map((d) => ({ id: d.id, data: () => d.data() }));
-        const { items, codes } = parseFirestoreCostMaster(docs);
+        const { items, codes, missingEffectiveDateSkus: missingEff } = parseFirestoreCostMaster(docs);
         setMasterCodes(codes);
         setCostLookup(items);
+        setMissingEffectiveDateSkus(missingEff);
       },
       (err) => setQueryError({ code: err.code, collection: 'cost_master' })
     );
@@ -259,7 +265,26 @@ export const PnLDashboardScreen: React.FC = () => {
     });
   }, [selectedMonth, aliasMap, costLookup, masterCodes, ledgerSettings, fkOrders, fkAdjustments, azUnified, azMtr, msPayments, msAds]);
 
-  const { totals, unresolved } = ledgerResult;
+  const { totals, unresolved: ledgerUnresolved } = ledgerResult;
+
+  // Unresolved SKUs: combines ledger unresolved SKUs with any cost_master items missing effective_from
+  const unresolved = useMemo(() => {
+    const list: UnresolvedSku[] = [...ledgerUnresolved];
+    for (const sku of missingEffectiveDateSkus) {
+      if (!list.some((u) => u.sellerSku === sku)) {
+        list.push({
+          sellerSku: sku,
+          orderId: 'COST_MASTER',
+          platform: 'Flipkart',
+          units: 0,
+          netSettlement: 0,
+          reason: 'MISSING_EFFECTIVE_DATE',
+        });
+      }
+    }
+    return list;
+  }, [ledgerUnresolved, missingEffectiveDateSkus]);
+
   const fk = totals.byPlatform.Flipkart;
   const az = totals.byPlatform.Amazon;
   const ms = totals.byPlatform.Meesho;

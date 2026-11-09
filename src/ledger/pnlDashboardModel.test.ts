@@ -201,6 +201,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
             sku_name: masterRows[i][1],
             weight_grams: masterRows[i][2],
             mfg_cost: masterRows[i][3], // raw string from CSV
+            effective_from: '2026-04-01',
           }),
         });
       }
@@ -241,5 +242,47 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     expect(Math.abs(ms.profitAfterTcsTds - 18089.19)).toBeLessThanOrEqual(1.00);
     expect(Math.abs(totalProfit - 47041.30)).toBeLessThanOrEqual(1.00);
     expect(ledgerResult.unresolved.length).toBe(0);
+  });
+
+  it('flags SKU in Unresolved SKUs with reason MISSING_EFFECTIVE_DATE when effective_from is missing', () => {
+    const { aliasMap } = loadCostMasterAndAliases();
+    // Item with missing effective_from
+    const costDocsWithMissingEff: any[] = [
+      {
+        id: 'TM-PC-001',
+        data: () => ({
+          sku_code: 'TM-PC-001',
+          mfg_cost: 145,
+          // effective_from missing!
+        }),
+      },
+    ];
+
+    const { items, codes, missingEffectiveDateSkus } = parseFirestoreCostMaster(costDocsWithMissingEff);
+    expect(missingEffectiveDateSkus).toContain('TM-PC-001');
+
+    const ledgerResult = buildLedger({
+      settlementMonth: '2026-09',
+      aliasMap,
+      costLookup: items,
+      masterCodes: codes,
+      flipkart: {
+        orders: [
+          {
+            orderItemId: 'item-1',
+            sellerSku: 'TM-PC-001',
+            paymentDate: '2026-09-10',
+            orderDate: '2026-09-05',
+            qty: 1,
+            refund: 0,
+            bankSettlement: 500,
+          } as any,
+        ],
+      },
+    });
+
+    const unresolvedItem = ledgerResult.unresolved.find((u) => u.sellerSku === 'TM-PC-001');
+    expect(unresolvedItem).toBeDefined();
+    expect(unresolvedItem?.reason).toBe('MISSING_EFFECTIVE_DATE');
   });
 });

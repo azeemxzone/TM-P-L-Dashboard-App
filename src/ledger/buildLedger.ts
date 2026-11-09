@@ -9,6 +9,7 @@
 import { Marketplace, CostMasterItem, StockEvent } from '../types';
 import { resolveMasterSku } from '../utils/skuResolver';
 import { getCostAsOf, calculateStandardCost, getAvgCostAsOf } from '../utils/costCalculator';
+import { cleanSku } from '../flipkart/normalizers';
 import {
   BuildLedgerInput,
   BuildLedgerResult,
@@ -76,7 +77,10 @@ function resolveItemCost(
 
   // 3. Array of CostMasterItem (standard cost lookup)
   if (Array.isArray(costLookup)) {
-    const item = getCostAsOf(masterSku, date || '2026-09-01', costLookup as CostMasterItem[]);
+    const validRows = (costLookup as CostMasterItem[]).filter(
+      (c) => c && c.effective_from && c.effective_from.trim().length > 0
+    );
+    const item = getCostAsOf(masterSku, date || '2026-09-01', validRows);
     if (item && typeof item.mfg_cost === 'number' && !isNaN(item.mfg_cost)) {
       return {
         mfgCost: item.mfg_cost,
@@ -206,13 +210,26 @@ export function buildLedger(
       : null;
 
     if (r.sellerSku && (!resolvedMaster || costInfo === null)) {
+      let reason: string;
+      if (!resolvedMaster) {
+        reason = 'missing_alias';
+      } else {
+        const matchingCost = Array.isArray(costLookup)
+          ? costLookup.find((c) => c && cleanSku(c.sku_code) === cleanSku(resolvedMaster))
+          : undefined;
+        if (matchingCost && (!matchingCost.effective_from || matchingCost.effective_from.trim() === '')) {
+          reason = 'MISSING_EFFECTIVE_DATE';
+        } else {
+          reason = 'missing_cost';
+        }
+      }
       unresolved.push({
         sellerSku: r.sellerSku,
         orderId: r.orderItemId,
         platform: 'Flipkart',
         units: r.refund === 0 ? r.qty : -r.qty,
         netSettlement: r.bankSettlement,
-        reason: !resolvedMaster ? 'missing_alias' : 'missing_cost',
+        reason,
       });
     }
 
@@ -367,13 +384,26 @@ export function buildLedger(
       (!resolvedMaster || costInfo === null) &&
       (r.type === 'Order' || r.type === 'Refund')
     ) {
+      let reason: string;
+      if (!resolvedMaster) {
+        reason = 'missing_alias';
+      } else {
+        const matchingCost = Array.isArray(costLookup)
+          ? costLookup.find((c) => c && cleanSku(c.sku_code) === cleanSku(resolvedMaster))
+          : undefined;
+        if (matchingCost && (!matchingCost.effective_from || matchingCost.effective_from.trim() === '')) {
+          reason = 'MISSING_EFFECTIVE_DATE';
+        } else {
+          reason = 'missing_cost';
+        }
+      }
       unresolved.push({
         sellerSku: r.sku,
         orderId: r.orderId,
         platform: 'Amazon',
         units: r.type === 'Refund' ? -Math.abs(r.quantity) : r.quantity,
         netSettlement: r.total,
-        reason: !resolvedMaster ? 'missing_alias' : 'missing_cost',
+        reason,
       });
     }
 
@@ -463,13 +493,26 @@ export function buildLedger(
       : null;
 
     if (hasSku && (!resolvedMaster || costInfo === null)) {
+      let reason: string;
+      if (!resolvedMaster) {
+        reason = 'missing_alias';
+      } else {
+        const matchingCost = Array.isArray(costLookup)
+          ? costLookup.find((c) => c && cleanSku(c.sku_code) === cleanSku(resolvedMaster))
+          : undefined;
+        if (matchingCost && (!matchingCost.effective_from || matchingCost.effective_from.trim() === '')) {
+          reason = 'MISSING_EFFECTIVE_DATE';
+        } else {
+          reason = 'missing_cost';
+        }
+      }
       unresolved.push({
         sellerSku: r.supplierSku,
         orderId: r.subOrderNo,
         platform: 'Meesho',
         units: r.qty,
         netSettlement: r.finalSettlement,
-        reason: !resolvedMaster ? 'missing_alias' : 'missing_cost',
+        reason,
       });
     }
 
