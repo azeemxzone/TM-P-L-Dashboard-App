@@ -10,7 +10,7 @@ import { parseMeeshoPayments } from '../meesho';
 import { parseAliasCsv } from '../utils/skuResolver';
 import { parseCSV } from '../utils/csvParser';
 import { CostMasterItem } from '../types';
-import { parseFirestoreAliases } from '../components/PnLDashboardScreen';
+import { parseFirestoreAliases, parseFirestoreCostMaster } from '../components/PnLDashboardScreen';
 
 function findRealSampleFile(token: string): string {
   const dirs = [
@@ -166,6 +166,80 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       meesho: { payments: msReport.payments, ads: msReport.ads },
     });
 
+    expect(ledgerResult.unresolved.length).toBe(0);
+  });
+
+  it('builds ledger through screen loader functions (parseFirestoreAliases & parseFirestoreCostMaster) on sample CSVs and asserts target profits', () => {
+    // 1. Load mock Firestore alias docs from sample CSV
+    const aliasPath = findRealSampleFile('sku_aliases_v2');
+    const aliasText = fs.readFileSync(aliasPath, 'utf8');
+    const aliasLines = aliasText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+    const mockAliasDocs: any[] = [];
+    for (let i = 1; i < aliasLines.length; i++) {
+      const parts = aliasLines[i].split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
+      if (parts.length >= 2) {
+        mockAliasDocs.push({
+          id: parts[0],
+          data: () => ({ alias: parts[0], master_sku: parts[1] }),
+        });
+      }
+    }
+    const aliasMap = parseFirestoreAliases(mockAliasDocs);
+
+    // 2. Load mock Firestore cost master docs from sample CSV
+    const masterPath = findRealSampleFile('sku_master_v3');
+    const masterText = fs.readFileSync(masterPath, 'utf8');
+    const masterRows = parseCSV(masterText);
+    const mockCostDocs: any[] = [];
+    for (let i = 1; i < masterRows.length; i++) {
+      const code = masterRows[i][0];
+      if (code) {
+        mockCostDocs.push({
+          id: code,
+          data: () => ({
+            sku_code: code,
+            sku_name: masterRows[i][1],
+            weight_grams: masterRows[i][2],
+            mfg_cost: masterRows[i][3], // raw string from CSV
+          }),
+        });
+      }
+    }
+    const { items: costLookup, codes: masterCodes } = parseFirestoreCostMaster(mockCostDocs);
+
+    // 3. Load marketplace settlement sample files
+    const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
+    const azUnified = parseAmazonUnified(
+      fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
+    );
+    const azMtr = parseAmazonMtr(
+      fs.readFileSync(findRealSampleFile('2-MTR_B2C-SEPTEMBER-2026'), 'utf8')
+    );
+    const msReport = parseMeeshoPayments(
+      XLSX.readFile(findRealSampleFile('previous_payment'))
+    );
+
+    // 4. Run buildLedger
+    const ledgerResult = buildLedger({
+      settlementMonth: '2026-09',
+      aliasMap,
+      costLookup,
+      masterCodes,
+      settings: { freight: 5, packing: 6, returnLoss: 0.05 },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      amazon: { unifiedRows: azUnified, mtrRows: azMtr },
+      meesho: { payments: msReport.payments, ads: msReport.ads },
+    });
+
+    const fk = ledgerResult.totals.byPlatform.Flipkart;
+    const az = ledgerResult.totals.byPlatform.Amazon;
+    const ms = ledgerResult.totals.byPlatform.Meesho;
+    const totalProfit = ledgerResult.totals.profitAfterTcsTds;
+
+    expect(Math.abs(fk.profitAfterTcsTds - 26646.46)).toBeLessThanOrEqual(1.00);
+    expect(Math.abs(az.profitAfterTcsTds - 2305.65)).toBeLessThanOrEqual(1.00);
+    expect(Math.abs(ms.profitAfterTcsTds - 18089.19)).toBeLessThanOrEqual(1.00);
+    expect(Math.abs(totalProfit - 47041.30)).toBeLessThanOrEqual(1.00);
     expect(ledgerResult.unresolved.length).toBe(0);
   });
 });

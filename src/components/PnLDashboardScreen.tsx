@@ -26,6 +26,38 @@ export function parseFirestoreAliases(
   }
   return map;
 }
+
+export function parseFirestoreCostMaster(
+  docs: Array<{ id?: string; data: () => Record<string, any> }> | Record<string, any>[]
+): { items: CostMasterItem[]; codes: Set<string> } {
+  const items: CostMasterItem[] = [];
+  const codes = new Set<string>();
+  for (const item of docs) {
+    const data = typeof item.data === 'function' ? item.data() : item;
+    const docId = item.id || '';
+    const skuCode = data.sku_code || docId || data.master_sku || data.id;
+    if (skuCode) {
+      const code = cleanSku(skuCode);
+      codes.add(code);
+      const mfgCostRaw = data.mfg_cost ?? data.mfgCost ?? data.mfg_rate ?? data.unit_cost ?? data.cost;
+      const mfgCostNum = typeof mfgCostRaw === 'number' ? mfgCostRaw : parseFloat(mfgCostRaw);
+      const effFrom = data.effective_from || '2020-01-01';
+      items.push({
+        ...data,
+        id: docId || code,
+        sku_code: code,
+        sku_name: data.sku_name || code,
+        weight_grams: Number(data.weight_grams) || 0,
+        mfg_cost: !isNaN(mfgCostNum) ? mfgCostNum : 0,
+        active: data.active !== false,
+        effective_from: effFrom,
+        createdAt: data.createdAt || '2020-01-01T00:00:00Z',
+        createdBy: data.createdBy || 'system',
+      });
+    }
+  }
+  return { items, codes };
+}
 import {
   TrendingUp,
   Calendar,
@@ -132,17 +164,8 @@ export const PnLDashboardScreen: React.FC = () => {
     const unsubCostMaster = onSnapshot(
       collection(db, 'cost_master'),
       (snap) => {
-        const items: CostMasterItem[] = [];
-        const codes = new Set<string>();
-        snap.forEach((d) => {
-          const data = d.data() as CostMasterItem;
-          const skuCode = data.sku_code || data.id || (data as any).master_sku;
-          if (skuCode) {
-            const code = cleanSku(skuCode);
-            codes.add(code);
-            items.push({ ...data, sku_code: code });
-          }
-        });
+        const docs = snap.docs.map((d) => ({ id: d.id, data: () => d.data() }));
+        const { items, codes } = parseFirestoreCostMaster(docs);
         setMasterCodes(codes);
         setCostLookup(items);
       },
