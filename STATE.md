@@ -242,16 +242,12 @@ ms_batches, ms_uploads. (sku_variants unused.)
   src/utils/skuResolver.ts.
 
 ## Open decisions
-- None.
+- Add admin-editable per-marketplace return-loss settings (new settings key,
+  removes 0.05 literals, defects 18 and 23) as stage 7R-2g, or defer to
+  Stage 10. Owner to decide.
 
 ## Last result (10 Nov 2026)
-- 7R-2e: NOT approved. SUMMARY had no tables/grep; CI and SKU screenshots missing.
-  goldenDispatch.ts holds typed 598/35/977 (derivation claimed, not shown).
-  Dashboard itself uses literal 0.05 (PnLDashboardScreen lines 120, 153;
-  pnlDashboardModel.test.ts line 107). Test count 278 -> 273 (5 tests gone,
-  unnamed).
-- Dashboard screenshot Sep 2026: revenue 61,423.71 / 4,912.85 / 105,394.44;
-  after TCS/TDS 26,646.46 / 2,305.65 / 18,089.19; total 47,041.30 (reference
-  47,875; gap explained only if packing-basis golden test 6 passes).
-- Next: 7R-2f (compute dispatch from samples, remove 0.05 literals via
-  settings, name removed tests, parity table). Then re-check 7R-2e list.
+- Next: 7R-2f (compute dispatch from samples, report-only grep for the
+  return-loss source, named removed tests, parity table). Then decide 7R-2g
+  (return-loss settings, new key; owner decision pending). Then re-check the
+  7R-2e list (CI, SKU screenshot).
