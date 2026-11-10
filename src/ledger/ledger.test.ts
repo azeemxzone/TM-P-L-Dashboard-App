@@ -106,8 +106,15 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     settlementMonth: '2026-09',
     aliasMap,
     costLookup: costMasterItems,
-    masterCodes,
-    settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRate },
+    settings: {
+      freight: 5,
+      packing: 6,
+      returnLoss: {
+        Flipkart: goldenReturnLossRate,
+        Amazon: goldenReturnLossRate,
+        Meesho: goldenReturnLossRate,
+      },
+    },
     flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
     amazon: { unifiedRows: azUnified, mtrRows: azMtr },
     meesho: { payments: msReport.payments, ads: msReport.ads },

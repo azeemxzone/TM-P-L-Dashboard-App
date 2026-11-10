@@ -3,6 +3,7 @@ import { db } from '../firebase';
 import { collection, onSnapshot, doc } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 import { buildLedger } from '../ledger/buildLedger';
+import { parseLedgerSettings, ParseLedgerSettingsResult } from '../ledger/ledgerSettings';
 import { LedgerSettings, UnresolvedSku } from '../ledger/types';
 import { formatINR } from '../utils/costCalculator';
 import { PipelineTrackerScreen } from './PipelineTrackerScreen';
@@ -113,12 +114,8 @@ export const PnLDashboardScreen: React.FC = () => {
   const [selectedChannel, setSelectedChannel] = useState<'all' | 'Flipkart' | 'Amazon' | 'Meesho'>('all');
   const [viewMode, setViewMode] = useState<'overview' | 'detailed' | 'pipeline' | 'sku_performance' | 'return_performance'>('overview');
 
-  // Operational cost settings
-  const [ledgerSettings, setLedgerSettings] = useState<LedgerSettings>({
-    freight: 5,
-    packing: 6,
-    returnLoss: 0.05,
-  });
+  // Operational cost settings state (null = loading, ok: false = missing keys, ok: true = ready)
+  const [settingsState, setSettingsState] = useState<ParseLedgerSettingsResult | null>(null);
 
   // Firestore raw datasets
   const [aliasMap, setAliasMap] = useState<Map<string, string>>(new Map());
@@ -146,12 +143,9 @@ export const PnLDashboardScreen: React.FC = () => {
       doc(db, 'settings', 'config'),
       (snap) => {
         if (snap.exists()) {
-          const data = snap.data();
-          setLedgerSettings({
-            freight: data.inbound_freight_per_unit != null ? Number(data.inbound_freight_per_unit) : 5,
-            packing: data.packaging_cost_per_unit != null ? Number(data.packaging_cost_per_unit) : 6,
-            returnLoss: data.return_loss_rate != null ? Number(data.return_loss_rate) / 100 : 0.05,
-          });
+          setSettingsState(parseLedgerSettings(snap.data()));
+        } else {
+          setSettingsState(parseLedgerSettings(undefined));
         }
       },
       (err) => setQueryError({ code: err.code, collection: 'settings/config' })
@@ -253,19 +247,23 @@ export const PnLDashboardScreen: React.FC = () => {
 
   // Build single ledger output
   const ledgerResult = useMemo(() => {
+    if (!settingsState || !settingsState.ok) {
+      return null;
+    }
     return buildLedger({
       settlementMonth: selectedMonth,
       aliasMap,
       costLookup,
       masterCodes,
-      settings: ledgerSettings,
+      settings: settingsState.settings,
       flipkart: { orders: fkOrders, adjustments: fkAdjustments },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msPayments, ads: msAds },
     });
-  }, [selectedMonth, aliasMap, costLookup, masterCodes, ledgerSettings, fkOrders, fkAdjustments, azUnified, azMtr, msPayments, msAds]);
+  }, [selectedMonth, aliasMap, costLookup, masterCodes, settingsState, fkOrders, fkAdjustments, azUnified, azMtr, msPayments, msAds]);
 
-  const { totals, unresolved: ledgerUnresolved } = ledgerResult;
+  const totals = ledgerResult?.totals;
+  const ledgerUnresolved = ledgerResult?.unresolved || [];
 
   // Unresolved SKUs: combines ledger unresolved SKUs with any cost_master items missing effective_from
   const unresolved = useMemo(() => {
@@ -285,9 +283,10 @@ export const PnLDashboardScreen: React.FC = () => {
     return list;
   }, [ledgerUnresolved, missingEffectiveDateSkus]);
 
-  const fk = totals.byPlatform.Flipkart;
-  const az = totals.byPlatform.Amazon;
-  const ms = totals.byPlatform.Meesho;
+  const fk = totals?.byPlatform.Flipkart;
+  const az = totals?.byPlatform.Amazon;
+  const ms = totals?.byPlatform.Meesho;
+  const ledgerSettings = settingsState?.ok ? settingsState.settings : null;
 
   // Bank Credits (Cash credited to bank)
   const bankCredits = useMemo(() => {
@@ -406,8 +405,41 @@ export const PnLDashboardScreen: React.FC = () => {
         </div>
       )}
 
-      {/* Month Selection Tabs */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs space-y-2">
+      {/* Settings loading state */}
+      {settingsState === null && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center shadow-xs">
+          <div className="inline-flex items-center gap-3 text-slate-600 dark:text-slate-400 font-medium text-sm">
+            <RefreshCw className="w-5 h-5 animate-spin text-indigo-500" />
+            <span>Loading settings...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Settings blocking panel */}
+      {settingsState && !settingsState.ok && (
+        <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-2xl p-6 space-y-4 shadow-xs">
+          <div className="flex items-center gap-2 text-red-700 dark:text-red-300 font-bold text-base">
+            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+            <span>Missing Required Settings</span>
+          </div>
+          <p className="text-sm text-red-600 dark:text-red-400">
+            The following required configuration keys are missing or invalid in settings/config:
+          </p>
+          <ul className="list-disc list-inside font-mono text-xs text-red-700 dark:text-red-300 space-y-1">
+            {settingsState.missing.map((key) => (
+              <li key={key}>{key}</li>
+            ))}
+          </ul>
+          <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+            Open Settings and save these values.
+          </p>
+        </div>
+      )}
+
+      {/* Settlement Month Tabs & Main Content */}
+      {settingsState?.ok && ledgerSettings && ledgerResult && totals && fk && az && ms && (
+        <>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-bold text-slate-700 dark:text-slate-300">Settlement Month</h2>
           <span className="text-[11px] text-slate-400 font-mono">Period: {selectedMonth}</span>
@@ -485,7 +517,7 @@ export const PnLDashboardScreen: React.FC = () => {
         <div className="flex items-center gap-3 text-[11px] font-mono text-slate-500">
           <span>Freight: ₹{ledgerSettings.freight}/unit</span>
           <span>Packing: ₹{ledgerSettings.packing}/unit</span>
-          <span>Return Loss: {((typeof ledgerSettings.returnLoss === 'number' ? ledgerSettings.returnLoss : 0.05) * 100).toFixed(0)}%</span>
+          <span>Return loss: FK {ledgerSettings.rawPercentages.Flipkart}% | AZ {ledgerSettings.rawPercentages.Amazon}% | MS {ledgerSettings.rawPercentages.Meesho}%</span>
         </div>
       </div>
 
@@ -609,7 +641,9 @@ export const PnLDashboardScreen: React.FC = () => {
 
                   {/* Return Loss */}
                   <tr>
-                    <td className="py-2.5 px-6 text-slate-600 dark:text-slate-400 pl-8">(-) Customer Return Loss (5% Provision)</td>
+                    <td className="py-2.5 px-6 text-slate-600 dark:text-slate-400 pl-8">
+                      (-) Customer Return Loss (FK {ledgerSettings.rawPercentages.Flipkart}% | AZ {ledgerSettings.rawPercentages.Amazon}% | MS {ledgerSettings.rawPercentages.Meesho}%)
+                    </td>
                     {(selectedChannel === 'all' || selectedChannel === 'Flipkart') && (
                       <td className="py-2.5 px-4 text-right">{formatINR(fk.returnLoss)}</td>
                     )}
@@ -721,6 +755,8 @@ export const PnLDashboardScreen: React.FC = () => {
         <SkuPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
       ) : (
         <ReturnPerformanceScreen initialMonth={selectedMonth} initialFY={selectedFY} />
+      )}
+        </>
       )}
     </div>
   );

@@ -28,15 +28,6 @@ function round2(val: number): number {
   return Math.round((val + Number.EPSILON) * 100) / 100;
 }
 
-const DEFAULT_SETTINGS: LedgerSettings = {
-  freight: 5,
-  packing: 6,
-  returnLoss: {
-    Flipkart: 0.05,
-    Amazon: 0.05,
-    Meesho: 0.05,
-  },
-};
 
 interface CostResult {
   mfgCost: number;
@@ -117,14 +108,19 @@ function resolveItemCost(
 }
 
 function getReturnLossRate(
-  settings: Partial<LedgerSettings> | undefined,
+  settings: (Partial<LedgerSettings> & { returnLossRates?: Record<Marketplace, number> }) | undefined,
   platform: Marketplace
 ): number {
-  const returnLossSetting = settings?.returnLoss ?? DEFAULT_SETTINGS.returnLoss;
-  if (typeof returnLossSetting === 'number') {
-    return returnLossSetting;
+  const returnLossRates = settings?.returnLossRates ?? settings?.returnLoss;
+  const rate =
+    typeof returnLossRates === 'number'
+      ? returnLossRates
+      : returnLossRates?.[platform];
+
+  if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0) {
+    throw new Error(`CRITICAL: missing return-loss rate for ${platform} in ledger settings`);
   }
-  return returnLossSetting[platform] ?? 0.05;
+  return rate;
 }
 
 /**
@@ -180,8 +176,14 @@ export function buildLedger(
     }
   }
 
-  const freightRate = settings.freight ?? DEFAULT_SETTINGS.freight;
-  const packingRate = settings.packing ?? DEFAULT_SETTINGS.packing;
+  if (typeof settings.freight !== 'number' || !Number.isFinite(settings.freight) || settings.freight < 0) {
+    throw new Error('CRITICAL: missing or invalid freight in ledger settings');
+  }
+  if (typeof settings.packing !== 'number' || !Number.isFinite(settings.packing) || settings.packing < 0) {
+    throw new Error('CRITICAL: missing or invalid packing in ledger settings');
+  }
+  const freightRate = settings.freight;
+  const packingRate = settings.packing;
 
   const lines: LedgerLine[] = [];
   const unresolved: UnresolvedSku[] = [];

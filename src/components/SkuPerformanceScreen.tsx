@@ -15,6 +15,7 @@ import { cleanSku } from '../flipkart/normalizers';
 import { exportToCSV } from '../utils/csvParser';
 import { buildLedger } from '../ledger/buildLedger';
 import { groupLedgerBySku, SkuGroupedRow } from '../ledger/skuGrouping';
+import { parseLedgerSettings, ParseLedgerSettingsResult } from '../ledger/ledgerSettings';
 import { LedgerSettings, UnresolvedSku } from '../ledger/types';
 import { parseFirestoreAliases, parseFirestoreCostMaster } from './PnLDashboardScreen';
 import { getCategoryFromSku } from '../utils/skuEngine';
@@ -27,6 +28,8 @@ import {
   Download,
   Calendar,
   AlertCircle,
+  AlertTriangle,
+  RefreshCw,
   Layers,
   ChevronRight,
   ChevronDown,
@@ -53,11 +56,9 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
 
   // Firestore raw datasets
-  const [ledgerSettings, setLedgerSettings] = useState<LedgerSettings>({
-    freight: 5,
-    packing: 6,
-    returnLoss: 0.05,
-  });
+  const [settingsState, setSettingsState] = useState<ParseLedgerSettingsResult | null>(null);
+  const [queryError, setQueryError] = useState<{ code: string; collection: string } | null>(null);
+  const [retryTrigger, setRetryTrigger] = useState<number>(0);
 
   const [aliasMap, setAliasMap] = useState<Map<string, string>>(new Map());
   const [masterCodes, setMasterCodes] = useState<Set<string>>(new Set());
@@ -73,18 +74,20 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
 
   // 1. Settings listener
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'settings', 'config'), (snap) => {
-      if (snap.exists()) {
-        const d = snap.data();
-        setLedgerSettings({
-          freight: Number(d.inbound_freight_per_purchased_unit ?? d.inbound_freight_per_unit ?? 5),
-          packing: Number(d.packing_per_dispatched_unit ?? d.packaging_cost_per_unit ?? 6),
-          returnLoss: typeof d.return_loss_rate === 'number' ? d.return_loss_rate / 100 : 0.05,
-        });
-      }
-    });
+    setQueryError(null);
+    const unsub = onSnapshot(
+      doc(db, 'settings', 'config'),
+      (snap) => {
+        if (snap.exists()) {
+          setSettingsState(parseLedgerSettings(snap.data()));
+        } else {
+          setSettingsState(parseLedgerSettings(undefined));
+        }
+      },
+      (err) => setQueryError({ code: err.code, collection: 'settings/config' })
+    );
     return () => unsub();
-  }, []);
+  }, [retryTrigger]);
 
   // 2. SKU Aliases listener
   useEffect(() => {
@@ -187,8 +190,13 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     return list;
   }, [selectedFY]);
 
+  const ledgerSettings = settingsState?.ok ? settingsState.settings : null;
+
   // Single Ledger calculation via buildLedger
   const ledgerResult = useMemo(() => {
+    if (!ledgerSettings) {
+      return null;
+    }
     return buildLedger({
       settlementMonth: selectedMonth,
       aliasMap,
@@ -203,20 +211,25 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
 
   // SKU Grouping via groupLedgerBySku
   const groupingResult = useMemo(() => {
+    if (!ledgerResult || !ledgerSettings) {
+      return null;
+    }
     return groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, selectedChannel, ledgerSettings.packing);
-  }, [ledgerResult, selectedChannel, ledgerSettings.packing]);
+  }, [ledgerResult, selectedChannel, ledgerSettings]);
 
   // Extract Categories
   const allCategories = useMemo(() => {
+    if (!groupingResult) return [];
     const set = new Set<string>();
     for (const s of groupingResult.skuRows) {
       set.add(getCategoryFromSku(s.masterSku));
     }
     return Array.from(set).sort();
-  }, [groupingResult.skuRows]);
+  }, [groupingResult]);
 
   // Filtered & Sorted SKU Rows
   const displaySkuRows = useMemo(() => {
+    if (!groupingResult) return [];
     let list = [...groupingResult.skuRows];
 
     // Category Filter
@@ -254,10 +267,11 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     });
 
     return list;
-  }, [groupingResult.skuRows, selectedCategory, searchQuery, sortBy, sortDir]);
+  }, [groupingResult, selectedCategory, searchQuery, sortBy, sortDir]);
 
   // Export to CSV
   const handleExportCSV = () => {
+    if (!groupingResult || !ledgerResult) return;
     const headers = [
       'Master SKU',
       'Category',
@@ -338,10 +352,6 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     document.body.removeChild(link);
   };
 
-  const returnLossPctDisplay = typeof ledgerSettings.returnLoss === 'number'
-    ? (ledgerSettings.returnLoss * 100).toFixed(0)
-    : '5';
-
   return (
     <div className="space-y-6">
       {/* Top Header Card */}
@@ -363,7 +373,7 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {ledgerResult.unresolved.length > 0 && (
+            {ledgerResult?.unresolved && ledgerResult.unresolved.length > 0 && (
               <div className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30">
                 <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
                 <span>{ledgerResult.unresolved.length} Unresolved SKUs</span>
@@ -372,7 +382,8 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
 
             <button
               onClick={handleExportCSV}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+              disabled={!groupingResult}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700 disabled:opacity-50"
             >
               <Download className="w-3.5 h-3.5" />
               Export CSV
@@ -398,11 +409,13 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 text-[11px] font-mono text-slate-500">
-            <span>Inbound Freight: ₹{ledgerSettings.freight}/unit</span>
-            <span>Packing: ₹{ledgerSettings.packing}/dispatch</span>
-            <span>Return Loss: {returnLossPctDisplay}%</span>
-          </div>
+          {ledgerSettings && (
+            <div className="flex items-center gap-3 text-[11px] font-mono text-slate-500">
+              <span>Inbound Freight: ₹{ledgerSettings.freight}/unit</span>
+              <span>Packing: ₹{ledgerSettings.packing}/dispatch</span>
+              <span>Return loss: FK {ledgerSettings.rawPercentages.Flipkart}% | AZ {ledgerSettings.rawPercentages.Amazon}% | MS {ledgerSettings.rawPercentages.Meesho}%</span>
+            </div>
+          )}
         </div>
 
         {/* Month Selector Grid */}
@@ -432,8 +445,60 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
         </div>
       </div>
 
-      {/* Channel Filters */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl">
+      {/* Query Error Warning Banner with Code, Collection, & Retry */}
+      {queryError && (
+        <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 text-amber-800 dark:text-amber-200 text-xs">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <div>
+              <span className="font-bold">Firestore Query Warning ({queryError.code}):</span> Error loading collection{' '}
+              <code className="bg-amber-100 dark:bg-amber-900 px-1.5 py-0.5 rounded font-mono">{queryError.collection}</code>.
+            </div>
+          </div>
+          <button
+            onClick={() => setRetryTrigger((prev) => prev + 1)}
+            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> Retry
+          </button>
+        </div>
+      )}
+
+      {/* Settings loading state */}
+      {settingsState === null && (
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center shadow-xs">
+          <div className="inline-flex items-center gap-3 text-slate-600 dark:text-slate-400 font-medium text-sm">
+            <RefreshCw className="w-5 h-5 animate-spin text-indigo-500" />
+            <span>Loading settings...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Settings blocking panel */}
+      {settingsState && !settingsState.ok && (
+        <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-2xl p-6 space-y-4 shadow-xs">
+          <div className="flex items-center gap-2 text-red-700 dark:text-red-300 font-bold text-base">
+            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+            <span>Missing Required Settings</span>
+          </div>
+          <p className="text-sm text-red-600 dark:text-red-400">
+            The following required configuration keys are missing or invalid in settings/config:
+          </p>
+          <ul className="list-disc list-inside font-mono text-xs text-red-700 dark:text-red-300 space-y-1">
+            {settingsState.missing.map((key) => (
+              <li key={key}>{key}</li>
+            ))}
+          </ul>
+          <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+            Open Settings and save these values.
+          </p>
+        </div>
+      )}
+
+      {settingsState?.ok && ledgerSettings && ledgerResult && groupingResult && (
+        <>
+          {/* Channel Filters */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl">
         <div className="flex items-center gap-1.5 flex-wrap">
           <button
             onClick={() => setSelectedChannel('all')}
@@ -602,6 +667,8 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
           * Revenue is net settlement after TCS/TDS. The P&L Dashboard &apos;Profit Before TCS/TDS&apos; adds TCS and TDS back.
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };

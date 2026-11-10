@@ -14,6 +14,13 @@ import { parseFirestoreAliases, parseFirestoreCostMaster } from '../components/P
 import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { cleanSku } from '../flipkart/normalizers';
+import { goldenReturnLossRate } from './goldenDispatch';
+
+const goldenReturnLossRates = {
+  Flipkart: goldenReturnLossRate,
+  Amazon: goldenReturnLossRate,
+  Meesho: goldenReturnLossRate,
+};
 
 function findRealSampleFile(token: string): string {
   const dirs = [
@@ -104,7 +111,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       aliasMap,
       costLookup: costMasterItems,
       masterCodes,
-      settings: { freight: 5, packing: 6, returnLoss: 0.05 },
+      settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRates },
       flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
@@ -163,7 +170,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       aliasMap,
       costLookup: costMasterItems,
       masterCodes,
-      settings: { freight: 5, packing: 6, returnLoss: 0.05 },
+      settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRates },
       flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
@@ -229,7 +236,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       aliasMap,
       costLookup,
       masterCodes,
-      settings: { freight: 5, packing: 6, returnLoss: 0.05 },
+      settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRates },
       flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
@@ -269,6 +276,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       aliasMap,
       costLookup: items,
       masterCodes: codes,
+      settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRates },
       flipkart: {
         orders: [
           {
