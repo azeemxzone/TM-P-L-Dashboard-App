@@ -120,11 +120,17 @@
       list; storageDeduplication -1 unexplained.
     - Line numbers of 0.05 literals moved (Dashboard 120/153 -> 153/173,
       SkuPerformance 59/82 -> 82/94): unexplained edits to off-limits files.
-  * 7R-2f-b (read-only verification) issued: changed files since b2537c9,
-    honest per-file test table with removed it() names (restore
-    storageDeduplication test if unjustified), Amazon breakdown from raw
-    samples. Agent closing sentence received 10 Nov, SUMMARY block NOT
-    received. CI for 7R-2 commits not yet seen.
+  * 7R-2f-b SUMMARY received 10 Nov: NOT approved. All git commands failed
+    (container has no .git), yet "Deviations: none". Test table internally
+    consistent (17 files / 199 blocks / 273 tests; 5 skuEngine removals
+    mandated by 7R-2; storageDeduplication.test.ts never existed, the 7R-2f
+    table was fabricated). 203 blocks at b2537c9 implies 277, not 278 vitest
+    tests; "then" column unverifiable. Amazon: unified Order 38 rows (32
+    Released = 32 units, 6 Deferred = 7 units), Refund 7 (4 same-month, 3
+    prior-month), MTR 37 shipment orders / 38 units; explanation 32 + 3 = 35 =
+    210 / 6, conflicts with STATE (32 orders = 35 units) and with the
+    goldenDispatch code (no Released filter). Line-number contradictions
+    between reports unresolved. 7R-2f-c (read-only, raw output) issued.
 - Not approved: 4c, 6, 7 (pending 7R-2f-b), 8.
 - Next: 7R-2f-b SUMMARY review. Then 7R-2g if owner approves (read
   *_not_sellable_pct, loading state, no literal). Then close 7, then 8
@@ -230,13 +236,20 @@
     Dashboard 153/173; Dashboard 210 writes return_loss_rate: verify
     whether it writes to Firestore). Covered by 7R-2g.
 24. Test count history unreliable: 16 files / 278 tests at b2537c9 (agent
-    report) vs 17 files / 273 now. 7R-2f per-file table rejected; honest
-    table requested in 7R-2f-b.
+    report) vs 17 / 273 now. Agent block counts: 203 then / 199 now. Owner to
+    read test counts from CI #70 and latest CI logs.
 25. Return-loss settings keys exist (*_not_sellable_pct, SettingsScreen
     337-395, types 18-20) but engine and screens use legacy
     return_loss_rate / 0.05 / "?? 5". Fix in 7R-2g (covers 18, 23).
-26. 0.05 literal line numbers moved between 7R-2e and 7R-2f in files that
-    were off-limits; changed-files proof requested in 7R-2f-b.
+26. Agent pastes disagree on 0.05 literal line numbers and on what is at
+    PnLDashboardScreen line 210 (7R-2e, 7R-2f, 7R-2f-b). Resolved by the raw
+    output in 7R-2f-c; acceptance item 2 (no 0.05 in screens) moves to 7R-2g.
+27. The agent container has no .git; git-based proofs must come from the
+    owner via GitHub web (commits page, CI logs). Do not ask the agent for
+    git output.
+28. goldenDispatch.ts Amazon block (pasted 7R-2f) has no Released/Deferred
+    filter and adds Order and Refund quantities; its described result
+    (32 + 3 = 35) does not follow from it. To be explained in 7R-2f-c.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -278,4 +291,7 @@ ms_batches, ms_uploads. (sku_variants unused.)
   product cost 1,13,450.00; packing 9,660.00; return loss 1,579.70;
   dispatched 1,610; 1,850 lines). Acceptance item 6 PASS. CI screenshot for
   the latest commit still missing.
-- Next: owner pastes the full 7R-2f-b SUMMARY block + CI screenshot.
+- Next: 7R-2f-c SUMMARY (raw file state, goldenDispatch Amazon run). Owner
+  pastes GitHub commits page, green CI screenshot on the latest commit, and
+  the test-count lines from CI #70 and the latest log. Then close 7R-2e/f (item
+  2 moved to 7R-2g) and issue 7R-2g if the owner approves.
