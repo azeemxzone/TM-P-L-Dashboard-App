@@ -115,27 +115,36 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
     });
 
     const platforms: Marketplace[] = ['Flipkart', 'Amazon', 'Meesho'];
+    const packingRate = 6;
 
     for (const p of platforms) {
-      const grouped = groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, p);
+      const grouped = groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, p, packingRate);
       const expectedP = ledgerResult.totals.byPlatform[p];
 
-      // Assert sum of SKU rows + Non-SKU row + Unresolved row equals buildLedger totals
-      expect(Math.abs(grouped.totals.revenue - expectedP.netSettlement)).toBeLessThanOrEqual(0.05);
-      expect(Math.abs(grouped.totals.productCost - expectedP.productCost)).toBeLessThanOrEqual(0.05);
-      expect(Math.abs(grouped.totals.packing - expectedP.packing)).toBeLessThanOrEqual(0.05);
-      expect(Math.abs(grouped.totals.returnLoss - expectedP.returnLoss)).toBeLessThanOrEqual(0.05);
-      expect(Math.abs(grouped.totals.profitBeforeTax - expectedP.profitAfterTcsTds)).toBeLessThanOrEqual(0.05);
+      // Assert sum of SKU rows + Non-SKU row + Unresolved row equals buildLedger totals exactly at 2 decimals
+      expect(grouped.totals.revenue).toBeCloseTo(expectedP.netSettlement, 2);
+      expect(grouped.totals.productCost).toBeCloseTo(expectedP.productCost, 2);
+      expect(grouped.totals.packing).toBeCloseTo(expectedP.packing, 2);
+      expect(grouped.totals.returnLoss).toBeCloseTo(expectedP.returnLoss, 2);
+      expect(grouped.totals.profitBeforeTax).toBeCloseTo(expectedP.profitAfterTcsTds, 2);
+
+      // Assert dispatchedUnits * packingRate == packing per SKU row and for totals
+      for (const row of grouped.skuRows) {
+        expect(row.dispatchedUnits * packingRate).toBeCloseTo(row.packing, 2);
+      }
+      expect(grouped.totals.dispatchedUnits * packingRate).toBeCloseTo(grouped.totals.packing, 2);
     }
 
     // Consolidated Total
-    const totalGrouped = groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, 'all');
+    const totalGrouped = groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, 'all', packingRate);
     const expectedTot = ledgerResult.totals;
 
-    expect(Math.abs(totalGrouped.totals.revenue - expectedTot.netSettlement)).toBeLessThanOrEqual(0.05);
-    expect(Math.abs(totalGrouped.totals.productCost - expectedTot.productCost)).toBeLessThanOrEqual(0.05);
-    expect(Math.abs(totalGrouped.totals.packing - expectedTot.packing)).toBeLessThanOrEqual(0.05);
-    expect(Math.abs(totalGrouped.totals.returnLoss - expectedTot.returnLoss)).toBeLessThanOrEqual(0.05);
-    expect(Math.abs(totalGrouped.totals.profitBeforeTax - expectedTot.profitAfterTcsTds)).toBeLessThanOrEqual(0.05);
+    expect(totalGrouped.totals.revenue).toBeCloseTo(expectedTot.netSettlement, 2);
+    expect(totalGrouped.totals.productCost).toBeCloseTo(expectedTot.productCost, 2);
+    expect(totalGrouped.totals.packing).toBeCloseTo(expectedTot.packing, 2);
+    expect(totalGrouped.totals.returnLoss).toBeCloseTo(expectedTot.returnLoss, 2);
+    expect(totalGrouped.totals.profitBeforeTax).toBeCloseTo(expectedTot.profitAfterTcsTds, 2);
+
+    expect(totalGrouped.totals.dispatchedUnits * packingRate).toBeCloseTo(totalGrouped.totals.packing, 2);
   });
 });

@@ -203,8 +203,8 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
 
   // SKU Grouping via groupLedgerBySku
   const groupingResult = useMemo(() => {
-    return groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, selectedChannel);
-  }, [ledgerResult, selectedChannel]);
+    return groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, selectedChannel, ledgerSettings.packing);
+  }, [ledgerResult, selectedChannel, ledgerSettings.packing]);
 
   // Extract Categories
   const allCategories = useMemo(() => {
@@ -520,7 +520,7 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
                 <th className="py-3 px-4 text-right">Product Cost (₹)</th>
                 <th className="py-3 px-4 text-right">Packing (₹)</th>
                 <th className="py-3 px-4 text-right">Return Loss (₹)</th>
-                <th className="py-3 px-4 text-right">Profit Before Tax (₹)</th>
+                <th className="py-3 px-4 text-right">Profit (after TCS/TDS) (₹)</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
@@ -547,7 +547,7 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
                 <td className="py-3 px-3 text-slate-400 font-sans italic">Platform Charges</td>
                 <td className="py-3 px-3 text-right">-</td>
                 <td className="py-3 px-3 text-right">-</td>
-                <td className="py-3 px-3 text-right">-</td>
+                <td className="py-3 px-3 text-right">{groupingResult.nonSkuRow.dispatchedUnits > 0 ? groupingResult.nonSkuRow.dispatchedUnits : '-'}</td>
                 <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.revenue)}</td>
                 <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.productCost)}</td>
                 <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.packing)}</td>
@@ -597,6 +597,9 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
               </tr>
             </tfoot>
           </table>
+        </div>
+        <div className="p-3 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 font-sans">
+          * Revenue is net settlement after TCS/TDS. The P&L Dashboard &apos;Profit Before TCS/TDS&apos; adds TCS and TDS back.
         </div>
       </div>
     </div>

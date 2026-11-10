@@ -41,135 +41,192 @@ export interface SkuGroupingResult {
 export function groupLedgerBySku(
   lines: LedgerLine[],
   unresolved: UnresolvedSku[] = [],
-  platformFilter?: Marketplace | 'all'
+  platformFilter?: Marketplace | 'all',
+  packingRate: number = 6
 ): SkuGroupingResult {
   const pFilter = platformFilter && platformFilter !== 'all' ? platformFilter : null;
   const filteredLines = pFilter ? lines.filter((l) => l.platform === pFilter) : lines;
   const filteredUnresolved = pFilter ? unresolved.filter((u) => u.platform === pFilter) : unresolved;
 
-  const skuMap = new Map<string, SkuGroupedRow>();
+  interface InternalSkuAcc {
+    masterSku: string;
+    platform: Marketplace | 'All';
+    unitsSold: number;
+    unitsReturned: number;
+    netUnits: number;
+    revenue: number;
+    productCost: number;
+    packing: number;
+    returnLoss: number;
+    lineCount: number;
+  }
 
-  const nonSkuRow: SkuGroupedRow = {
-    masterSku: 'Non-SKU charges',
-    platform: pFilter || 'All',
-    unitsSold: 0,
-    unitsReturned: 0,
-    dispatchedUnits: 0,
-    netUnits: 0,
+  const skuMap = new Map<string, InternalSkuAcc>();
+
+  const nonSkuAcc = {
     revenue: 0,
     productCost: 0,
     packing: 0,
     returnLoss: 0,
-    profitBeforeTax: 0,
     lineCount: 0,
-    isNonSku: true,
   };
 
   for (const line of filteredLines) {
     if (line.masterSku && line.masterSku.trim().length > 0) {
       const code = line.masterSku.trim();
-      let row = skuMap.get(code);
-      if (!row) {
-        row = {
+      let acc = skuMap.get(code);
+      if (!acc) {
+        acc = {
           masterSku: code,
           platform: pFilter || 'All',
           unitsSold: 0,
           unitsReturned: 0,
-          dispatchedUnits: 0,
           netUnits: 0,
           revenue: 0,
           productCost: 0,
           packing: 0,
           returnLoss: 0,
-          profitBeforeTax: 0,
           lineCount: 0,
         };
-        skuMap.set(code, row);
+        skuMap.set(code, acc);
       }
 
-      row.revenue += line.netSettlement || 0;
-      row.productCost += line.productCost || 0;
-      row.packing += line.packing || 0;
-      row.returnLoss += line.returnLoss || 0;
-      row.lineCount += 1;
-      row.netUnits += line.units || 0;
+      acc.revenue += line.netSettlement || 0;
+      acc.productCost += line.productCost || 0;
+      acc.packing += line.packing || 0;
+      acc.returnLoss += line.returnLoss || 0;
+      acc.lineCount += 1;
+      acc.netUnits += line.units || 0;
       if (line.units > 0) {
-        row.unitsSold += line.units;
+        acc.unitsSold += line.units;
       } else if (line.units < 0) {
-        row.unitsReturned += Math.abs(line.units);
-      }
-      if (line.packing > 0 || line.kind === 'sale' || line.kind === 'customer_return' || line.kind === 'rto' || line.kind === 'replacement') {
-        row.dispatchedUnits += Math.abs(line.units || 0);
+        acc.unitsReturned += Math.abs(line.units);
       }
     } else {
-      nonSkuRow.revenue += line.netSettlement || 0;
-      nonSkuRow.productCost += line.productCost || 0;
-      nonSkuRow.packing += line.packing || 0;
-      nonSkuRow.returnLoss += line.returnLoss || 0;
-      nonSkuRow.lineCount += 1;
+      nonSkuAcc.revenue += line.netSettlement || 0;
+      nonSkuAcc.productCost += line.productCost || 0;
+      nonSkuAcc.packing += line.packing || 0;
+      nonSkuAcc.returnLoss += line.returnLoss || 0;
+      nonSkuAcc.lineCount += 1;
     }
   }
 
-  // Finalize SKU rows
+  const unresolvedAcc = {
+    revenue: 0,
+    netUnits: 0,
+    unitsSold: 0,
+    unitsReturned: 0,
+    lineCount: filteredUnresolved.length,
+  };
+  for (const u of filteredUnresolved) {
+    unresolvedAcc.revenue += u.netSettlement || 0;
+    unresolvedAcc.netUnits += u.units || 0;
+  }
+
+  // Accumulate total unrounded sums across nonSkuAcc, unresolvedAcc, and all SKU accs
+  let totRevenue = nonSkuAcc.revenue + unresolvedAcc.revenue;
+  let totProductCost = nonSkuAcc.productCost;
+  let totPacking = nonSkuAcc.packing;
+  let totReturnLoss = nonSkuAcc.returnLoss;
+  let totUnitsSold = unresolvedAcc.unitsSold;
+  let totUnitsReturned = unresolvedAcc.unitsReturned;
+  let totNetUnits = unresolvedAcc.netUnits;
+  let totLineCount = nonSkuAcc.lineCount + unresolvedAcc.lineCount;
+
   const skuRows: SkuGroupedRow[] = [];
-  for (const row of skuMap.values()) {
-    row.revenue = round2(row.revenue);
-    row.productCost = round2(row.productCost);
-    row.packing = round2(row.packing);
-    row.returnLoss = round2(row.returnLoss);
-    row.profitBeforeTax = round2(row.revenue - row.productCost - row.packing - row.returnLoss);
-    skuRows.push(row);
+  for (const acc of skuMap.values()) {
+    totRevenue += acc.revenue;
+    totProductCost += acc.productCost;
+    totPacking += acc.packing;
+    totReturnLoss += acc.returnLoss;
+    totUnitsSold += acc.unitsSold;
+    totUnitsReturned += acc.unitsReturned;
+    totNetUnits += acc.netUnits;
+    totLineCount += acc.lineCount;
+
+    const rowRev = round2(acc.revenue);
+    const rowCost = round2(acc.productCost);
+    const rowPack = round2(acc.packing);
+    const rowRetLoss = round2(acc.returnLoss);
+    const rowProfit = round2(rowRev - rowCost - rowPack - rowRetLoss);
+
+    skuRows.push({
+      masterSku: acc.masterSku,
+      platform: acc.platform,
+      unitsSold: acc.unitsSold,
+      unitsReturned: acc.unitsReturned,
+      dispatchedUnits: Math.round(acc.packing / packingRate),
+      netUnits: acc.netUnits,
+      revenue: rowRev,
+      productCost: rowCost,
+      packing: rowPack,
+      returnLoss: rowRetLoss,
+      profitBeforeTax: rowProfit,
+      lineCount: acc.lineCount,
+    });
   }
 
   // Sort default by profitBeforeTax descending
   skuRows.sort((a, b) => b.profitBeforeTax - a.profitBeforeTax);
 
   // Finalize Non-SKU row
-  nonSkuRow.revenue = round2(nonSkuRow.revenue);
-  nonSkuRow.productCost = round2(nonSkuRow.productCost);
-  nonSkuRow.packing = round2(nonSkuRow.packing);
-  nonSkuRow.returnLoss = round2(nonSkuRow.returnLoss);
-  nonSkuRow.profitBeforeTax = round2(nonSkuRow.revenue - nonSkuRow.productCost - nonSkuRow.packing - nonSkuRow.returnLoss);
-
-  // Finalize Unresolved SKUs row
-  const unresolvedRow: SkuGroupedRow = {
-    masterSku: 'Unresolved SKUs',
+  const nonSkuRev = round2(nonSkuAcc.revenue);
+  const nonSkuCost = round2(nonSkuAcc.productCost);
+  const nonSkuPack = round2(nonSkuAcc.packing);
+  const nonSkuRetLoss = round2(nonSkuAcc.returnLoss);
+  const nonSkuRow: SkuGroupedRow = {
+    masterSku: 'Non-SKU charges',
     platform: pFilter || 'All',
     unitsSold: 0,
     unitsReturned: 0,
-    dispatchedUnits: 0,
+    dispatchedUnits: Math.round(nonSkuAcc.packing / packingRate),
     netUnits: 0,
-    revenue: 0,
+    revenue: nonSkuRev,
+    productCost: nonSkuCost,
+    packing: nonSkuPack,
+    returnLoss: nonSkuRetLoss,
+    profitBeforeTax: round2(nonSkuRev - nonSkuCost - nonSkuPack - nonSkuRetLoss),
+    lineCount: nonSkuAcc.lineCount,
+    isNonSku: true,
+  };
+
+  // Finalize Unresolved SKUs row
+  const unresRev = round2(unresolvedAcc.revenue);
+  const unresolvedRow: SkuGroupedRow = {
+    masterSku: 'Unresolved SKUs',
+    platform: pFilter || 'All',
+    unitsSold: unresolvedAcc.unitsSold,
+    unitsReturned: unresolvedAcc.unitsReturned,
+    dispatchedUnits: 0,
+    netUnits: unresolvedAcc.netUnits,
+    revenue: unresRev,
     productCost: 0,
     packing: 0,
     returnLoss: 0,
-    profitBeforeTax: 0,
-    lineCount: filteredUnresolved.length,
+    profitBeforeTax: unresRev,
+    lineCount: unresolvedAcc.lineCount,
     isUnresolved: true,
   };
-  for (const u of filteredUnresolved) {
-    unresolvedRow.revenue += u.netSettlement || 0;
-    unresolvedRow.netUnits += u.units || 0;
-  }
-  unresolvedRow.revenue = round2(unresolvedRow.revenue);
-  unresolvedRow.profitBeforeTax = round2(unresolvedRow.revenue - unresolvedRow.productCost - unresolvedRow.packing - unresolvedRow.returnLoss);
 
-  // Calculate Totals (sum of all SKU rows + nonSkuRow + unresolvedRow)
+  // Finalize Totals
+  const finalTotRev = round2(totRevenue);
+  const finalTotCost = round2(totProductCost);
+  const finalTotPack = round2(totPacking);
+  const finalTotRetLoss = round2(totReturnLoss);
   const totals: SkuGroupedRow = {
     masterSku: 'Total',
     platform: pFilter || 'All',
-    unitsSold: round2(skuRows.reduce((a, b) => a + b.unitsSold, 0) + nonSkuRow.unitsSold + unresolvedRow.unitsSold),
-    unitsReturned: round2(skuRows.reduce((a, b) => a + b.unitsReturned, 0) + nonSkuRow.unitsReturned + unresolvedRow.unitsReturned),
-    dispatchedUnits: round2(skuRows.reduce((a, b) => a + b.dispatchedUnits, 0) + nonSkuRow.dispatchedUnits + unresolvedRow.dispatchedUnits),
-    netUnits: round2(skuRows.reduce((a, b) => a + b.netUnits, 0) + nonSkuRow.netUnits + unresolvedRow.netUnits),
-    revenue: round2(skuRows.reduce((a, b) => a + b.revenue, 0) + nonSkuRow.revenue + unresolvedRow.revenue),
-    productCost: round2(skuRows.reduce((a, b) => a + b.productCost, 0) + nonSkuRow.productCost + unresolvedRow.productCost),
-    packing: round2(skuRows.reduce((a, b) => a + b.packing, 0) + nonSkuRow.packing + unresolvedRow.packing),
-    returnLoss: round2(skuRows.reduce((a, b) => a + b.returnLoss, 0) + nonSkuRow.returnLoss + unresolvedRow.returnLoss),
-    profitBeforeTax: 0,
-    lineCount: skuRows.reduce((a, b) => a + b.lineCount, 0) + nonSkuRow.lineCount + unresolvedRow.lineCount,
+    unitsSold: totUnitsSold,
+    unitsReturned: totUnitsReturned,
+    dispatchedUnits: Math.round(totPacking / packingRate),
+    netUnits: totNetUnits,
+    revenue: finalTotRev,
+    productCost: finalTotCost,
+    packing: finalTotPack,
+    returnLoss: finalTotRetLoss,
+    profitBeforeTax: round2(finalTotRev - finalTotCost - finalTotPack - finalTotRetLoss),
+    lineCount: totLineCount,
   };
-  totals.profitBeforeTax = round2(totals.revenue - totals.productCost - totals.packing - totals.returnLoss);
 
   return {
     skuRows,
