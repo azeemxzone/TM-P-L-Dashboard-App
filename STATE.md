@@ -54,16 +54,19 @@
   Summary cells B5:D14; independent dispatch counts FK 598, AZ 35, MS 977).
   CI #52, #53 green.
 - Next: 
-- 5R-3f (9 Nov): NOT APPROVED as a fix; diagnosis valid. Both paths use
-  resolveItemCost with +5 freight, order date, so rules match. Firestore
-  cost_master still differs from sku_master_v3.csv: TM-MA-001 260 vs 230,
-  TM-CA-004 100 vs 120, TM-PC-007 25 vs 185, TM-ST-002 125 vs 120; alias
-  TM-PC-004New maps TM-PC-003 vs TM-PC-004. Cost Master screenshot shows
-  TM-CA-004 = 100 (not v3). Suspect the "Load Sample sku_master_v2.csv"
-  button or a non-overwriting upload was used.
-- Next: owner deletes cost_master, uploads v3 via Upload CSV, checks alias
-  TM-PC-004New, sends P&L screenshot -> if 47,041.30 approve 5R-3 -> 5R-3g
-  (real parity test, remove temp panel) -> close 5R -> other module.
+- 5R-3 / 5R-3g (9 Nov): APPROVED on screen evidence. Sep 2026 after
+  TCS/TDS: FK 26,646.46 / AZ 2,305.65 / MS 18,089.19 / total 47,041.30,
+  equal to golden. Product cost 30,778 / 2,355 / 80,317; return loss
+  411.25 / 42.20 / 1,126.25; cash to bank 61,423.79 / 5,781.57 /
+  105,394.44. Root cause of earlier mismatch: Firestore cost_master was
+  not v3 (e.g. TM-MA-001 260 vs 230, TM-CA-004 100 vs 120, TM-PC-007 30
+  vs 185, TM-ST-002 130 vs 120). Owner deleted cost_master and re-uploaded
+  sku_master_v3.csv (34 SKUs). No calculation code changed.
+- Parity test added (pnlDashboardModel.test.ts): regression guard only;
+  agent did not paste fail/pass outputs; likely fixture-based.
+- Temporary Ledger inputs panel: reported removed (screenshot pending).
+- Next: confirm CI green on latest commit and panel gone -> close 5R ->
+  start next module. Then re-verify 7, 8, 6, 4c, 9, 10 in that order.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17);
