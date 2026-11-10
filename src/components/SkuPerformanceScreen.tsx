@@ -1,6 +1,8 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
+ * Stage 7R-2: Master SKU Performance & Channel Profitability Screen
+ *
+ * Built directly on top of the consolidated single ledger (buildLedger)
+ * and grouped using groupLedgerBySku.
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -11,33 +13,23 @@ import { formatINR } from '../utils/costCalculator';
 import { stripUndefined } from '../utils/stripUndefined';
 import { cleanSku } from '../flipkart/normalizers';
 import { exportToCSV } from '../utils/csvParser';
-import {
-  computeSkuPerformance,
-  MasterSkuPerformance,
-  UnmatchedSkuRecord,
-  SkuEngineResult,
-  SkuChannelMetrics,
-} from '../utils/skuEngine';
+import { buildLedger } from '../ledger/buildLedger';
+import { groupLedgerBySku, SkuGroupedRow } from '../ledger/skuGrouping';
+import { LedgerSettings, UnresolvedSku } from '../ledger/types';
+import { parseFirestoreAliases, parseFirestoreCostMaster } from './PnLDashboardScreen';
+import { getCategoryFromSku } from '../utils/skuEngine';
+import { CostMasterItem } from '../types';
 import {
   TrendingUp,
   TrendingDown,
   Package,
   Search,
-  Filter,
   Download,
-  ArrowUpDown,
-  X,
-  Check,
   Calendar,
   AlertCircle,
-  ShoppingBag,
   Layers,
   ChevronRight,
   ChevronDown,
-  Info,
-  SlidersHorizontal,
-  ExternalLink,
-  Sparkles,
 } from 'lucide-react';
 
 interface SkuPerformanceScreenProps {
@@ -51,39 +43,32 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
 }) => {
   const { user, isAdmin } = useAuth();
 
-  // Mode & Period Selectors
-  const [timeScope, setTimeScope] = useState<'month' | 'fy'>('month');
+  // Selectors
   const [selectedFY, setSelectedFY] = useState<string>(initialFY);
   const [selectedMonth, setSelectedMonth] = useState<string>(initialMonth);
-
-  // Filters & Sorting
+  const [selectedChannel, setSelectedChannel] = useState<'all' | 'Flipkart' | 'Amazon' | 'Meesho'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedChannel, setSelectedChannel] = useState<'all' | 'Flipkart' | 'Amazon' | 'Meesho'>('all');
-  const [statusFilter, setStatusFilter] = useState<'with_sales' | 'all' | 'active_only'>('with_sales');
-  const [sortBy, setSortBy] = useState<'profit' | 'revenue' | 'volume' | 'margin' | 'sku'>('profit');
+  const [sortBy, setSortBy] = useState<'profit' | 'revenue' | 'volume' | 'sku'>('profit');
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
 
-  // Expanded SKU details row
-  const [expandedSku, setExpandedSku] = useState<string | null>(null);
+  // Firestore raw datasets
+  const [ledgerSettings, setLedgerSettings] = useState<LedgerSettings>({
+    freight: 5,
+    packing: 6,
+    returnLoss: 0.05,
+  });
 
-  // Unmatched SKUs Drawer State
-  const [showUnmatchedDrawer, setShowUnmatchedDrawer] = useState(false);
-  const [mappingSelection, setMappingSelection] = useState<Record<string, string>>({});
-  const [savingMapping, setSavingMapping] = useState<string | null>(null);
-
-  // Raw Firestore Data
-  const [costMasterItems, setCostMasterItems] = useState<any[]>([]);
   const [aliasMap, setAliasMap] = useState<Map<string, string>>(new Map());
-  const [inboundFreightRate, setInboundFreightRate] = useState<number>(5);
-  const [packagingRate, setPackagingRate] = useState<number>(6);
-  const [returnLossPercent, setReturnLossPercent] = useState<number>(0.05);
+  const [masterCodes, setMasterCodes] = useState<Set<string>>(new Set());
+  const [costLookup, setCostLookup] = useState<CostMasterItem[]>([]);
 
-  const [fkSettled, setFkSettled] = useState<any[]>([]);
   const [fkOrders, setFkOrders] = useState<any[]>([]);
-  const [fkReturns, setFkReturns] = useState<any[]>([]);
-  const [azTransactions, setAzTransactions] = useState<any[]>([]);
+  const [fkAdjustments, setFkAdjustments] = useState<any[]>([]);
+  const [azUnified, setAzUnified] = useState<any[]>([]);
+  const [azMtr, setAzMtr] = useState<any[]>([]);
   const [msPayments, setMsPayments] = useState<any[]>([]);
+  const [msAds, setMsAds] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // 1. Settings listener
@@ -91,65 +76,60 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     const unsub = onSnapshot(doc(db, 'settings', 'config'), (snap) => {
       if (snap.exists()) {
         const d = snap.data();
-        if (d.inbound_freight_per_unit != null) setInboundFreightRate(Number(d.inbound_freight_per_unit));
-        if (d.packaging_cost_per_unit != null) setPackagingRate(Number(d.packaging_cost_per_unit));
-        if (d.return_loss_rate != null) setReturnLossPercent(Number(d.return_loss_rate) / 100);
+        setLedgerSettings({
+          freight: Number(d.inbound_freight_per_purchased_unit ?? d.inbound_freight_per_unit ?? 5),
+          packing: Number(d.packing_per_dispatched_unit ?? d.packaging_cost_per_unit ?? 6),
+          returnLoss: typeof d.return_loss_rate === 'number' ? d.return_loss_rate / 100 : 0.05,
+        });
       }
     });
     return () => unsub();
   }, []);
 
-  // 2. Cost Master listener
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'cost_master'), (snap) => {
-      const list: any[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      setCostMasterItems(list);
-    });
-    return () => unsub();
-  }, []);
-
-  // 3. Sku Aliases listener
+  // 2. SKU Aliases listener
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'sku_aliases'), (snap) => {
-      const map = new Map<string, string>();
-      snap.forEach((d) => {
-        const data = d.data();
-        if (data.alias && data.master_sku) {
-          map.set(cleanSku(data.alias), cleanSku(data.master_sku));
-        }
-      });
-      setAliasMap(map);
+      setAliasMap(parseFirestoreAliases(snap.docs));
     });
     return () => unsub();
   }, []);
 
-  // 4. Multi-channel datasets listener
+  // 3. Cost Master listener
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'cost_master'), (snap) => {
+      const { items, codes } = parseFirestoreCostMaster(snap.docs);
+      setCostLookup(items);
+      setMasterCodes(codes);
+    });
+    return () => unsub();
+  }, []);
+
+  // 4. Multi-channel marketplace datasets listener
   useEffect(() => {
     setLoading(true);
 
     const unsubFkSettled = onSnapshot(collection(db, 'fk_settlement_rows'), (snap) => {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      setFkSettled(list);
-    });
-
-    const unsubFkOrders = onSnapshot(collection(db, 'fk_order_items'), (snap) => {
-      const list: any[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setFkOrders(list);
     });
 
-    const unsubFkReturns = onSnapshot(collection(db, 'fk_returns'), (snap) => {
+    const unsubFkAdjs = onSnapshot(collection(db, 'fk_adjustments'), (snap) => {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      setFkReturns(list);
+      setFkAdjustments(list);
     });
 
     const unsubAzTx = onSnapshot(collection(db, 'az_transactions'), (snap) => {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
-      setAzTransactions(list);
+      setAzUnified(list);
+    });
+
+    const unsubAzMtr = onSnapshot(collection(db, 'az_mtr_rows'), (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setAzMtr(list);
     });
 
     const unsubMsPayments = onSnapshot(collection(db, 'ms_payments'), (snap) => {
@@ -159,16 +139,23 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       setLoading(false);
     });
 
+    const unsubMsAds = onSnapshot(collection(db, 'ms_ads'), (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setMsAds(list);
+    });
+
     return () => {
       unsubFkSettled();
-      unsubFkOrders();
-      unsubFkReturns();
+      unsubFkAdjs();
       unsubAzTx();
+      unsubAzMtr();
       unsubMsPayments();
+      unsubMsAds();
     };
   }, []);
 
-  // Calculate Indian Financial Year Months
+  // Financial Year Months
   const monthsInFY = useMemo(() => {
     const [startYearStr] = selectedFY.split('-');
     const startYear = parseInt(startYearStr, 10);
@@ -187,7 +174,7 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       { num: '12', name: 'Dec' },
     ];
     for (const m of monthNames) {
-      list.push({ key: `${startYear}-${m.num}`, label: `${m.name} ${startYear}` });
+      list.push({ key: `${startYear}-${m.num}`, label: `${m.name}` });
     }
     const q4Names = [
       { num: '01', name: 'Jan' },
@@ -195,66 +182,46 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       { num: '03', name: 'Mar' },
     ];
     for (const m of q4Names) {
-      list.push({ key: `${endYear}-${m.num}`, label: `${m.name} ${endYear}` });
+      list.push({ key: `${endYear}-${m.num}`, label: `${m.name}` });
     }
     return list;
   }, [selectedFY]);
 
-  // Compute SKU Performance Results
-  const engineResult: SkuEngineResult = useMemo(() => {
-    return computeSkuPerformance({
-      period: timeScope === 'month' ? selectedMonth : undefined,
-      fy: timeScope === 'fy' ? selectedFY : undefined,
-      costMasterItems,
+  // Single Ledger calculation via buildLedger
+  const ledgerResult = useMemo(() => {
+    return buildLedger({
+      settlementMonth: selectedMonth,
       aliasMap,
-      inboundFreightRate,
-      packagingRate,
-      returnLossPercent,
-      fkSettledRows: fkSettled,
-      fkOrders,
-      fkReturns,
-      azTransactions,
-      msPayments,
+      costLookup,
+      masterCodes,
+      settings: ledgerSettings,
+      flipkart: { orders: fkOrders, adjustments: fkAdjustments },
+      amazon: { unifiedRows: azUnified, mtrRows: azMtr },
+      meesho: { payments: msPayments, ads: msAds },
     });
-  }, [
-    timeScope,
-    selectedMonth,
-    selectedFY,
-    costMasterItems,
-    aliasMap,
-    inboundFreightRate,
-    packagingRate,
-    returnLossPercent,
-    fkSettled,
-    fkOrders,
-    fkReturns,
-    azTransactions,
-    msPayments,
-  ]);
+  }, [selectedMonth, aliasMap, costLookup, masterCodes, ledgerSettings, fkOrders, fkAdjustments, azUnified, azMtr, msPayments, msAds]);
+
+  // SKU Grouping via groupLedgerBySku
+  const groupingResult = useMemo(() => {
+    return groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, selectedChannel);
+  }, [ledgerResult, selectedChannel]);
 
   // Extract Categories
   const allCategories = useMemo(() => {
     const set = new Set<string>();
-    for (const s of engineResult.skus) {
-      if (s.category) set.add(s.category);
+    for (const s of groupingResult.skuRows) {
+      set.add(getCategoryFromSku(s.masterSku));
     }
     return Array.from(set).sort();
-  }, [engineResult.skus]);
+  }, [groupingResult.skuRows]);
 
-  // Filtered & Sorted SKUs
-  const displaySkus = useMemo(() => {
-    let list = [...engineResult.skus];
-
-    // Status Filter
-    if (statusFilter === 'with_sales') {
-      list = list.filter((s) => s.total.settledUnits > 0 || s.total.dispatchedUnits > 0 || s.total.grossSales > 0);
-    } else if (statusFilter === 'active_only') {
-      list = list.filter((s) => s.active);
-    }
+  // Filtered & Sorted SKU Rows
+  const displaySkuRows = useMemo(() => {
+    let list = [...groupingResult.skuRows];
 
     // Category Filter
     if (selectedCategory !== 'all') {
-      list = list.filter((s) => s.category === selectedCategory);
+      list = list.filter((s) => getCategoryFromSku(s.masterSku) === selectedCategory);
     }
 
     // Search Query
@@ -263,9 +230,7 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       list = list.filter(
         (s) =>
           s.masterSku.toLowerCase().includes(q) ||
-          s.skuName.toLowerCase().includes(q) ||
-          s.category.toLowerCase().includes(q) ||
-          s.sellerSkus.some((ss) => ss.toLowerCase().includes(q))
+          getCategoryFromSku(s.masterSku).toLowerCase().includes(q)
       );
     }
 
@@ -273,155 +238,109 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     list.sort((a, b) => {
       let valA = 0;
       let valB = 0;
-
-      const getChannelMetrics = (sku: MasterSkuPerformance): SkuChannelMetrics => {
-        if (selectedChannel === 'Flipkart') return sku.flipkart;
-        if (selectedChannel === 'Amazon') return sku.amazon;
-        if (selectedChannel === 'Meesho') return sku.meesho;
-        return sku.total;
-      };
-
-      const mA = getChannelMetrics(a);
-      const mB = getChannelMetrics(b);
-
       if (sortBy === 'profit') {
-        valA = mA.netProfit;
-        valB = mB.netProfit;
+        valA = a.profitBeforeTax;
+        valB = b.profitBeforeTax;
       } else if (sortBy === 'revenue') {
-        valA = mA.grossSales;
-        valB = mB.grossSales;
+        valA = a.revenue;
+        valB = b.revenue;
       } else if (sortBy === 'volume') {
-        valA = mA.settledUnits;
-        valB = mB.settledUnits;
-      } else if (sortBy === 'margin') {
-        valA = mA.netMarginPercent;
-        valB = mB.netMarginPercent;
+        valA = a.unitsSold;
+        valB = b.unitsSold;
       } else if (sortBy === 'sku') {
         return sortDir === 'asc' ? a.masterSku.localeCompare(b.masterSku) : b.masterSku.localeCompare(a.masterSku);
       }
-
       return sortDir === 'desc' ? valB - valA : valA - valB;
     });
 
     return list;
-  }, [engineResult.skus, statusFilter, selectedCategory, searchQuery, sortBy, sortDir, selectedChannel]);
-
-  // Handle Save Alias Mapping
-  const handleSaveAlias = async (unmatched: UnmatchedSkuRecord) => {
-    const targetMaster = mappingSelection[unmatched.cleanedSku] || unmatched.suggestedMasterSku;
-    if (!targetMaster || !isAdmin) return;
-
-    setSavingMapping(unmatched.cleanedSku);
-    try {
-      const cleanAlias = cleanSku(unmatched.sellerSku);
-      const cleanTarget = cleanSku(targetMaster);
-      const ref = doc(db, 'sku_aliases', cleanAlias);
-
-      await setDoc(
-        ref,
-        stripUndefined({
-          alias: cleanAlias,
-          master_sku: cleanTarget,
-          source: 'sku_performance_drawer',
-          marketplace: unmatched.marketplace,
-          mappedBy: user?.email || 'admin',
-          mappedAt: new Date().toISOString(),
-        }),
-        { merge: true }
-      );
-
-      // Clear selection
-      setMappingSelection((prev) => {
-        const next = { ...prev };
-        delete next[unmatched.cleanedSku];
-        return next;
-      });
-    } catch (err: any) {
-      console.error('Failed to map alias:', err);
-      alert(`Error saving alias: ${err.message}`);
-    } finally {
-      setSavingMapping(null);
-    }
-  };
+  }, [groupingResult.skuRows, selectedCategory, searchQuery, sortBy, sortDir]);
 
   // Export to CSV
   const handleExportCSV = () => {
     const headers = [
       'Master SKU',
-      'Product Name',
       'Category',
-      'Active',
-      'Unit COGS (₹)',
-      'FK Settled Units',
-      'FK Gross Sales (₹)',
-      'FK Net Realization (₹)',
-      'FK Net Profit (₹)',
-      'FK Margin %',
-      'AZ Settled Units',
-      'AZ Gross Sales (₹)',
-      'AZ Net Realization (₹)',
-      'AZ Net Profit (₹)',
-      'AZ Margin %',
-      'MS Settled Units',
-      'MS Gross Sales (₹)',
-      'MS Net Realization (₹)',
-      'MS Net Profit (₹)',
-      'MS Margin %',
-      'Total Settled Units',
-      'Total Dispatched Units',
-      'Total Gross Sales (₹)',
-      'Total ASP (₹)',
-      'Total Realization (₹)',
-      'Total Landed & Fulfillment COGS (₹)',
-      'Total Net Profit (₹)',
-      'Total Margin %',
+      'Platform',
+      'Units Sold',
+      'Units Returned',
+      'Dispatched Units',
+      'Revenue (₹)',
+      'Product Cost (₹)',
+      'Packing (₹)',
+      'Return Loss (₹)',
+      'Profit Before Tax (₹)',
     ];
 
-    const rows = displaySkus.map((s) => [
-      `"${s.masterSku}"`,
-      `"${s.skuName.replace(/"/g, '""')}"`,
-      s.category,
-      s.active ? 'Yes' : 'No',
-      s.unitCost,
-      s.flipkart.settledUnits,
-      s.flipkart.grossSales,
-      s.flipkart.netRealization,
-      s.flipkart.netProfit,
-      s.flipkart.netMarginPercent,
-      s.amazon.settledUnits,
-      s.amazon.grossSales,
-      s.amazon.netRealization,
-      s.amazon.netProfit,
-      s.amazon.netMarginPercent,
-      s.meesho.settledUnits,
-      s.meesho.grossSales,
-      s.meesho.netRealization,
-      s.meesho.netProfit,
-      s.meesho.netMarginPercent,
-      s.total.settledUnits,
-      s.total.dispatchedUnits,
-      s.total.grossSales,
-      s.total.asp,
-      s.total.netRealization,
-      s.total.totalCostOfGoods,
-      s.total.netProfit,
-      s.total.netMarginPercent,
-    ]);
+    const rows: (string | number)[][] = [
+      ...displaySkuRows.map((s) => [
+        `"${s.masterSku}"`,
+        getCategoryFromSku(s.masterSku),
+        s.platform,
+        s.unitsSold,
+        s.unitsReturned,
+        s.dispatchedUnits,
+        s.revenue,
+        s.productCost,
+        s.packing,
+        s.returnLoss,
+        s.profitBeforeTax,
+      ]),
+      [
+        '"Non-SKU charges"',
+        'Non-SKU',
+        groupingResult.nonSkuRow.platform,
+        groupingResult.nonSkuRow.unitsSold,
+        groupingResult.nonSkuRow.unitsReturned,
+        groupingResult.nonSkuRow.dispatchedUnits,
+        groupingResult.nonSkuRow.revenue,
+        groupingResult.nonSkuRow.productCost,
+        groupingResult.nonSkuRow.packing,
+        groupingResult.nonSkuRow.returnLoss,
+        groupingResult.nonSkuRow.profitBeforeTax,
+      ],
+      [
+        '"Unresolved SKUs"',
+        'Unresolved',
+        groupingResult.unresolvedRow.platform,
+        groupingResult.unresolvedRow.unitsSold,
+        groupingResult.unresolvedRow.unitsReturned,
+        groupingResult.unresolvedRow.dispatchedUnits,
+        groupingResult.unresolvedRow.revenue,
+        groupingResult.unresolvedRow.productCost,
+        groupingResult.unresolvedRow.packing,
+        groupingResult.unresolvedRow.returnLoss,
+        groupingResult.unresolvedRow.profitBeforeTax,
+      ],
+      [
+        '"Total"',
+        'Consolidated',
+        groupingResult.totals.platform,
+        groupingResult.totals.unitsSold,
+        groupingResult.totals.unitsReturned,
+        groupingResult.totals.dispatchedUnits,
+        groupingResult.totals.revenue,
+        groupingResult.totals.productCost,
+        groupingResult.totals.packing,
+        groupingResult.totals.returnLoss,
+        groupingResult.totals.profitBeforeTax,
+      ],
+    ];
 
     const csvContent = exportToCSV(headers, rows);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `SKU_Performance_${timeScope === 'month' ? selectedMonth : selectedFY}_${selectedChannel}.csv`);
+    link.setAttribute('download', `SKU_Performance_${selectedMonth}_${selectedChannel}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const topSku = engineResult.summary.topSkuByProfit;
-  const highVolSku = engineResult.summary.highestVolumeSku;
-  const worstSku = engineResult.summary.worstSkuByProfit;
+  const returnLossPctDisplay = typeof ledgerSettings.returnLoss === 'number'
+    ? (ledgerSettings.returnLoss * 100).toFixed(0)
+    : '5';
 
   return (
     <div className="space-y-6">
@@ -432,33 +351,24 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Layers className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-                Master SKU Performance &amp; Channel Profitability
+                Master SKU Performance &amp; Channel Profitability (Single Ledger)
               </h1>
               <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                Stage 7
+                Stage 7R-2
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Unit-level unit economics, net realizations, deductions, and contribution margins across Flipkart, Amazon, and Meesho.
+              Unit-level unit economics grouped directly from the single ledger across Flipkart, Amazon, and Meesho.
             </p>
           </div>
 
-          {/* Action buttons & Unmatched Drawer Trigger */}
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => setShowUnmatchedDrawer(true)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border ${
-                engineResult.unmatched.length > 0
-                  ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 hover:bg-amber-500/20'
-                  : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
-              }`}
-            >
-              <AlertCircle className="w-3.5 h-3.5" />
-              <span>{engineResult.unmatched.length} Unmatched SKUs</span>
-              {engineResult.unmatched.length > 0 && (
-                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              )}
-            </button>
+            {ledgerResult.unresolved.length > 0 && (
+              <div className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30">
+                <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                <span>{ledgerResult.unresolved.length} Unresolved SKUs</span>
+              </div>
+            )}
 
             <button
               onClick={handleExportCSV}
@@ -470,34 +380,9 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
           </div>
         </div>
 
-        {/* Time Scope & FY/Month Selectors */}
+        {/* Time Selectors & Read-only Parameters */}
         <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3 flex-wrap">
-            {/* Scope Switcher */}
-            <div className="bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center gap-1">
-              <button
-                onClick={() => setTimeScope('month')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  timeScope === 'month'
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-              >
-                Monthly View
-              </button>
-              <button
-                onClick={() => setTimeScope('fy')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  timeScope === 'fy'
-                    ? 'bg-indigo-600 text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-              >
-                Full FY View
-              </button>
-            </div>
-
-            {/* FY Selector */}
             <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-1.5">
               <Calendar className="w-4 h-4 text-slate-400" />
               <span className="text-xs font-medium text-slate-500">FY:</span>
@@ -513,659 +398,207 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
             </div>
           </div>
 
-          {/* Operational Cost Parameters display */}
           <div className="flex items-center gap-3 text-[11px] font-mono text-slate-500">
-            <span>Inbound Freight: ₹{inboundFreightRate}/unit</span>
-            <span>Packaging: ₹{packagingRate}/dispatch</span>
-            <span>Return Loss: {(returnLossPercent * 100).toFixed(0)}%</span>
+            <span>Inbound Freight: ₹{ledgerSettings.freight}/unit</span>
+            <span>Packing: ₹{ledgerSettings.packing}/dispatch</span>
+            <span>Return Loss: {returnLossPctDisplay}%</span>
           </div>
         </div>
 
-        {/* Month Selector Grid (when in monthly mode) */}
-        {timeScope === 'month' && (
-          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Select Financial Month:</span>
-              <span className="text-[11px] text-slate-400 font-mono">Period: {selectedMonth}</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2">
-              {monthsInFY.map((m) => {
-                const isSelected = selectedMonth === m.key;
-                return (
-                  <button
-                    key={m.key}
-                    onClick={() => setSelectedMonth(m.key)}
-                    className={`py-1.5 px-1 rounded-xl text-center border text-xs transition-all cursor-pointer ${
-                      isSelected
-                        ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold ring-2 ring-indigo-500/20'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                );
-              })}
-            </div>
+        {/* Month Selector Grid */}
+        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Select Financial Month:</span>
+            <span className="text-[11px] text-slate-400 font-mono">Period: {selectedMonth}</span>
           </div>
-        )}
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2">
+            {monthsInFY.map((m) => {
+              const isSelected = selectedMonth === m.key;
+              return (
+                <button
+                  key={m.key}
+                  onClick={() => setSelectedMonth(m.key)}
+                  className={`py-1.5 px-1 rounded-xl text-center border text-xs transition-all cursor-pointer ${
+                    isSelected
+                      ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-bold ring-2 ring-indigo-500/20'
+                      : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      {/* Overview Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Total Portfolio Realized Profit */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-2">
-          <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Total Net Profit</span>
-            <span
-              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                engineResult.summary.overallMarginPercent >= 0
-                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                  : 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
-              }`}
-            >
-              {engineResult.summary.overallMarginPercent.toFixed(1)}% margin
-            </span>
-          </div>
-          <div
-            className={`text-2xl font-bold font-mono ${
-              engineResult.summary.totalNetProfit >= 0
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-rose-600 dark:text-rose-400'
+      {/* Channel Filters */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-2xl">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            onClick={() => setSelectedChannel('all')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              selectedChannel === 'all'
+                ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-950 dark:text-slate-400 dark:border-slate-800'
             }`}
           >
-            {formatINR(engineResult.summary.totalNetProfit)}
-          </div>
-          <div className="text-xs text-slate-500 font-mono pt-1 border-t border-slate-100 dark:border-slate-800 flex justify-between">
-            <span>Sales: {formatINR(engineResult.summary.totalGrossSales)}</span>
-            <span>Realized: {formatINR(engineResult.summary.totalNetRealization)}</span>
-          </div>
+            All Channels
+          </button>
+          <button
+            onClick={() => setSelectedChannel('Flipkart')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              selectedChannel === 'Flipkart'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-950 dark:text-slate-400 dark:border-slate-800'
+            }`}
+          >
+            Flipkart
+          </button>
+          <button
+            onClick={() => setSelectedChannel('Amazon')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              selectedChannel === 'Amazon'
+                ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-950 dark:text-slate-400 dark:border-slate-800'
+            }`}
+          >
+            Amazon
+          </button>
+          <button
+            onClick={() => setSelectedChannel('Meesho')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+              selectedChannel === 'Meesho'
+                ? 'bg-pink-600 text-white border-pink-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-950 dark:text-slate-400 dark:border-slate-800'
+            }`}
+          >
+            Meesho
+          </button>
         </div>
 
-        {/* Top Performing SKU */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-emerald-200 dark:border-emerald-950/60 p-5 shadow-xs space-y-2 relative overflow-hidden">
-          <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
-            <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5" /> Top Profit Maker
-            </span>
-            <TrendingUp className="w-4 h-4" />
-          </div>
-          {topSku ? (
-            <>
-              <div className="text-lg font-bold font-mono text-slate-900 dark:text-white truncate">
-                {topSku.masterSku}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{topSku.skuName}</p>
-              <div className="text-xs text-emerald-600 dark:text-emerald-400 font-mono font-bold pt-1 border-t border-slate-100 dark:border-slate-800 flex justify-between">
-                <span>Profit: {formatINR(topSku.total.netProfit)}</span>
-                <span>{topSku.total.netMarginPercent.toFixed(1)}%</span>
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-slate-400 pt-2">No settled SKUs in period</p>
-          )}
-        </div>
-
-        {/* Highest Volume SKU */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-indigo-200 dark:border-indigo-950/60 p-5 shadow-xs space-y-2">
-          <div className="flex items-center justify-between text-indigo-600 dark:text-indigo-400">
-            <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
-              <Package className="w-3.5 h-3.5" /> Highest Volume SKU
-            </span>
-            <span className="text-xs font-mono font-bold">{highVolSku?.total.settledUnits ?? 0} units</span>
-          </div>
-          {highVolSku ? (
-            <>
-              <div className="text-lg font-bold font-mono text-slate-900 dark:text-white truncate">
-                {highVolSku.masterSku}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{highVolSku.skuName}</p>
-              <div className="text-xs text-indigo-600 dark:text-indigo-400 font-mono pt-1 border-t border-slate-100 dark:border-slate-800 flex justify-between">
-                <span>Sales: {formatINR(highVolSku.total.grossSales)}</span>
-                <span>ASP: {formatINR(highVolSku.total.asp)}</span>
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-slate-400 pt-2">No units settled</p>
-          )}
-        </div>
-
-        {/* Worst Performing / Loss Maker */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-rose-200 dark:border-rose-950/60 p-5 shadow-xs space-y-2">
-          <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
-            <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
-              <TrendingDown className="w-3.5 h-3.5" /> Lowest Margin SKU
-            </span>
-            <AlertCircle className="w-4 h-4" />
-          </div>
-          {worstSku ? (
-            <>
-              <div className="text-lg font-bold font-mono text-slate-900 dark:text-white truncate">
-                {worstSku.masterSku}
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{worstSku.skuName}</p>
-              <div className="text-xs text-rose-600 dark:text-rose-400 font-mono font-bold pt-1 border-t border-slate-100 dark:border-slate-800 flex justify-between">
-                <span>Profit: {formatINR(worstSku.total.netProfit)}</span>
-                <span>{worstSku.total.netMarginPercent.toFixed(1)}%</span>
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-slate-400 pt-2">No loss-making SKUs</p>
-          )}
-        </div>
-      </div>
-
-      {/* Control Filter Toolbar */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-4 shadow-xs space-y-3">
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-          {/* Search Box */}
-          <div className="relative flex-1 min-w-[240px]">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        {/* Search & Category Filter */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="Search by Master SKU, Title, or Seller Alias..."
+              placeholder="Search Master SKU..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 rounded-xl text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-white"
+              className="pl-8 pr-3 py-1.5 rounded-xl text-xs border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 w-48"
             />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
           </div>
 
-          {/* Channel Filter Switcher */}
-          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 shrink-0">
-            {(['all', 'Flipkart', 'Amazon', 'Meesho'] as const).map((ch) => (
-              <button
-                key={ch}
-                onClick={() => setSelectedChannel(ch)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedChannel === ch
-                    ? ch === 'Flipkart'
-                      ? 'bg-blue-600 text-white'
-                      : ch === 'Amazon'
-                      ? 'bg-amber-600 text-white'
-                      : ch === 'Meesho'
-                      ? 'bg-pink-600 text-white'
-                      : 'bg-indigo-600 text-white'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-              >
-                {ch === 'all' ? 'All Channels' : ch}
-              </button>
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="px-3 py-1.5 rounded-xl text-xs border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+          >
+            <option value="all">All Categories</option>
+            {allCategories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
             ))}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
-          {/* Category Dropdown */}
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500">Category:</span>
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Categories ({allCategories.length})</option>
-              {allCategories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Status Filter */}
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500">Show:</span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-            >
-              <option value="with_sales">With Sales / Dispatches Only</option>
-              <option value="all">All Master SKUs</option>
-              <option value="active_only">Active Catalog Only</option>
-            </select>
-          </div>
-
-          {/* Sort By Controls */}
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500">Sort By:</span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-            >
-              <option value="profit">Net Profit (₹)</option>
-              <option value="margin">Net Margin (%)</option>
-              <option value="revenue">Gross Sales (₹)</option>
-              <option value="volume">Units Settled</option>
-              <option value="sku">Master SKU Code</option>
-            </select>
-            <button
-              onClick={() => setSortDir((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
-              className="p-1 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 cursor-pointer"
-              title="Toggle sort direction"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Results Count */}
-          <span className="text-slate-400 font-mono">
-            Showing {displaySkus.length} of {engineResult.skus.length} Master SKUs
-          </span>
+          </select>
         </div>
       </div>
 
-      {/* Channel Comparison Master Table */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+      {/* SKU Performance Grouped Table */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs font-mono">
-            <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-800 uppercase text-[10px]">
+          <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-xs">
+            <thead className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-semibold">
               <tr>
-                <th className="py-3 px-4">Master SKU &amp; Name</th>
-                <th className="py-3 px-3 text-right">Unit Cost</th>
-
-                {/* Flipkart Columns */}
-                {(selectedChannel === 'all' || selectedChannel === 'Flipkart') && (
-                  <>
-                    <th className="py-3 px-3 text-right text-blue-600 dark:text-blue-400 border-l border-slate-200 dark:border-slate-800">
-                      FK Units
-                    </th>
-                    <th className="py-3 px-3 text-right text-blue-600 dark:text-blue-400">FK Sales</th>
-                    <th className="py-3 px-3 text-right text-blue-600 dark:text-blue-400">FK Realization</th>
-                    <th className="py-3 px-3 text-right text-blue-600 dark:text-blue-400">FK Profit</th>
-                  </>
-                )}
-
-                {/* Amazon Columns */}
-                {(selectedChannel === 'all' || selectedChannel === 'Amazon') && (
-                  <>
-                    <th className="py-3 px-3 text-right text-amber-600 dark:text-amber-400 border-l border-slate-200 dark:border-slate-800">
-                      AZ Units
-                    </th>
-                    <th className="py-3 px-3 text-right text-amber-600 dark:text-amber-400">AZ Sales</th>
-                    <th className="py-3 px-3 text-right text-amber-600 dark:text-amber-400">AZ Realization</th>
-                    <th className="py-3 px-3 text-right text-amber-600 dark:text-amber-400">AZ Profit</th>
-                  </>
-                )}
-
-                {/* Meesho Columns */}
-                {(selectedChannel === 'all' || selectedChannel === 'Meesho') && (
-                  <>
-                    <th className="py-3 px-3 text-right text-pink-600 dark:text-pink-400 border-l border-slate-200 dark:border-slate-800">
-                      MS Units
-                    </th>
-                    <th className="py-3 px-3 text-right text-pink-600 dark:text-pink-400">MS Sales</th>
-                    <th className="py-3 px-3 text-right text-pink-600 dark:text-pink-400">MS Realization</th>
-                    <th className="py-3 px-3 text-right text-pink-600 dark:text-pink-400">MS Profit</th>
-                  </>
-                )}
-
-                {/* Portfolio Total Columns */}
-                <th className="py-3 px-3 text-right font-bold text-slate-900 dark:text-white border-l border-slate-200 dark:border-slate-800">
-                  Total Units
-                </th>
-                <th className="py-3 px-3 text-right font-bold text-slate-900 dark:text-white">Gross Sales</th>
-                <th className="py-3 px-3 text-right font-bold text-slate-900 dark:text-white">Total COGS</th>
-                <th className="py-3 px-3 text-right font-bold text-slate-900 dark:text-white">Net Profit</th>
-                <th className="py-3 px-4 text-right font-bold text-slate-900 dark:text-white">Margin %</th>
+                <th className="py-3 px-4 text-left">Master SKU</th>
+                <th className="py-3 px-3 text-left">Category</th>
+                <th className="py-3 px-3 text-right">Sold Units</th>
+                <th className="py-3 px-3 text-right">Return Units</th>
+                <th className="py-3 px-3 text-right">Dispatched</th>
+                <th className="py-3 px-4 text-right">Revenue (₹)</th>
+                <th className="py-3 px-4 text-right">Product Cost (₹)</th>
+                <th className="py-3 px-4 text-right">Packing (₹)</th>
+                <th className="py-3 px-4 text-right">Return Loss (₹)</th>
+                <th className="py-3 px-4 text-right">Profit Before Tax (₹)</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
-              {displaySkus.length === 0 ? (
-                <tr>
-                  <td colSpan={18} className="py-12 text-center text-slate-400 font-sans">
-                    No Master SKUs match your search and filter criteria.
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
+              {displaySkuRows.map((s) => (
+                <tr key={s.masterSku} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                  <td className="py-3 px-4 font-bold text-slate-900 dark:text-white font-sans">{s.masterSku}</td>
+                  <td className="py-3 px-3 text-slate-500 font-sans">{getCategoryFromSku(s.masterSku)}</td>
+                  <td className="py-3 px-3 text-right">{s.unitsSold}</td>
+                  <td className="py-3 px-3 text-right text-rose-600 dark:text-rose-400">{s.unitsReturned}</td>
+                  <td className="py-3 px-3 text-right">{s.dispatchedUnits}</td>
+                  <td className="py-3 px-4 text-right font-semibold">{formatINR(s.revenue)}</td>
+                  <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">{formatINR(s.productCost)}</td>
+                  <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">{formatINR(s.packing)}</td>
+                  <td className="py-3 px-4 text-right text-amber-600 dark:text-amber-400">{formatINR(s.returnLoss)}</td>
+                  <td className={`py-3 px-4 text-right font-bold ${s.profitBeforeTax >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                    {formatINR(s.profitBeforeTax)}
                   </td>
                 </tr>
-              ) : (
-                displaySkus.map((s) => {
-                  const isExpanded = expandedSku === s.masterSku;
-                  const isPositive = s.total.netProfit >= 0;
+              ))}
 
-                  return (
-                    <React.Fragment key={s.masterSku}>
-                      <tr
-                        onClick={() => setExpandedSku(isExpanded ? null : s.masterSku)}
-                        className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer ${
-                          isExpanded ? 'bg-slate-50 dark:bg-slate-800/60' : ''
-                        }`}
-                      >
-                        {/* Master SKU and Name */}
-                        <td className="py-3 px-4 font-sans">
-                          <div className="flex items-center gap-2">
-                            <span className="text-slate-400">
-                              {isExpanded ? (
-                                <ChevronDown className="w-3.5 h-3.5" />
-                              ) : (
-                                <ChevronRight className="w-3.5 h-3.5" />
-                              )}
-                            </span>
-                            <div>
-                              <div className="font-mono font-bold text-slate-900 dark:text-white text-xs">
-                                {s.masterSku}
-                              </div>
-                              <div className="text-[11px] text-slate-500 truncate max-w-[220px]" title={s.skuName}>
-                                {s.skuName}
-                              </div>
-                              <span className="inline-block mt-0.5 text-[9px] px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                                {s.category}
-                              </span>
-                            </div>
-                          </div>
-                        </td>
+              {/* Non-SKU charges Row */}
+              <tr className="bg-slate-50/80 dark:bg-slate-950/80 font-bold border-t border-slate-200 dark:border-slate-800">
+                <td className="py-3 px-4 text-slate-900 dark:text-white font-sans">{groupingResult.nonSkuRow.masterSku}</td>
+                <td className="py-3 px-3 text-slate-400 font-sans italic">Platform Charges</td>
+                <td className="py-3 px-3 text-right">-</td>
+                <td className="py-3 px-3 text-right">-</td>
+                <td className="py-3 px-3 text-right">-</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.revenue)}</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.productCost)}</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.packing)}</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.returnLoss)}</td>
+                <td className={`py-3 px-4 text-right font-bold ${groupingResult.nonSkuRow.profitBeforeTax >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                  {formatINR(groupingResult.nonSkuRow.profitBeforeTax)}
+                </td>
+              </tr>
 
-                        {/* Unit Cost */}
-                        <td className="py-3 px-3 text-right font-mono text-slate-600 dark:text-slate-300">
-                          ₹{s.unitCost}
-                        </td>
-
-                        {/* Flipkart */}
-                        {(selectedChannel === 'all' || selectedChannel === 'Flipkart') && (
-                          <>
-                            <td className="py-3 px-3 text-right text-blue-600 dark:text-blue-400 border-l border-slate-100 dark:border-slate-800">
-                              {s.flipkart.settledUnits}
-                            </td>
-                            <td className="py-3 px-3 text-right text-slate-700 dark:text-slate-300">
-                              {formatINR(s.flipkart.grossSales)}
-                            </td>
-                            <td className="py-3 px-3 text-right text-slate-700 dark:text-slate-300">
-                              {formatINR(s.flipkart.netRealization)}
-                            </td>
-                            <td
-                              className={`py-3 px-3 text-right font-bold ${
-                                s.flipkart.netProfit >= 0
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-rose-600 dark:text-rose-400'
-                              }`}
-                            >
-                              {formatINR(s.flipkart.netProfit)}
-                            </td>
-                          </>
-                        )}
-
-                        {/* Amazon */}
-                        {(selectedChannel === 'all' || selectedChannel === 'Amazon') && (
-                          <>
-                            <td className="py-3 px-3 text-right text-amber-600 dark:text-amber-400 border-l border-slate-100 dark:border-slate-800">
-                              {s.amazon.settledUnits}
-                            </td>
-                            <td className="py-3 px-3 text-right text-slate-700 dark:text-slate-300">
-                              {formatINR(s.amazon.grossSales)}
-                            </td>
-                            <td className="py-3 px-3 text-right text-slate-700 dark:text-slate-300">
-                              {formatINR(s.amazon.netRealization)}
-                            </td>
-                            <td
-                              className={`py-3 px-3 text-right font-bold ${
-                                s.amazon.netProfit >= 0
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-rose-600 dark:text-rose-400'
-                              }`}
-                            >
-                              {formatINR(s.amazon.netProfit)}
-                            </td>
-                          </>
-                        )}
-
-                        {/* Meesho */}
-                        {(selectedChannel === 'all' || selectedChannel === 'Meesho') && (
-                          <>
-                            <td className="py-3 px-3 text-right text-pink-600 dark:text-pink-400 border-l border-slate-100 dark:border-slate-800">
-                              {s.meesho.settledUnits}
-                            </td>
-                            <td className="py-3 px-3 text-right text-slate-700 dark:text-slate-300">
-                              {formatINR(s.meesho.grossSales)}
-                            </td>
-                            <td className="py-3 px-3 text-right text-slate-700 dark:text-slate-300">
-                              {formatINR(s.meesho.netRealization)}
-                            </td>
-                            <td
-                              className={`py-3 px-3 text-right font-bold ${
-                                s.meesho.netProfit >= 0
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-rose-600 dark:text-rose-400'
-                              }`}
-                            >
-                              {formatINR(s.meesho.netProfit)}
-                            </td>
-                          </>
-                        )}
-
-                        {/* Total Portfolio */}
-                        <td className="py-3 px-3 text-right font-bold text-slate-900 dark:text-white border-l border-slate-100 dark:border-slate-800">
-                          {s.total.settledUnits}
-                        </td>
-                        <td className="py-3 px-3 text-right font-bold text-slate-900 dark:text-white">
-                          {formatINR(s.total.grossSales)}
-                        </td>
-                        <td className="py-3 px-3 text-right text-slate-600 dark:text-slate-400">
-                          {formatINR(s.total.totalCostOfGoods)}
-                        </td>
-                        <td
-                          className={`py-3 px-3 text-right font-bold ${
-                            isPositive
-                              ? 'text-emerald-600 dark:text-emerald-400'
-                              : 'text-rose-600 dark:text-rose-400'
-                          }`}
-                        >
-                          {formatINR(s.total.netProfit)}
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
-                              isPositive
-                                ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20'
-                                : 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/20'
-                            }`}
-                          >
-                            {s.total.netMarginPercent.toFixed(1)}%
-                          </span>
-                        </td>
-                      </tr>
-
-                      {/* Expandable Deep Dive Drawer */}
-                      {isExpanded && (
-                        <tr className="bg-slate-50/70 dark:bg-slate-950/60 font-sans border-b border-slate-200 dark:border-slate-800">
-                          <td colSpan={18} className="p-5 space-y-4">
-                            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-                              {/* Left: Seller SKU aliases resolved */}
-                              <div className="space-y-2 flex-1">
-                                <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-500" />
-                                  Resolved Seller SKUs ({s.sellerSkus.length})
-                                </h4>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {s.sellerSkus.length === 0 ? (
-                                    <span className="text-xs text-slate-400 font-mono">No direct seller orders</span>
-                                  ) : (
-                                    s.sellerSkus.map((alias) => (
-                                      <span
-                                        key={alias}
-                                        className="px-2 py-1 rounded bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-700 dark:text-slate-300"
-                                      >
-                                        {alias}
-                                      </span>
-                                    ))
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Right: Cost & Fulfillment Breakdown */}
-                              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-xs space-y-1.5 min-w-[280px]">
-                                <h5 className="font-bold text-slate-800 dark:text-slate-200 text-[11px] uppercase tracking-wider">
-                                  Cost &amp; Fulfillment Breakdown
-                                </h5>
-                                <div className="flex justify-between text-slate-600 dark:text-slate-400 font-mono text-[11px]">
-                                  <span>Product COGS ({s.total.settledUnits} × ₹{s.unitCost}):</span>
-                                  <span>{formatINR(s.total.productCogs)}</span>
-                                </div>
-                                <div className="flex justify-between text-slate-600 dark:text-slate-400 font-mono text-[11px]">
-                                  <span>Inbound Freight ({s.total.settledUnits} × ₹{inboundFreightRate}):</span>
-                                  <span>{formatINR(s.total.inboundFreight)}</span>
-                                </div>
-                                <div className="flex justify-between text-slate-600 dark:text-slate-400 font-mono text-[11px]">
-                                  <span>Packaging ({s.total.dispatchedUnits} dispatches × ₹{packagingRate}):</span>
-                                  <span>{formatINR(s.total.packagingCost)}</span>
-                                </div>
-                                <div className="flex justify-between text-slate-600 dark:text-slate-400 font-mono text-[11px]">
-                                  <span>Customer Return Loss ({s.total.returnedUnits} ret × {(returnLossPercent * 100).toFixed(0)}%):</span>
-                                  <span>{formatINR(s.total.returnLoss)}</span>
-                                </div>
-                                <div className="flex justify-between font-bold text-slate-900 dark:text-white font-mono text-[11px] pt-1 border-t border-slate-100 dark:border-slate-800">
-                                  <span>Total Landed &amp; Fulfillment:</span>
-                                  <span>{formatINR(s.total.totalCostOfGoods)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })
-              )}
+              {/* Unresolved SKUs Row */}
+              <tr className="bg-amber-50/40 dark:bg-amber-950/20 font-bold">
+                <td className="py-3 px-4 text-amber-900 dark:text-amber-300 font-sans flex items-center gap-1.5">
+                  <span>{groupingResult.unresolvedRow.masterSku}</span>
+                  {ledgerResult.unresolved.length > 0 && (
+                    <span className="text-[9px] bg-amber-500 text-white px-1.5 py-0.2 rounded uppercase tracking-wider font-extrabold">
+                      Warning ({ledgerResult.unresolved.length})
+                    </span>
+                  )}
+                </td>
+                <td className="py-3 px-3 text-amber-700/60 dark:text-amber-400/60 font-sans italic">Unresolved</td>
+                <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.unitsSold}</td>
+                <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.unitsReturned}</td>
+                <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.dispatchedUnits}</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.revenue)}</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.productCost)}</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.packing)}</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.returnLoss)}</td>
+                <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.profitBeforeTax)}</td>
+              </tr>
             </tbody>
+
+            {/* Consolidated Footer Totals */}
+            <tfoot className="bg-slate-100 dark:bg-slate-950 font-bold text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700">
+              <tr>
+                <td className="py-3.5 px-4 font-sans uppercase tracking-wider">Total ({groupingResult.totals.platform})</td>
+                <td className="py-3.5 px-3 font-sans font-normal text-slate-500">{groupingResult.totals.lineCount} lines</td>
+                <td className="py-3.5 px-3 text-right">{groupingResult.totals.unitsSold}</td>
+                <td className="py-3.5 px-3 text-right text-rose-600 dark:text-rose-400">{groupingResult.totals.unitsReturned}</td>
+                <td className="py-3.5 px-3 text-right">{groupingResult.totals.dispatchedUnits}</td>
+                <td className="py-3.5 px-4 text-right text-indigo-600 dark:text-indigo-400">{formatINR(groupingResult.totals.revenue)}</td>
+                <td className="py-3.5 px-4 text-right text-slate-700 dark:text-slate-300">{formatINR(groupingResult.totals.productCost)}</td>
+                <td className="py-3.5 px-4 text-right text-slate-700 dark:text-slate-300">{formatINR(groupingResult.totals.packing)}</td>
+                <td className="py-3.5 px-4 text-right text-amber-600 dark:text-amber-400">{formatINR(groupingResult.totals.returnLoss)}</td>
+                <td className={`py-3.5 px-4 text-right text-sm ${groupingResult.totals.profitBeforeTax >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                  {formatINR(groupingResult.totals.profitBeforeTax)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
-
-      {/* Unmatched SKUs Mapping Drawer */}
-      {showUnmatchedDrawer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            {/* Drawer Header */}
-            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5 text-amber-500" />
-                  Unmatched Seller SKUs ({engineResult.unmatched.length})
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  These seller SKUs appeared in uploaded settlement or payment files but are not currently mapped to any Master SKU.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowUnmatchedDrawer(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Drawer Body */}
-            <div className="p-5 overflow-y-auto space-y-4 flex-1">
-              {engineResult.unmatched.length === 0 ? (
-                <div className="py-12 text-center space-y-2">
-                  <div className="w-12 h-12 rounded-full bg-emerald-500/15 text-emerald-600 flex items-center justify-center mx-auto">
-                    <Check className="w-6 h-6" />
-                  </div>
-                  <h4 className="font-bold text-slate-900 dark:text-white text-sm">All Seller SKUs Are Fully Mapped!</h4>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    Every SKU found across Flipkart, Amazon, and Meesho has resolved to an official Master SKU.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-200">
-                    Map an unknown seller SKU to its correct Master SKU. Saving will persist to the <span className="font-mono font-bold">sku_aliases</span> store and immediately reflect in performance calculations.
-                  </div>
-
-                  <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                    {engineResult.unmatched.map((u) => {
-                      const selectedTarget = mappingSelection[u.cleanedSku] || u.suggestedMasterSku || '';
-                      const isSaving = savingMapping === u.cleanedSku;
-
-                      return (
-                        <div
-                          key={`${u.marketplace}:${u.cleanedSku}`}
-                          className="p-3.5 bg-white dark:bg-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs"
-                        >
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  u.marketplace === 'Flipkart'
-                                    ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300'
-                                    : u.marketplace === 'Amazon'
-                                    ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
-                                    : 'bg-pink-500/15 text-pink-700 dark:text-pink-300'
-                                }`}
-                              >
-                                {u.marketplace}
-                              </span>
-                              <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">
-                                {u.sellerSku}
-                              </span>
-                            </div>
-                            <div className="text-[11px] text-slate-500 font-mono flex items-center gap-3">
-                              <span>Occurrences: {u.occurrences}</span>
-                              <span>Units: {u.units}</span>
-                              <span>Sales: {formatINR(u.grossSales)}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <select
-                              value={selectedTarget}
-                              onChange={(e) =>
-                                setMappingSelection((prev) => ({
-                                  ...prev,
-                                  [u.cleanedSku]: e.target.value,
-                                }))
-                              }
-                              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none cursor-pointer max-w-[220px]"
-                            >
-                              <option value="">-- Map to Master SKU --</option>
-                              {engineResult.skus.map((m) => (
-                                <option key={m.masterSku} value={m.masterSku}>
-                                  {m.masterSku} - {m.skuName.slice(0, 30)}
-                                </option>
-                              ))}
-                            </select>
-
-                            <button
-                              onClick={() => handleSaveAlias(u)}
-                              disabled={!selectedTarget || isSaving || !isAdmin}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                                selectedTarget && !isSaving && isAdmin
-                                  ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                                  : 'bg-slate-100 text-slate-400 dark:bg-slate-800 cursor-not-allowed'
-                              }`}
-                            >
-                              {isSaving ? 'Saving...' : 'Save Alias'}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Drawer Footer */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
-              <span className="text-xs text-slate-500">
-                {!isAdmin && 'Sign in as admin to save new alias mappings.'}
-              </span>
-              <button
-                onClick={() => setShowUnmatchedDrawer(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
-              >
-                Close Drawer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
