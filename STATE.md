@@ -217,7 +217,7 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - None.
 
 ## Last result (10 Nov 2026)
-- 5R closed. 7R-1 audit accepted. 7R-2 reviewed on screens: not approved
-  (0.02 total gap, dispatched units vs packing, mislabelled profit column,
-  no pasted tables, no CI). 7R-2b fix prompt issued; awaiting SUMMARY, CI
-  screenshot and SKU Performance screenshot.
+- 5R closed. 7R-1 accepted. 7R-2c screen evidence passes but its SUMMARY
+  (sent twice) has no tables and likely uses typed dispatch expectations.
+  7R-2d issued; awaiting SUMMARY with tables inside the block and the CI
+  screenshot. Next: Stage 8.
