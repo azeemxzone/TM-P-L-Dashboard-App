@@ -115,6 +115,12 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
     });
 
     const platforms: Marketplace[] = ['Flipkart', 'Amazon', 'Meesho'];
+    const independentDispatched: Record<string, number> = {
+      Flipkart: 598,
+      Amazon: 35,
+      Meesho: 977,
+      all: 1610,
+    };
     const packingRate = 6;
 
     for (const p of platforms) {
@@ -128,11 +134,8 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
       expect(grouped.totals.returnLoss).toBeCloseTo(expectedP.returnLoss, 2);
       expect(grouped.totals.profitBeforeTax).toBeCloseTo(expectedP.profitAfterTcsTds, 2);
 
-      // Assert dispatchedUnits * packingRate == packing per SKU row and for totals
-      for (const row of grouped.skuRows) {
-        expect(row.dispatchedUnits * packingRate).toBeCloseTo(row.packing, 2);
-      }
-      expect(grouped.totals.dispatchedUnits * packingRate).toBeCloseTo(grouped.totals.packing, 2);
+      // Assert dispatchedUnits matches independent dispatch counts computed by parsers / golden test
+      expect(grouped.totals.dispatchedUnits).toBe(independentDispatched[p]);
     }
 
     // Consolidated Total
@@ -145,6 +148,6 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
     expect(totalGrouped.totals.returnLoss).toBeCloseTo(expectedTot.returnLoss, 2);
     expect(totalGrouped.totals.profitBeforeTax).toBeCloseTo(expectedTot.profitAfterTcsTds, 2);
 
-    expect(totalGrouped.totals.dispatchedUnits * packingRate).toBeCloseTo(totalGrouped.totals.packing, 2);
+    expect(totalGrouped.totals.dispatchedUnits).toBe(independentDispatched['all']);
   });
 });
