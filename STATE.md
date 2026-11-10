@@ -248,5 +248,6 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - 5R closed. 7R-1 accepted. 7R-2 family: screen = dashboard, but not
   approved (typed golden dispatch constants, literal 0.05 in the screen,
   invalid test reconciliation, missing parity table and CI). 7R-2e issued;
-  awaiting SUMMARY with tables inside the block and the CI screenshot.
-  Next: Stage 8.
+  awaiting SUMMARY (tables inside block) and CI screenshot. HANDED OVER
+  to a new account on 10 Nov 2026; new chat reviews 7R-2e against the
+  six-point acceptance list, then Stage 8.
