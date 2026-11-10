@@ -120,24 +120,26 @@
       list; storageDeduplication -1 unexplained.
     - Line numbers of 0.05 literals moved (Dashboard 120/153 -> 153/173,
       SkuPerformance 59/82 -> 82/94): unexplained edits to off-limits files.
-  * 7R-2f-b SUMMARY received 10 Nov: NOT approved. All git commands failed
-    (container has no .git), yet "Deviations: none". Test table internally
-    consistent (17 files / 199 blocks / 273 tests; 5 skuEngine removals
-    mandated by 7R-2; storageDeduplication.test.ts never existed, the 7R-2f
-    table was fabricated). 203 blocks at b2537c9 implies 277, not 278 vitest
-    tests; "then" column unverifiable. Amazon: unified Order 38 rows (32
-    Released = 32 units, 6 Deferred = 7 units), Refund 7 (4 same-month, 3
-    prior-month), MTR 37 shipment orders / 38 units; explanation 32 + 3 = 35 =
-    210 / 6, conflicts with STATE (32 orders = 35 units) and with the
-    goldenDispatch code (no Released filter). Line-number contradictions
-    between reports unresolved. 7R-2f-c (read-only, raw output) issued.
-- Not approved: 4c, 6, 7 (pending 7R-2f-b), 8.
-- Next: 7R-2f-b SUMMARY review. Then 7R-2g if owner approves (read
-  *_not_sellable_pct, loading state, no literal). Then close 7, then 8
-  (return performance on ledger; remove damaged/lost 100% COGS and fallback
-  cost 100 in returnEngine / pnlEngine), 6, 4c, 9 (GST/TDS/TCS as CA
-  reconciliation report), 10 (hardening, backup, deploy, own Firebase
-  project with billing).
+  * 7R-2f-b (10 Nov): NOT approved (git commands failed, container has no
+    .git). Test table consistent: 17 files / 199 blocks / 273 tests; 5
+    skuEngine removals mandated by 7R-2; storageDeduplication.test.ts never
+    existed (7R-2f table was fabricated).
+  * 7R-2f-c (10 Nov): ACCEPTED. Raw file state: Dashboard literals 0.05 at
+    120 / 153 / 488; SkuPerformance 59 / 82; buildLedger 35-37 / 127. No
+    return_loss_rate write in the Dashboard. Earlier line numbers
+    (153/173, 82/94, "line 210") were agent errors (7R-2f grep output
+    unreliable). goldenDispatch.ts Amazon block filters Released, dedupes by
+    orderId: 32 Released Order units + 3 prior-month return-only = 35;
+    unified table: Order Released 32 rows, Deferred 6 rows / 7 units, Refund
+    Released 7. 7R-2e / 7R-2f / 7R-2f-b CLOSED, pending owner CI screenshot
+    on the latest commit. 7R-2e item 2 (no 0.05 in screens) moves to 7R-2g.
+  * 7R-2g issued: ledgerSettings.ts, per-marketplace return-loss from
+    settings, no literal fallbacks, loading/blocked states, no number change.
+- Not approved: 4c, 6, 7 (pending 7R-2g and CI), 8.
+- Next: 7R-2g SUMMARY. Then close 7 (full STATE.md), then 8 (return
+  performance on ledger; remove damaged/lost 100% COGS and fallback cost 100
+  in returnEngine / pnlEngine), 6, 4c, 9 (GST/TDS/TCS as CA reconciliation
+  report), 10 (hardening, backup, deploy, own Firebase project with billing).
 - Stage 9 files (taxEngine.ts, its test, TaxReconciliationScreen) were
   deleted in Prompt A-2 (recoverable from git history). Rates: Sec 194-O
   TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS (Sec 52) 0.5%
@@ -227,29 +229,31 @@
 21. Loss-making SKUs Sep 2026 (settlement basis): TM-ST-002 -2,813.66,
     TM-PC-004 -2,136.00 (alias TM-PC-004New unverified, defect 2).
     Business review later; not a code defect.
-22. goldenDispatch.ts now computes dispatch from raw samples (7R-2f).
-    Amazon breakdown (3 vs 7 returns; unified vs MTR) to be explained in
-    7R-2f-b. goldenReturnLossRate = 5/100 is a typed constant in
-    goldenDispatch.ts:10.
-23. SkuPerformanceScreen.tsx and PnLDashboardScreen.tsx use legacy
-    return_loss_rate with literal 0.05 fallback (SkuPerformance 82/94,
-    Dashboard 153/173; Dashboard 210 writes return_loss_rate: verify
-    whether it writes to Firestore). Covered by 7R-2g.
+22. goldenDispatch.ts computes dispatch from raw samples (accepted 7R-2f-c).
+    goldenReturnLossRate = 5/100 is a typed test fixture (line 136).
+23. Return-loss, packing and freight settings in screens: Dashboard reads
+    return_loss_rate (legacy) with 0.05 fallback, inbound_freight_per_unit
+    and packaging_cost_per_unit with fallbacks 5 and 6; SkuPerformance reads
+    canonical-first then the same legacy keys and fallbacks. Two screens use
+    different keys. buildLedger.ts 35-37 / 127 default 0.05. Fix in 7R-2g.
 24. Test count history unreliable: 16 files / 278 tests at b2537c9 (agent
     report) vs 17 / 273 now. Agent block counts: 203 then / 199 now. Owner to
     read test counts from CI #70 and latest CI logs.
 25. Return-loss settings keys exist (*_not_sellable_pct, SettingsScreen
     337-395, types 18-20) but engine and screens use legacy
     return_loss_rate / 0.05 / "?? 5". Fix in 7R-2g (covers 18, 23).
-26. Agent pastes disagree on 0.05 literal line numbers and on what is at
-    PnLDashboardScreen line 210 (7R-2e, 7R-2f, 7R-2f-b). Resolved by the raw
-    output in 7R-2f-c; acceptance item 2 (no 0.05 in screens) moves to 7R-2g.
+26. RESOLVED (7R-2f-c): earlier 0.05 line numbers were agent errors.
 27. The agent container has no .git; git-based proofs must come from the
     owner via GitHub web (commits page, CI logs). Do not ask the agent for
     git output.
-28. goldenDispatch.ts Amazon block (pasted 7R-2f) has no Released/Deferred
-    filter and adds Order and Refund quantities; its described result
-    (32 + 3 = 35) does not follow from it. To be explained in 7R-2f-c.
+28. RESOLVED (7R-2f-c): Amazon dispatch code filters Released; 35 = 32 + 3.
+29. 7R-2f grep output was unreliable (showed lines that do not exist), so the
+    claim that *_not_sellable_pct keys exist in SettingsScreen/types is
+    UNVERIFIED. 7R-2g task 1 checks it first.
+30. goldenDispatch.ts reads the sample files via fs at import time; it must
+    be imported by test files only. 7R-2g task 1e checks importers.
+31. The Dashboard does not re-read packing/freight when owner edits the
+    canonical keys (it reads legacy keys). Same fix as 23.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -278,20 +282,12 @@ ms_batches, ms_uploads. (sku_variants unused.)
   src/utils/costCalculator.ts, src/utils/skuResolver.ts.
 
 ## Open decisions
-- Approve 7R-2g: dashboard, SKU Performance and buildLedger read the
-  existing *_not_sellable_pct settings (loading state, no 0.05 / 5
-  literal)? Owner to answer.
+- None.
 
 ## Last result (10 Nov 2026)
-- 7R-2f-b: agent's closing sentence only; SUMMARY block not received, so
-  changed-files proof, honest test table and Amazon breakdown are unproven.
-  Not approved.
-- New screenshots (10 Nov): Dashboard and SKU Performance Sep 2026, All
-  Channels. SKU TOTAL row = dashboard (47,041.30; revenue 1,71,731.00;
-  product cost 1,13,450.00; packing 9,660.00; return loss 1,579.70;
-  dispatched 1,610; 1,850 lines). Acceptance item 6 PASS. CI screenshot for
-  the latest commit still missing.
-- Next: 7R-2f-c SUMMARY (raw file state, goldenDispatch Amazon run). Owner
-  pastes GitHub commits page, green CI screenshot on the latest commit, and
-  the test-count lines from CI #70 and the latest log. Then close 7R-2e/f (item
-  2 moved to 7R-2g) and issue 7R-2g if the owner approves.
+- 7R-2f-c ACCEPTED (read-only raw output). 7R-2e / 7R-2f / 7R-2f-b closed,
+  pending owner CI screenshot on the latest commit and CI test counts.
+- New: Dashboard and SKU screen read different settings keys with literal
+  fallbacks; the *_not_sellable_pct keys are unverified.
+- Issued 7R-2g. Owner: save the three return-loss % in Settings first.
+- Next: 7R-2g SUMMARY, then CI screenshot and Dashboard + SKU screenshots.
