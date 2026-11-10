@@ -90,9 +90,17 @@
   * Gaps: pipeline engine not grepped (0.7 factor unproven); current SKU
     Performance per-platform totals not given; resolveItemCost /
     getAvgCostAsOf / returnEngine paths not tabled.
-- 7R-2 (rebuild SKU Performance as ledger grouping, skuGrouping.ts, parity
-  test on real samples, remove computeSkuPerformance if no other importer):
-  prompt issued 10 Nov, awaiting SUMMARY.
+- 7R-2 (SKU Performance rebuilt as ledger grouping; skuGrouping.ts,
+  skuGrouping.test.ts; computeSkuPerformance removed): NOT approved (10
+  Nov). Screen evidence: product cost 1,13,450 / packing 9,660 / return
+  loss 1,579.70 match the dashboard. Defects: total revenue 1,71,731.02
+  and profit 47,041.32 vs dashboard 1,71,731.00 / 47,041.30 (0.02);
+  Dispatched column 1,292 vs packing/6 = 1,610; no pasted tables (ledger
+  field list, greps, parity table, top 5); no CI screenshot; test counts
+  17 files / 273 vs 16 / 278 unexplained. Column "Profit Before Tax" is
+  mislabelled: revenue is net of TCS/TDS, so revenue minus costs = Profit
+  After TCS/TDS (PM prompt error). Fix prompt 7R-2b issued, awaiting
+  SUMMARY.
 - Not approved: 4c, 6, 7, 8.
 - Next after 7: 8 (return performance on ledger; remove damaged/lost 100%
   COGS), 6, 4c, 9 (GST/TDS/TCS as CA reconciliation report), 10
@@ -138,8 +146,8 @@
    file; relabel or remove.
 4. Upload Centre has no Unmatched SKUs box (spec); SKU Performance has a
    drawer.
-5. SKU Performance (Stage 7) still on old engine (total -41,326.30);
-   standalone, double-charges freight, uses settled units. Fix = 7R-2.
+5. SKU Performance rebuilt on ledger in 7R-2 (not yet approved; see 7R-2b
+   for 0.02 gap, dispatched-units mismatch and label).
 6. Fallback cost 100 and bundled v2 default data PROVEN present (see 7R-1
    findings). Fixed for SKU engine in 7R-2; returnEngine and pnlEngine
    remain (Stage 8; check whether pnlEngine.ts / pnlEngine.test.ts still
@@ -172,6 +180,14 @@
 18. buildLedger.ts has literal 0.05 return-loss defaults (lines 35-37,
     127). Move to per-marketplace settings with no literal fallback
     (cleanup, later; not a number change).
+19. SKU Performance Dispatched column (1,292) does not reconcile with
+    packing (9,660 / 6 = 1,610; FK 598, AZ 35, MS 977). Diagnosis in 7R-2b.
+20. SKU rows can show negative net units (TM-TG-001: product cost -210,
+    revenue -206.50): return settled in a later month than the sale
+    (settlement basis). Consistent with the rules; review in Stage 8.
+21. Loss-making SKUs Sep 2026 (settlement basis): TM-ST-002 -2,813.66,
+    TM-PC-004 -2,136.00 (alias TM-PC-004New unverified, defect 2). Business
+    review later; not a code defect.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -188,8 +204,10 @@ ms_batches, ms_uploads. (sku_variants unused.)
   sign out/in each session. Own project with billing planned for Stage 10.
 - Roles: admin = owner; 2 viewers read-only. allowedUsers/default holds
   emails, admins, roles (lowercase).
-- Tests: 16 files, 278 tests passing, tsc clean (agent report, 7R-1). CI
-  runs #59 to #70 green (#70 b2537c9 confirmed 10 Nov).
+- Tests: agent report after 7R-2: 17 files, 273 tests passing, tsc clean
+  (unreconciled with 16 / 278 before; checked in 7R-2b). CI runs #59 to
+  #70 green (#70 b2537c9 confirmed 10 Nov); CI for 7R-2 commit not yet
+  seen.
 - Code paths: src/components/SkuPerformanceScreen.tsx,
   src/utils/skuEngine.ts, src/utils/returnEngine.ts,
   src/utils/pnlEngine.ts, src/ledger/buildLedger.ts,
@@ -199,7 +217,7 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - None.
 
 ## Last result (10 Nov 2026)
-- 5R closed and approved (CI #70 green, panel gone, no Unresolved warning,
-  screen = golden 47,041.30). 7R-1 audit accepted with gaps. 7R-2 prompt
-  issued; awaiting SUMMARY with pasted tables, CI screenshot and SKU
-  Performance screenshot (Sep 2026, All Platforms).
+- 5R closed. 7R-1 audit accepted. 7R-2 reviewed on screens: not approved
+  (0.02 total gap, dispatched units vs packing, mislabelled profit column,
+  no pasted tables, no CI). 7R-2b fix prompt issued; awaiting SUMMARY, CI
+  screenshot and SKU Performance screenshot.
