@@ -245,9 +245,13 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - None.
 
 ## Last result (10 Nov 2026)
-- 5R closed. 7R-1 accepted. 7R-2 family: screen = dashboard, but not
-  approved (typed golden dispatch constants, literal 0.05 in the screen,
-  invalid test reconciliation, missing parity table and CI). 7R-2e issued;
-  awaiting SUMMARY (tables inside block) and CI screenshot. HANDED OVER
-  to a new account on 10 Nov 2026; new chat reviews 7R-2e against the
-  six-point acceptance list, then Stage 8.
+- 7R-2e: NOT approved. SUMMARY had no tables/grep; CI and SKU screenshots missing.
+  goldenDispatch.ts holds typed 598/35/977 (derivation claimed, not shown).
+  Dashboard itself uses literal 0.05 (PnLDashboardScreen lines 120, 153;
+  pnlDashboardModel.test.ts line 107). Test count 278 -> 273 (5 tests gone,
+  unnamed).
+- Dashboard screenshot Sep 2026: revenue 61,423.71 / 4,912.85 / 105,394.44;
+  after TCS/TDS 26,646.46 / 2,305.65 / 18,089.19; total 47,041.30 (reference
+  47,875; gap explained only if packing-basis golden test 6 passes).
+- Next: 7R-2f (compute dispatch from samples, remove 0.05 literals via
+  settings, name removed tests, parity table). Then re-check 7R-2e list.
