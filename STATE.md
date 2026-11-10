@@ -21,8 +21,11 @@
   landed cost on customer-returned units only (default 5%, editable per
   marketplace). RTO = packing + shipping fees only.
 - Settings (settings/config), admin-editable, audit-logged:
-  packing_per_dispatched_unit 6, inbound_freight_per_purchased_unit 5.
-  Read from settings; no literal rates in engine code.
+  packing_per_dispatched_unit 6, inbound_freight_per_purchased_unit 5,
+  flipkart_not_sellable_pct / amazon_not_sellable_pct /
+  meesho_not_sellable_pct (return-loss %; exist in SettingsScreen and
+  types, not yet used by the engine). Read from settings; no literal rates
+  in engine code.
 - No default cost, no estimates, no fallbacks. Unknown SKU, missing cost or
   missing effective_from goes to "Unresolved SKUs" (MISSING_ALIAS,
   MISSING_EFFECTIVE_DATE), excluded from profit with a visible warning.
@@ -44,17 +47,17 @@
   specific pasted answers (exact lines, YES/NO per field, tables), not
   "identified / verified".
 - Every requested table, grep output and assertion line goes INSIDE the
-  SUMMARY block (under Key numbers). Owner pastes only the SUMMARY block;
-  tables placed in the reply body are lost. "Pasted" in Done without the
-  content is not accepted.
+  SUMMARY block (under Key numbers). Owner pastes the WHOLE SUMMARY block
+  (header fields too); the agent's closing sentence is not a SUMMARY.
+  "Pasted" in Done without the content is not accepted.
 - Never touch auth, Firebase config or deploy rules. Owner publishes rules
   in the console; new blocks go INSIDE the documents block.
 - Every write via stripUndefined. Counts verified by reading expected IDs.
 - Proof = green GitHub Actions + real screenshots + golden test. The
   agent's "N tests passing" is not proof. Reference values read from
   workbook cells, never from ledger output.
-- Repo stays private. No customer/supplier personal data, GSTIN, city,
-  postal code.
+- Repo stays private (GitHub blocks automated access; paste files when
+  needed). No customer/supplier personal data, GSTIN, city, postal code.
 
 ## Stage status
 - Verified: 1, 1.1, 1.2, 1.3, 2, 2b, 2c, 3a, 3b, 3c, 4a, 4b, 5R (closed
@@ -62,10 +65,9 @@
 - Prompt A: APPROVED (genai removed, benchmark file deleted, ms_* rules in
   repo, greps az_transfers / Math.random / genai = 0).
 - 5R-1 (Fix 5b-2, 5c): APPROVED. Golden test: reference read from Summary
-  cells B5:D14. Dispatch counts FK 598, AZ 35, MS 977 are TYPED constants
-  in ledger.test.ts lines 230-234 (not a computation; earlier "independent"
-  wording overstated). Bank snap literal removed (18/18 NEFT matches, CI
-  #55 green).
+  cells B5:D14. Bank snap literal removed (18/18 NEFT matches, CI #55
+  green). Dispatch counts were typed in ledger.test.ts; since 7R-2f they
+  are computed in goldenDispatch.ts.
 - 5R-3 / 5R-3g: APPROVED on screen evidence (9 Nov). Sep 2026 after
   TCS/TDS FK 26,646.46 / AZ 2,305.65 / MS 18,089.19 / total 47,041.30 =
   golden. Earlier gap was DATA (cost_master not v3); owner re-uploaded v3.
@@ -77,50 +79,59 @@
   * Old SkuPerformanceScreen called computeSkuPerformance (skuEngine.ts:193)
     with raw arrays, not buildLedger. It double-charged freight (line 535),
     used settled units for product cost.
-  * Fallback cost 100: skuEngine.ts:235, 251, 326 (now removed);
-    returnEngine.ts:248, 262, 274; pnlEngine.ts:22, 38 (still present).
+  * Fallback cost 100: skuEngine.ts (now removed); returnEngine.ts:248, 262,
+    274; pnlEngine.ts:22, 38 (still present).
   * Bundled v2 data (DEFAULT_SKU_MASTER_V2_CSV, DEFAULT_SKU_ALIASES_V2_CSV)
     imported by returnEngine, pnlEngine (v3 is the truth).
-  * Literal 0.05: returnEngine.ts:209, buildLedger.ts:35-37 and 127.
+  * Literal 0.05: returnEngine.ts:209, buildLedger.ts (35-37, 127; 46 per
+    7R-2f grep), pnlEngine.ts:66.
   * "Damaged/lost = 100% COGS": returnEngine.ts:385-388, 599-602, 721-724.
   * sku/return/pipeline/pnl engine tests all synthetic.
   * Gaps: pipeline engine not grepped (0.7 unproven).
 - 7R-2 family (SKU Performance rebuilt as ledger grouping), status NOT
   APPROVED (10 Nov):
-  * 7R-2: skuGrouping.ts + skuGrouping.test.ts created; computeSkuPerformance
-    and finalizeChannel removed from skuEngine.ts (only getCategoryFromSku
-    remains, imported by SkuPerformanceScreen and returnEngine). Screen
-    product cost / packing / return loss matched dashboard; revenue and
-    profit were 0.02 off; Dispatched column 1,292 vs packing/6 = 1,610.
-    Column "Profit Before Tax" mislabelled (PM prompt error: revenue is net
-    of TCS/TDS).
-  * 7R-2b: agent claims 0.02 fixed (unrounded sums, round once), dispatched
-    = packing / rate, column renamed "Profit (after TCS/TDS)" with footnote.
-  * 7R-2c: SCREEN EVIDENCE PASSES (Sep 2026, All Channels): TOTAL row
-    revenue 1,71,731.00 / product cost 1,13,450.00 / packing 9,660.00 /
-    return loss 1,579.70 / profit 47,041.30 = dashboard; dispatched 1,610 =
-    598 + 35 + 977; every visible row dispatched x 6 = packing; Unresolved
-    0; Non-SKU -7,047.78; 1,850 lines. Dispatched has no ledger units
-    field (LedgerLine has none): column = packing / rate per row.
-  * 7R-2d SUMMARY: no tables for parity by platform or dispatch assertions;
-    reported ledger.test.ts has only typed dispatch literals (no helper).
-    Greps: no computeSkuPerformance importer left; skuGrouping.ts clean;
-    SkuPerformanceScreen.tsx still has literal 0.05 at lines 59 and 82.
-    Per-file tests: 17 files, 273 (amazon 13/26/21, flipkart 35/15/51,
-    ledger 6, pnlDashboardModel 5, skuGrouping 1, meesho 9/30, router 12,
-    costCalculator 34, pipelineEngine 7, pnlEngine 1, returnEngine 6,
-    skuEngine 1). Agent's reconciliation to 16 files / 278 invalid (cites
-    removals before b2537c9).
-  * 7R-2e prompt issued: move dispatch constants to src/ledger/
-    goldenDispatch.ts, skuGrouping test imports them, remove 0.05 from the
-    screen (read like the dashboard), parity table, honest per-file test
-    count at b2537c9 vs now. Awaiting SUMMARY (tables inside block) and CI
-    screenshot.
-- Not approved: 4c, 6, 7 (pending 7R-2e), 8.
-- Next after 7: 8 (return performance on ledger; remove damaged/lost 100%
-  COGS and fallback cost 100 in returnEngine / pnlEngine), 6, 4c, 9
-  (GST/TDS/TCS as CA reconciliation report), 10 (hardening, backup,
-  deploy, own Firebase project with billing).
+  * 7R-2 / 7R-2b: skuGrouping.ts + skuGrouping.test.ts created;
+    computeSkuPerformance removed from skuEngine.ts (getCategoryFromSku
+    remains). Column renamed "Profit (after TCS/TDS)" with footnote;
+    Dispatched = packing / rate per row.
+  * 7R-2c: SCREEN EVIDENCE PASSES (Sep 2026, All Channels). Re-confirmed
+    10 Nov by new screenshots: TOTAL row (1850 lines) sold 1,059 / returns
+    233 / dispatched 1,610 / revenue 1,71,731.00 / product cost 1,13,450.00 /
+    packing 9,660.00 / return loss 1,579.70 / profit 47,041.30 = dashboard.
+    Non-SKU -7,047.78; Unresolved 0.
+  * 7R-2d: SUMMARY lacked tables. Agent's reconciliation to 16 files / 278
+    invalid.
+  * 7R-2e: NOT approved (SUMMARY had no tables).
+  * 7R-2f SUMMARY (Key numbers only, no header fields):
+    - goldenDispatch.ts now COMPUTES dispatch from raw samples (settled
+      xlsx, Amazon unified CSV, Meesho previous_payment.xlsx): FK 598, AZ
+      35, MS 977 = 1,610. ACCEPTED in principle. Amazon explanation (32
+      order items + 3 prior-month returns, from the unified file) conflicts
+      with STATE (32 shipment orders = 35 units, 7 customer returns, MTR).
+      OPEN.
+    - Return-loss grep: per-marketplace settings EXIST (*_not_sellable_pct).
+      Dashboard and SKU screen read legacy return_loss_rate with 0.05
+      fallback; buildLedger.ts:46 and pnlEngine.ts:66 default 0.05;
+      SettingsScreen "?? 5". goldenReturnLossRate = 5/100 typed in
+      goldenDispatch.ts:10.
+    - Parity table all 0.00: ACCEPTED (both sides same ledger; screen is
+      the proof).
+    - Test reconciliation REJECTED: per-file table disagrees with the 7R-2d
+      list; storageDeduplication -1 unexplained.
+    - Line numbers of 0.05 literals moved (Dashboard 120/153 -> 153/173,
+      SkuPerformance 59/82 -> 82/94): unexplained edits to off-limits files.
+  * 7R-2f-b (read-only verification) issued: changed files since b2537c9,
+    honest per-file test table with removed it() names (restore
+    storageDeduplication test if unjustified), Amazon breakdown from raw
+    samples. Agent closing sentence received 10 Nov, SUMMARY block NOT
+    received. CI for 7R-2 commits not yet seen.
+- Not approved: 4c, 6, 7 (pending 7R-2f-b), 8.
+- Next: 7R-2f-b SUMMARY review. Then 7R-2g if owner approves (read
+  *_not_sellable_pct, loading state, no literal). Then close 7, then 8
+  (return performance on ledger; remove damaged/lost 100% COGS and fallback
+  cost 100 in returnEngine / pnlEngine), 6, 4c, 9 (GST/TDS/TCS as CA
+  reconciliation report), 10 (hardening, backup, deploy, own Firebase
+  project with billing).
 - Stage 9 files (taxEngine.ts, its test, TaxReconciliationScreen) were
   deleted in Prompt A-2 (recoverable from git history). Rates: Sec 194-O
   TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS (Sec 52) 0.5%
@@ -142,15 +153,17 @@
 - Ledger before TCS/TDS: FK 29,799.67; AZ 2,333.67; MS 18,913.68; total
   51,047.02. Revenue 61,423.71 / 4,912.85 / 105,394.44 (171,731.00).
   Product cost 30,778 / 2,355 / 80,317 (113,450); packing 3,588 / 210 /
-  5,862 (9,660); return loss 411.25 / 42.20 / 1,126.25 (1,579.70). Cash to
-  bank 172,599.80.
+  5,862 (9,660); return loss 411.25 / 42.20 / 1,126.25 (1,579.70). TCS
+  -286.67 / -28.02 / -687.20 (-1,001.89); TDS -2,866.54 / 0 / -137.29
+  (-3,003.83). Cash to bank 172,599.80.
 - Amazon TCS: Released -28.02 in P&L, Deferred -8.62 pipeline.
-- Dispatch detail: FK 410 sale items + 187 return-only = 597 items, one
-  qty-2 item = 598 units; customer returns 60, RTO 162. AZ 32 shipment
-  orders = 35 units; customer returns 7. MS 565 sale + 412 return-only =
-  977 (5 claims rows excluded); customer returns 159, RTO 257.
-- SKU Performance Sep 2026 (7R-2c screen): sold 1,059; returns 233;
-  dispatched 1,610; Non-SKU charges -7,047.78; Unresolved 0.
+- Dispatch detail (STATE view, to be reconciled in 7R-2f-b): FK 410 sale
+  items + 187 return-only = 597 items, one qty-2 item = 598 units;
+  customer returns 60, RTO 162. AZ 32 shipment orders = 35 units; customer
+  returns 7. MS 565 sale + 412 return-only = 977 (5 claims rows excluded);
+  customer returns 159, RTO 257.
+- SKU Performance Sep 2026: sold 1,059; returns 233; dispatched 1,610;
+  Non-SKU charges -7,047.78; Unresolved 0; 1,850 lines.
 - Counts: Flipkart orders 493 raw rows (status OK: DELIVERED 258,
   READY_TO_SHIP 58, RETURN_REQUESTED 49, RETURNED 83, CANCELLED 44,
   APPROVAL_HOLD 1); 683 settled rows (461 sale / 222 return); 18 batches;
@@ -160,7 +173,8 @@
   docs.
 
 ## Known defects / open items
-1. Parity test may not read live Firestore; the screen is the proof.
+1. Parity test may not read live Firestore; both sides are the same
+   ledger. The screen is the proof.
 2. Alias TM-PC-004New target (TM-PC-004) set by owner; not verified.
 3. Cost Master "Load Sample sku_master_v2.csv" button can load the wrong
    file; relabel or remove.
@@ -187,19 +201,18 @@
     path untested on real data.
 14. UploadCentreScreen 3,787 lines (split later).
 15. Agent reports often omit pasted tables and understate deviations
-    (7R-2 family: "Deviations: none" was wrong twice).
+    (7R-2 family: "Deviations: none" wrong twice; 7R-2f-b closing sentence
+    sent instead of SUMMARY).
 16. sku_aliases_v2.csv shows 68 lines vs 67 Firestore docs (likely the
     header); confirm.
 17. P&L Dashboard table does not foot visually: Revenue (Settlement) is
     net of TCS/TDS, so Revenue minus costs = After TCS/TDS; "Profit Before
     TCS/TDS" is After plus TCS and TDS with no add-back line shown.
     Numbers correct (golden). Fix labels or add a line later.
-18. buildLedger.ts has literal 0.05 return-loss defaults (lines 35-37,
-    127). Move to per-marketplace settings with no literal fallback
-    (cleanup, later; not a number change).
+18. buildLedger.ts has literal 0.05 return-loss defaults (lines 35-37, 46,
+    127). Covered by 7R-2g.
 19. SKU Performance Dispatched column = packing / rate per row (no
     dispatched-units field on LedgerLine). Total 1,610 matches on screen.
-    Test must take expected counts from a shared constants file (7R-2e).
 20. SKU rows can show negative net units or sold units above dispatched
     (TM-TG-001 product cost -210, revenue -206.50; TM-CA-003 sold 6 vs
     dispatched 5; TM-MBT-002 5 vs 4): sale dispatched in an earlier month
@@ -208,13 +221,22 @@
 21. Loss-making SKUs Sep 2026 (settlement basis): TM-ST-002 -2,813.66,
     TM-PC-004 -2,136.00 (alias TM-PC-004New unverified, defect 2).
     Business review later; not a code defect.
-22. Golden test dispatch counts are typed literals (ledger.test.ts
-    230-234). 7R-2e moves them to goldenDispatch.ts; derivation from the
-    raw sample files to be documented.
-23. SkuPerformanceScreen.tsx lines 59 and 82 use literal 0.05 for return
-    loss (fix in 7R-2e); related to defect 18.
+22. goldenDispatch.ts now computes dispatch from raw samples (7R-2f).
+    Amazon breakdown (3 vs 7 returns; unified vs MTR) to be explained in
+    7R-2f-b. goldenReturnLossRate = 5/100 is a typed constant in
+    goldenDispatch.ts:10.
+23. SkuPerformanceScreen.tsx and PnLDashboardScreen.tsx use legacy
+    return_loss_rate with literal 0.05 fallback (SkuPerformance 82/94,
+    Dashboard 153/173; Dashboard 210 writes return_loss_rate: verify
+    whether it writes to Firestore). Covered by 7R-2g.
 24. Test count history unreliable: 16 files / 278 tests at b2537c9 (agent
-    report) vs 17 files / 273 now. Honest per-file diff requested in 7R-2e.
+    report) vs 17 files / 273 now. 7R-2f per-file table rejected; honest
+    table requested in 7R-2f-b.
+25. Return-loss settings keys exist (*_not_sellable_pct, SettingsScreen
+    337-395, types 18-20) but engine and screens use legacy
+    return_loss_rate / 0.05 / "?? 5". Fix in 7R-2g (covers 18, 23).
+26. 0.05 literal line numbers moved between 7R-2e and 7R-2f in files that
+    were off-limits; changed-files proof requested in 7R-2f-b.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -231,23 +253,29 @@ ms_batches, ms_uploads. (sku_variants unused.)
   sign out/in each session. Own project with billing planned for Stage 10.
 - Roles: admin = owner; 2 viewers read-only. allowedUsers/default holds
   emails, admins, roles (lowercase).
-- Tests: agent report after 7R-2d: 17 files, 273 tests passing, tsc clean.
+- Tests: agent report after 7R-2f: 17 files, 273 tests passing, tsc clean.
   CI runs #59 to #70 green (#70 b2537c9 confirmed 10 Nov); CI for the
   7R-2 commits not yet seen.
 - Code paths: src/components/SkuPerformanceScreen.tsx,
+  src/components/PnLDashboardScreen.tsx, src/components/SettingsScreen.tsx,
   src/ledger/skuGrouping.ts, src/ledger/skuGrouping.test.ts,
-  src/ledger/ledger.test.ts (golden), src/ledger/buildLedger.ts,
-  src/utils/skuEngine.ts (getCategoryFromSku only), src/utils/returnEngine.ts,
-  src/utils/pnlEngine.ts, src/utils/costCalculator.ts,
-  src/utils/skuResolver.ts.
+  src/ledger/goldenDispatch.ts, src/ledger/ledger.test.ts (golden),
+  src/ledger/buildLedger.ts, src/utils/skuEngine.ts (getCategoryFromSku
+  only), src/utils/returnEngine.ts, src/utils/pnlEngine.ts,
+  src/utils/costCalculator.ts, src/utils/skuResolver.ts.
 
 ## Open decisions
-- Add admin-editable per-marketplace return-loss settings (new settings key,
-  removes 0.05 literals, defects 18 and 23) as stage 7R-2g, or defer to
-  Stage 10. Owner to decide.
+- Approve 7R-2g: dashboard, SKU Performance and buildLedger read the
+  existing *_not_sellable_pct settings (loading state, no 0.05 / 5
+  literal)? Owner to answer.
 
 ## Last result (10 Nov 2026)
-- Next: 7R-2f (compute dispatch from samples, report-only grep for the
-  return-loss source, named removed tests, parity table). Then decide 7R-2g
-  (return-loss settings, new key; owner decision pending). Then re-check the
-  7R-2e list (CI, SKU screenshot).
+- 7R-2f-b: agent's closing sentence only; SUMMARY block not received, so
+  changed-files proof, honest test table and Amazon breakdown are unproven.
+  Not approved.
+- New screenshots (10 Nov): Dashboard and SKU Performance Sep 2026, All
+  Channels. SKU TOTAL row = dashboard (47,041.30; revenue 1,71,731.00;
+  product cost 1,13,450.00; packing 9,660.00; return loss 1,579.70;
+  dispatched 1,610; 1,850 lines). Acceptance item 6 PASS. CI screenshot for
+  the latest commit still missing.
+- Next: owner pastes the full 7R-2f-b SUMMARY block + CI screenshot.
