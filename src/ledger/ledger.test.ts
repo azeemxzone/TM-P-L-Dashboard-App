@@ -11,6 +11,7 @@ import { parseMeeshoPayments } from '../meesho';
 import { parseAliasCsv, resolveMasterSku } from '../utils/skuResolver';
 import { parseCSV } from '../utils/csvParser';
 import { CostMasterItem } from '../types';
+import { independentDispatched, goldenReturnLossRate } from './goldenDispatch';
 
 /**
  * Finds a real sample file in /samples or ./samples.
@@ -106,7 +107,7 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     aliasMap,
     costLookup: costMasterItems,
     masterCodes,
-    settings: { freight: 5, packing: 6, returnLoss: 0.05 },
+    settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRate },
     flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
     amazon: { unifiedRows: azUnified, mtrRows: azMtr },
     meesho: { payments: msReport.payments, ads: msReport.ads },
@@ -227,11 +228,6 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     const ws = refWb.Sheets['Summary'];
 
     const packingSetting = 6;
-    const independentDispatched = {
-      Flipkart: 598,
-      Amazon: 35,
-      Meesho: 977,
-    };
 
     // Note: the reference workbook charges packing on sold units only; the spec charges all dispatched units.
     const referencePacking = {

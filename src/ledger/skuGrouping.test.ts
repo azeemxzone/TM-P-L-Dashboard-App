@@ -18,6 +18,7 @@ import { parseMeeshoPayments } from '../meesho';
 import { parseAliasCsv } from '../utils/skuResolver';
 import { parseCSV } from '../utils/csvParser';
 import { CostMasterItem, Marketplace } from '../types';
+import { independentDispatched, totalIndependentDispatched, goldenReturnLossRate } from './goldenDispatch';
 
 function findRealSampleFile(token: string): string {
   const dirs = [
@@ -108,19 +109,13 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
       aliasMap,
       costLookup: costMasterItems,
       masterCodes,
-      settings: { freight: 5, packing: 6, returnLoss: 0.05 },
+      settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRate },
       flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
     });
 
     const platforms: Marketplace[] = ['Flipkart', 'Amazon', 'Meesho'];
-    const independentDispatched: Record<string, number> = {
-      Flipkart: 598,
-      Amazon: 35,
-      Meesho: 977,
-      all: 1610,
-    };
     const packingRate = 6;
 
     for (const p of platforms) {
@@ -134,7 +129,9 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
       expect(grouped.totals.returnLoss).toBeCloseTo(expectedP.returnLoss, 2);
       expect(grouped.totals.profitBeforeTax).toBeCloseTo(expectedP.profitAfterTcsTds, 2);
 
-      // Assert dispatchedUnits matches independent dispatch counts computed by parsers / golden test
+      // Assert sum of SKU-row dispatched units equals the constant
+      const sumSkuDispatched = grouped.skuRows.reduce((sum, r) => sum + r.dispatchedUnits, 0);
+      expect(sumSkuDispatched).toBe(independentDispatched[p]);
       expect(grouped.totals.dispatchedUnits).toBe(independentDispatched[p]);
     }
 
@@ -148,6 +145,8 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
     expect(totalGrouped.totals.returnLoss).toBeCloseTo(expectedTot.returnLoss, 2);
     expect(totalGrouped.totals.profitBeforeTax).toBeCloseTo(expectedTot.profitAfterTcsTds, 2);
 
-    expect(totalGrouped.totals.dispatchedUnits).toBe(independentDispatched['all']);
+    const sumAllSkuDispatched = totalGrouped.skuRows.reduce((sum, r) => sum + r.dispatchedUnits, 0);
+    expect(sumAllSkuDispatched).toBe(totalIndependentDispatched);
+    expect(totalGrouped.totals.dispatchedUnits).toBe(totalIndependentDispatched);
   });
 });
