@@ -37,7 +37,9 @@
 ## Agent (AI Studio, Gemini 3.6 Flash) rules
 - Standing rules live in AI Studio Custom instructions. One stage per chat.
   Prompt lists only the files it may open; ends "stop after this task" and
-  the SUMMARY template. Pasted tables, not "printed".
+  the SUMMARY template. Pasted tables, not "printed". Prompts ask for
+  specific pasted answers (exact lines, YES/NO per field, tables), not
+  "identified / verified".
 - Never touch auth, Firebase config or deploy rules. Owner publishes rules
   in the console; new blocks go INSIDE the documents block.
 - Every write via stripUndefined. Counts verified by reading expected IDs.
@@ -48,7 +50,8 @@
   postal code.
 
 ## Stage status
-- Verified: 1, 1.1, 1.2, 1.3, 2, 2b, 2c, 3a, 3b, 3c, 4a, 4b.
+- Verified: 1, 1.1, 1.2, 1.3, 2, 2b, 2c, 3a, 3b, 3c, 4a, 4b, 5R (closed
+  10 Nov 2026).
 - Prompt A: APPROVED (genai removed, benchmark file deleted, ms_* rules in
   repo, greps az_transfers / Math.random / genai = 0).
 - 5R-1 (Fix 5b-2, 5c): APPROVED. Golden test independent: reference read
@@ -58,20 +61,46 @@
   TCS/TDS FK 26,646.46 / AZ 2,305.65 / MS 18,089.19 / total 47,041.30 =
   golden. Product cost 30,778 / 2,355 / 80,317; return loss 411.25 /
   42.20 / 1,126.25; cash to bank 61,423.79 / 5,781.57 / 105,394.44.
-  Earlier gap was DATA: Firestore cost_master was not v3 (TM-MA-001 260 vs
-  230, TM-CA-004 100 vs 120, TM-PC-007 30 vs 185, TM-ST-002 130 vs 120).
-  Owner deleted cost_master and re-uploaded v3. No calculation code wrong.
-  Parity test added (regression guard, likely fixture-based).
-- 5R close-out pending: (a) CI green on latest commit, (b) temporary
-  Ledger inputs panel gone, (c) no Unresolved SKUs warning.
-- Next after close-out: re-verify 7 (SKU performance on ledger), then 8,
-  6, 4c, 9 (GST/TDS/TCS as CA reconciliation report), 10 (hardening,
-  backup, deploy, own Firebase project with billing).
-- Not approved: 4c, 6, 7, 8. Stage 9 files (taxEngine.ts, its test,
-  TaxReconciliationScreen) were deleted in Prompt A-2 (recoverable from
-  git history). Rates: Sec 194-O TDS 0.1% of gross sales (5% without
-  PAN/Aadhaar); GST TCS (Sec 52) 0.5% of net taxable supplies since
-  10 Jul 2024. No buyer-state IGST/CGST.
+  Earlier gap was DATA: Firestore cost_master was not v3. Owner deleted
+  cost_master and re-uploaded v3. No calculation code wrong.
+- 5R close-out (10 Nov): DONE. (a) CI #59 to #70 green, #70 b2537c9; last
+  code commit #67 "remove diagnostic panel". (b) temporary Ledger inputs
+  panel gone (bottom-of-page screenshot, table ends at Cash Credited row).
+  (c) no Unresolved SKUs warning for Sep 2026. Screen equals golden:
+  revenue 61,423.71 / 4,912.85 / 105,394.44 (171,731.00); packing 3,588 /
+  210 / 5,862 (9,660); profit before TCS/TDS 29,799.67 / 2,333.67 /
+  18,913.68 (51,047.02); after 47,041.30; cash to bank 172,599.80.
+- 7R-1 audit (10 Nov): first SUMMARY rejected (no pasted content); re-run
+  ACCEPTED with gaps. Findings (agent-pasted, file:line):
+  * SkuPerformanceScreen.tsx calls computeSkuPerformance (skuEngine.ts:193)
+    with raw arrays; it does NOT read buildLedger. Own formulas (lines
+    534-539): productCogs = settledUnits x unitCost; inboundFreight =
+    settledUnits x freightRate (DOUBLE-CHARGES freight, breaks rule);
+    packagingCost = dispatchedUnits x packRate; returnLoss =
+    returnedUnits x unitCost x lossRate; netProfit = netRealization -
+    totalCostOfGoods.
+  * Fallback cost 100: skuEngine.ts:235, 251, 326; returnEngine.ts:248,
+    262, 274; pnlEngine.ts:22, 38.
+  * Bundled v2 data (DEFAULT_SKU_MASTER_V2_CSV, DEFAULT_SKU_ALIASES_V2_CSV)
+    imported by skuEngine, returnEngine, pnlEngine (v3 is the truth).
+  * Literal 0.05: skuEngine.ts:196, returnEngine.ts:209, buildLedger.ts:35-37
+    and 127, SkuPerformanceScreen.tsx:80.
+  * "Damaged/lost = 100% COGS": returnEngine.ts:385-388, 599-602, 721-724.
+  * skuEngine/returnEngine/pipelineEngine/pnlEngine tests: all synthetic.
+  * Gaps: pipeline engine not grepped (0.7 factor unproven); current SKU
+    Performance per-platform totals not given; resolveItemCost /
+    getAvgCostAsOf / returnEngine paths not tabled.
+- 7R-2 (rebuild SKU Performance as ledger grouping, skuGrouping.ts, parity
+  test on real samples, remove computeSkuPerformance if no other importer):
+  prompt issued 10 Nov, awaiting SUMMARY.
+- Not approved: 4c, 6, 7, 8.
+- Next after 7: 8 (return performance on ledger; remove damaged/lost 100%
+  COGS), 6, 4c, 9 (GST/TDS/TCS as CA reconciliation report), 10
+  (hardening, backup, deploy, own Firebase project with billing).
+- Stage 9 files (taxEngine.ts, its test, TaxReconciliationScreen) were
+  deleted in Prompt A-2 (recoverable from git history). Rates: Sec 194-O
+  TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS (Sec 52) 0.5%
+  of net taxable supplies since 10 Jul 2024. No buyer-state IGST/CGST.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -86,6 +115,9 @@
 - Ledger after-tax: FK 26,646.46; AZ 2,305.65; MS 18,089.19; total
   47,041.30. Gap -834.01 = packing basis only (FK 598 vs 462 sold = 816;
   AZ 35 vs 32 = 18; MS 977 vs 977 = 0).
+- Ledger before TCS/TDS: FK 29,799.67; AZ 2,333.67; MS 18,913.68; total
+  51,047.02. Product cost 30,778 / 2,355 / 80,317; packing 3,588 / 210 /
+  5,862; return loss 411.25 / 42.20 / 1,126.25.
 - Amazon TCS: Released -28.02 in P&L, Deferred -8.62 pipeline.
 - Dispatch detail: FK 410 sale items + 187 return-only = 597 items, one
   qty-2 item = 598 units; customer returns 60, RTO 162. AZ 32 shipment
@@ -106,13 +138,18 @@
    file; relabel or remove.
 4. Upload Centre has no Unmatched SKUs box (spec); SKU Performance has a
    drawer.
-5. SKU Performance (Stage 7) still on old engine (total -41,326.30).
-6. Old default cost 100 in skuEngine/returnEngine and pipeline 0.7
-   factor: not proven removed. Numeric-literal grep returned 0 hits;
-   regex unreliable, re-run properly.
-7. Stage 8 invented "damaged/lost = 100% COGS" (not a decision).
-8. Engine tests (sku/return/pipeline) use no real samples; 6 old pnlEngine
-   tests removed in 5R-3.
+5. SKU Performance (Stage 7) still on old engine (total -41,326.30);
+   standalone, double-charges freight, uses settled units. Fix = 7R-2.
+6. Fallback cost 100 and bundled v2 default data PROVEN present (see 7R-1
+   findings). Fixed for SKU engine in 7R-2; returnEngine and pnlEngine
+   remain (Stage 8; check whether pnlEngine.ts / pnlEngine.test.ts still
+   have any importer, delete if none). Pipeline 0.7 factor still unproven:
+   grep pipeline engine.
+7. Stage 8 invented "damaged/lost = 100% COGS" (returnEngine.ts:385-388,
+   599-602, 721-724; not a decision). Remove in Stage 8.
+8. Engine tests (sku/return/pipeline/pnl) all synthetic, confirmed in
+   7R-1. 6 old pnlEngine tests removed in 5R-3 but pnlEngine.test.ts file
+   still exists.
 9. Meesho: 128 completed returns (131 records: 74 customer / 57 RTO) have
    no September payment row; other-month payment unproven.
 10. Flipkart TDS 2,866.54 about 10x TCS 286.67 (cols 36/37; reference
@@ -127,6 +164,14 @@
 15. Agent reports often omit pasted tables and understate deviations.
 16. sku_aliases_v2.csv shows 68 lines vs 67 Firestore docs (likely the
     header); confirm.
+17. P&L Dashboard table does not foot visually: Revenue (Settlement) is
+    net of TCS/TDS, so Revenue minus costs = After TCS/TDS; "Profit Before
+    TCS/TDS" is After plus TCS and TDS with no add-back line shown.
+    Numbers correct (golden). Fix labels or add a line later; no
+    calculation change.
+18. buildLedger.ts has literal 0.05 return-loss defaults (lines 35-37,
+    127). Move to per-marketplace settings with no literal fallback
+    (cleanup, later; not a number change).
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -143,14 +188,18 @@ ms_batches, ms_uploads. (sku_variants unused.)
   sign out/in each session. Own project with billing planned for Stage 10.
 - Roles: admin = owner; 2 viewers read-only. allowedUsers/default holds
   emails, admins, roles (lowercase).
-- Tests: 16 files, 278 tests passing (agent report). CI runs #59 to #62
-  green; latest commit not yet confirmed.
+- Tests: 16 files, 278 tests passing, tsc clean (agent report, 7R-1). CI
+  runs #59 to #70 green (#70 b2537c9 confirmed 10 Nov).
+- Code paths: src/components/SkuPerformanceScreen.tsx,
+  src/utils/skuEngine.ts, src/utils/returnEngine.ts,
+  src/utils/pnlEngine.ts, src/ledger/buildLedger.ts,
+  src/utils/costCalculator.ts, src/utils/skuResolver.ts.
 
 ## Open decisions
 - None.
 
 ## Last result (10 Nov 2026)
-- 5R-3 approved: screen equals golden (47,041.30) after cost_master
-  reload from v3. Awaiting CI screenshot of the latest commit and
-  confirmation that the temporary panel is gone and no Unresolved SKUs
-  warning shows.
+- 5R closed and approved (CI #70 green, panel gone, no Unresolved warning,
+  screen = golden 47,041.30). 7R-1 audit accepted with gaps. 7R-2 prompt
+  issued; awaiting SUMMARY with pasted tables, CI screenshot and SKU
+  Performance screenshot (Sep 2026, All Platforms).
