@@ -106,14 +106,23 @@
   blocking panel, buildLedger callers, goldenDispatch importers; delete
   returnEngine.ts / pnlEngine.ts and their synthetic tests only if no
   importer remains (removes fallback cost 100 and "damaged/lost = 100% COGS").
-- Next: 8R-1 SUMMARY, then 6 (pipeline carry-forward; check the 0.7 factor;
-  PipelineTrackerScreen legacy keys), small settings-literal cleanup (defect
-  33), 4c, 9 (GST/TDS/TCS as CA reconciliation report), 10 (hardening,
-  backup, deploy, own Firebase project with billing).
-- Stage 9 files (taxEngine.ts, its test, TaxReconciliationScreen) were
-  deleted in Prompt A-2 (recoverable from git history). Rates: Sec 194-O
-  TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS (Sec 52) 0.5%
-  of net taxable supplies since 10 Jul 2024. No buyer-state IGST/CGST.
+- Not approved: 4c, 6, 8 (8R-1 reviewed 11 Nov, not approved; 8R-1b issued).
+- Stage 8R-1 (11 Nov) SUMMARY: returnGrouping.ts, returnGrouping.test.ts,
+  returnGolden.ts created; ReturnPerformanceScreen rebuilt on buildLedger +
+  parseLedgerSettings; returnEngine.ts and returnEngine.test.ts DELETED (6
+  synthetic tests: date diff, courier RTO vs customer return, claim recovery,
+  aging flags, multi-channel, FY filter). pnlEngine.ts KEPT (pipelineEngine
+  imports getSkuCost; fallback cost 100 and v2 data remain, Stage 6).
+  Sep 2026 table: dispatched 598 / 35 / 977 (1,610); sold 462 / 32 / 565
+  (1,059); customer-return units 60 / 7 / 159 (226); RTO 162 / 0 / 257 (419);
+  return loss 411.25 / 42.20 / 1,126.25 (1,579.70) = dashboard; "packing on
+  returns" 1,188 / 18 / 2,472 (3,678) does not reconcile with return units
+  (1,332 / 42 / 2,496) and leaves FK 400 units on sale lines vs 462 sold.
+  Tests 18 files / 272 (277 - 6 + 1). Missing: fallback-100 and damaged|lost
+  greps, screen lines 1-140, test assertions, CI, screen screenshot.
+- Next: 8R-1b SUMMARY (packing decomposition, greps, assertions, Amazon RTO),
+  owner CI + Return Performance screenshots. Then close 8, then 6, defect 33
+  cleanup, 4c, 9, 10.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -228,6 +237,12 @@
     unknown keys); ParsedLedgerSettings has duplicate fields returnLoss and
     returnLossRates; ledger/types.ts:101 comment "default 5% (0.05)" is
     stale.
+35. Return Performance "packing on returns" column is undefined and does not
+    match return-kind units (FK 1,188 = 198 units vs 222 return units; AZ 18
+    vs 7; MS 2,472 = 412 vs 416). 8R-1b explains it; column renamed or
+    redefined if needed.
+36. Amazon RTO = 0 in Sep 2026 samples; no RTO signal identified yet; the 15
+    MTR Cancel rows are unexplained (8R-1b task 4).
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -244,9 +259,9 @@ ms_batches, ms_uploads. (sku_variants unused.)
   sign out/in each session. Own project with billing planned for Stage 10.
 - Roles: admin = owner; 2 viewers read-only. allowedUsers/default holds
   emails, admins, roles (lowercase).
-- Tests: agent report after 7R-2g: 18 files, 277 tests passing, tsc clean,
-  vite build OK. CI #59 to #70 green (#70 b2537c9); CI for the 7R-2 and
-  7R-2g commits not yet seen (owner).
+- Tests: agent report after 8R-1: 18 files, 272 tests passing (returnEngine
+  tests deleted, returnGrouping test added), tsc clean. CI #59 to #70 green
+  (#70 b2537c9); CI for later commits not yet seen (owner).
 - Code paths: src/components/SkuPerformanceScreen.tsx,
   src/components/PnLDashboardScreen.tsx, src/components/SettingsScreen.tsx,
   src/components/ReturnPerformanceScreen.tsx (legacy, to rebuild),
@@ -261,11 +276,10 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - None.
 
 ## Last result (11 Nov 2026)
-- 7R-2g ACCEPTED on screen evidence: Settings (return loss 5 / 5 / 5, audit
-  log works), Dashboard and SKU Performance Sep 2026 show the same settings
-  badge and total 47,041.30. Stage 7 CLOSED; owner CI screenshot pending.
-- SUMMARY gaps carried to 8R-1 task 1; literal defaults elsewhere logged as
-  defects 33-34.
-- Issued Stage 8R-1 (return performance on the ledger). Owner: open a new
-  AI Studio chat for it.
-- Next: 8R-1 SUMMARY + CI screenshot + Return Performance screenshot.
+- 8R-1 SUMMARY reviewed: NOT approved. Return loss and units reconcile with
+  the ledger and the golden units; packing-on-returns column does not
+  reconcile; required greps and assertions missing; no CI or screen
+  screenshot.
+- Issued 8R-1b (read-only). Owner: CI screenshot (expect 272 passed) and
+  Return Performance screenshots (Sep 2026, All Channels and Flipkart).
+- Next: 8R-1b SUMMARY, then close 8 with a full STATE.md.
