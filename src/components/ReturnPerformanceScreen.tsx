@@ -321,8 +321,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
       'RTO Units',
       'RTO Rate (%)',
       'Return Loss (₹)',
-      'Return Packing Loss (₹)',
-      'RTO Shipping Loss (₹)',
     ];
 
     const rows: (string | number)[][] = [
@@ -337,8 +335,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
         s.rtoUnits,
         (s.rtoRate * 100).toFixed(2),
         s.returnLoss,
-        s.packingOnReturns,
-        s.shippingLossOnRto,
       ]),
       [
         '"Non-SKU charges"',
@@ -351,8 +347,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
         groupingResult.nonSkuRow.rtoUnits,
         (groupingResult.nonSkuRow.rtoRate * 100).toFixed(2),
         groupingResult.nonSkuRow.returnLoss,
-        groupingResult.nonSkuRow.packingOnReturns,
-        groupingResult.nonSkuRow.shippingLossOnRto,
       ],
       [
         '"Unresolved SKUs"',
@@ -365,8 +359,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
         groupingResult.unresolvedRow.rtoUnits,
         (groupingResult.unresolvedRow.rtoRate * 100).toFixed(2),
         groupingResult.unresolvedRow.returnLoss,
-        groupingResult.unresolvedRow.packingOnReturns,
-        groupingResult.unresolvedRow.shippingLossOnRto,
       ],
       [
         '"Total"',
@@ -379,8 +371,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
         groupingResult.totals.rtoUnits,
         (groupingResult.totals.rtoRate * 100).toFixed(2),
         groupingResult.totals.returnLoss,
-        groupingResult.totals.packingOnReturns,
-        groupingResult.totals.shippingLossOnRto,
       ],
     ];
 
@@ -702,8 +692,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                     <th className="py-3 px-3 text-right">RTO Units</th>
                     <th className="py-3 px-3 text-right">RTO %</th>
                     <th className="py-3 px-4 text-right">Return Loss (₹)</th>
-                    <th className="py-3 px-4 text-right">Return Packing (₹)</th>
-                    <th className="py-3 px-4 text-right">RTO Shipping Loss (₹)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
@@ -724,12 +712,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                       <td className="py-3 px-4 text-right font-bold text-rose-600 dark:text-rose-400">
                         {formatINR(s.returnLoss)}
                       </td>
-                      <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">
-                        {formatINR(s.packingOnReturns)}
-                      </td>
-                      <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">
-                        {formatINR(s.shippingLossOnRto)}
-                      </td>
                     </tr>
                   ))}
 
@@ -744,8 +726,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                     <td className="py-3 px-3 text-right">{groupingResult.nonSkuRow.rtoUnits || '-'}</td>
                     <td className="py-3 px-3 text-right">-</td>
                     <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.returnLoss)}</td>
-                    <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.packingOnReturns)}</td>
-                    <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.shippingLossOnRto)}</td>
                   </tr>
 
                   {/* Unresolved SKUs Row */}
@@ -766,8 +746,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                     <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.rtoUnits}</td>
                     <td className="py-3 px-3 text-right">-</td>
                     <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.returnLoss)}</td>
-                    <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.packingOnReturns)}</td>
-                    <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.shippingLossOnRto)}</td>
                   </tr>
                 </tbody>
 
@@ -797,18 +775,12 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                     <td className="py-3.5 px-4 text-right text-rose-600 dark:text-rose-400 font-bold text-sm">
                       {formatINR(groupingResult.totals.returnLoss)}
                     </td>
-                    <td className="py-3.5 px-4 text-right text-slate-700 dark:text-slate-300">
-                      {formatINR(groupingResult.totals.packingOnReturns)}
-                    </td>
-                    <td className="py-3.5 px-4 text-right text-slate-700 dark:text-slate-300">
-                      {formatINR(groupingResult.totals.shippingLossOnRto)}
-                    </td>
                   </tr>
                 </tfoot>
               </table>
             </div>
             <div className="p-3 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 font-sans">
-              * Return Loss represents un-sellable unit value loss from customer returns. Packing and shipping costs on returned/RTO orders are additionally tracked.
+              * Return Loss represents un-sellable unit value loss from customer returns.
             </div>
           </div>
         </>

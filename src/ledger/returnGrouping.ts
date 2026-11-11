@@ -29,8 +29,6 @@ export interface ReturnGroupedRow {
   customerReturnRate: number; // fraction 0..1
   rtoRate: number; // fraction 0..1
   returnLoss: number;
-  packingOnReturns: number;
-  shippingLossOnRto: number;
   lineCount: number;
   isNonSku?: boolean;
   isUnresolved?: boolean;
@@ -103,8 +101,6 @@ export function groupLedgerReturns(
     customerReturnUnits: number;
     rtoUnits: number;
     returnLoss: number;
-    packingOnReturns: number;
-    shippingLossOnRto: number;
     lineCount: number;
   }
 
@@ -117,8 +113,6 @@ export function groupLedgerReturns(
     customerReturnUnits: 0,
     rtoUnits: 0,
     returnLoss: 0,
-    packingOnReturns: 0,
-    shippingLossOnRto: 0,
     lineCount: 0,
   };
 
@@ -136,8 +130,6 @@ export function groupLedgerReturns(
         customerReturnUnits: 0,
         rtoUnits: 0,
         returnLoss: 0,
-        packingOnReturns: 0,
-        shippingLossOnRto: 0,
         lineCount: 0,
       };
       skuMap.set(code, acc);
@@ -156,12 +148,9 @@ export function groupLedgerReturns(
     if (line.kind === 'customer_return') {
       const retUnits = Math.abs(line.units) || 1;
       targetAcc.customerReturnUnits += retUnits;
-      targetAcc.packingOnReturns += line.packing || 0;
     } else if (line.kind === 'rto') {
       const rtoUnits = Math.abs(line.units) || 1;
       targetAcc.rtoUnits += rtoUnits;
-      targetAcc.packingOnReturns += line.packing || 0;
-      targetAcc.shippingLossOnRto += line.shipping || 0;
     }
   }
 
@@ -173,8 +162,6 @@ export function groupLedgerReturns(
     customerReturnUnits: 0,
     rtoUnits: 0,
     returnLoss: 0,
-    packingOnReturns: 0,
-    shippingLossOnRto: 0,
     lineCount: filteredUnresolved.length,
   };
 
@@ -192,8 +179,6 @@ export function groupLedgerReturns(
   let totCustomerReturnUnits = nonSkuAcc.customerReturnUnits + unresolvedAcc.customerReturnUnits;
   let totRtoUnits = nonSkuAcc.rtoUnits + unresolvedAcc.rtoUnits;
   let totReturnLoss = nonSkuAcc.returnLoss + unresolvedAcc.returnLoss;
-  let totPackingOnReturns = nonSkuAcc.packingOnReturns + unresolvedAcc.packingOnReturns;
-  let totShippingLossOnRto = nonSkuAcc.shippingLossOnRto + unresolvedAcc.shippingLossOnRto;
   let totLineCount = nonSkuAcc.lineCount + unresolvedAcc.lineCount;
 
   const skuRows: ReturnGroupedRow[] = [];
@@ -204,11 +189,10 @@ export function groupLedgerReturns(
     totCustomerReturnUnits += acc.customerReturnUnits;
     totRtoUnits += acc.rtoUnits;
     totReturnLoss += acc.returnLoss;
-    totPackingOnReturns += acc.packingOnReturns;
-    totShippingLossOnRto += acc.shippingLossOnRto;
     totLineCount += acc.lineCount;
 
     const dispatched = Math.round(acc.packing / packingRate);
+    // Sale and return lines of the same item can overlap, so the rates are on dispatched units.
     const crRate = dispatched > 0 ? round4(acc.customerReturnUnits / dispatched) : 0;
     const rtoRate = dispatched > 0 ? round4(acc.rtoUnits / dispatched) : 0;
 
@@ -222,8 +206,6 @@ export function groupLedgerReturns(
       customerReturnRate: crRate,
       rtoRate: rtoRate,
       returnLoss: round2(acc.returnLoss),
-      packingOnReturns: round2(acc.packingOnReturns),
-      shippingLossOnRto: round2(acc.shippingLossOnRto),
       lineCount: acc.lineCount,
     });
   }
@@ -233,6 +215,7 @@ export function groupLedgerReturns(
 
   // Finalize Non-SKU row
   const nonSkuDispatched = Math.round(nonSkuAcc.packing / packingRate);
+  // Sale and return lines of the same item can overlap, so the rates are on dispatched units.
   const nonSkuRow: ReturnGroupedRow = {
     masterSku: 'Non-SKU charges',
     platform: platformFilter || 'All',
@@ -243,8 +226,6 @@ export function groupLedgerReturns(
     customerReturnRate: nonSkuDispatched > 0 ? round4(nonSkuAcc.customerReturnUnits / nonSkuDispatched) : 0,
     rtoRate: nonSkuDispatched > 0 ? round4(nonSkuAcc.rtoUnits / nonSkuDispatched) : 0,
     returnLoss: round2(nonSkuAcc.returnLoss),
-    packingOnReturns: round2(nonSkuAcc.packingOnReturns),
-    shippingLossOnRto: round2(nonSkuAcc.shippingLossOnRto),
     lineCount: nonSkuAcc.lineCount,
     isNonSku: true,
   };
@@ -260,14 +241,13 @@ export function groupLedgerReturns(
     customerReturnRate: 0,
     rtoRate: 0,
     returnLoss: round2(unresolvedAcc.returnLoss),
-    packingOnReturns: round2(unresolvedAcc.packingOnReturns),
-    shippingLossOnRto: round2(unresolvedAcc.shippingLossOnRto),
     lineCount: unresolvedAcc.lineCount,
     isUnresolved: true,
   };
 
   // Finalize Totals
   const totDispatched = Math.round(totPacking / packingRate);
+  // Sale and return lines of the same item can overlap, so the rates are on dispatched units.
   const totals: ReturnGroupedRow = {
     masterSku: 'Total',
     platform: platformFilter || 'All',
@@ -278,8 +258,6 @@ export function groupLedgerReturns(
     customerReturnRate: totDispatched > 0 ? round4(totCustomerReturnUnits / totDispatched) : 0,
     rtoRate: totDispatched > 0 ? round4(totRtoUnits / totDispatched) : 0,
     returnLoss: round2(totReturnLoss),
-    packingOnReturns: round2(totPackingOnReturns),
-    shippingLossOnRto: round2(totShippingLossOnRto),
     lineCount: totLineCount,
   };
 
@@ -299,8 +277,6 @@ export function groupLedgerReturns(
         customerReturnRate: 0,
         rtoRate: 0,
         returnLoss: 0,
-        packingOnReturns: 0,
-        shippingLossOnRto: 0,
         lineCount: 0,
       };
       continue;
@@ -314,8 +290,6 @@ export function groupLedgerReturns(
     let mCustRet = 0;
     let mRto = 0;
     let mRetLoss = 0;
-    let mPackRet = 0;
-    let mShipRto = 0;
     let mCount = subLines.length + subUnresolved.length;
 
     for (const l of subLines) {
@@ -324,11 +298,8 @@ export function groupLedgerReturns(
       if (l.kind === 'sale' || l.units > 0) mSold += l.units || 1;
       if (l.kind === 'customer_return') {
         mCustRet += Math.abs(l.units) || 1;
-        mPackRet += l.packing || 0;
       } else if (l.kind === 'rto') {
         mRto += Math.abs(l.units) || 1;
-        mPackRet += l.packing || 0;
-        mShipRto += l.shipping || 0;
       }
     }
 
@@ -338,6 +309,7 @@ export function groupLedgerReturns(
     }
 
     const mDispatched = Math.round(mPacking / packingRate);
+    // Sale and return lines of the same item can overlap, so the rates are on dispatched units.
     byPlatform[m] = {
       masterSku: m,
       platform: m,
@@ -348,8 +320,6 @@ export function groupLedgerReturns(
       customerReturnRate: mDispatched > 0 ? round4(mCustRet / mDispatched) : 0,
       rtoRate: mDispatched > 0 ? round4(mRto / mDispatched) : 0,
       returnLoss: round2(mRetLoss),
-      packingOnReturns: round2(mPackRet),
-      shippingLossOnRto: round2(mShipRto),
       lineCount: mCount,
     };
   }

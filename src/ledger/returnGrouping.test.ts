@@ -98,7 +98,26 @@ describe('Stage 8R-1: Return Performance Grouping on Single Ledger (Sep 2026)', 
       independentDispatched.Flipkart + independentDispatched.Amazon + independentDispatched.Meesho;
     expect(groupedAll.totals.dispatchedUnits).toBe(totalExpDispatched);
 
-    // Assert per-marketplace breakdown matches returnGolden and goldenDispatch
+    // Assert total customer return units and RTO units match independent returns
+    const totalExpCustReturns =
+      independentReturns.Flipkart.customerReturnUnits +
+      independentReturns.Amazon.customerReturnUnits +
+      independentReturns.Meesho.customerReturnUnits;
+    expect(groupedAll.totals.customerReturnUnits).toBe(totalExpCustReturns);
+
+    const totalExpRtoUnits =
+      independentReturns.Flipkart.rtoUnits +
+      independentReturns.Amazon.rtoUnits +
+      independentReturns.Meesho.rtoUnits;
+    expect(groupedAll.totals.rtoUnits).toBe(totalExpRtoUnits);
+
+    // Assert total rates computed in test match grouping totals
+    const expTotalCustRate = totalExpDispatched > 0 ? totalExpCustReturns / totalExpDispatched : 0;
+    const expTotalRtoRate = totalExpDispatched > 0 ? totalExpRtoUnits / totalExpDispatched : 0;
+    expect(groupedAll.totals.customerReturnRate).toBeCloseTo(expTotalCustRate, 4);
+    expect(groupedAll.totals.rtoRate).toBeCloseTo(expTotalRtoRate, 4);
+
+    // Assert per-marketplace breakdown matches returnGolden, goldenDispatch and buildLedger
     for (const m of marketplaces) {
       const platRow = groupedAll.byPlatform[m];
       const expDispatched = independentDispatched[m];
@@ -109,16 +128,53 @@ describe('Stage 8R-1: Return Performance Grouping on Single Ledger (Sep 2026)', 
       expect(platRow.customerReturnUnits).toBe(expReturns.customerReturnUnits);
       expect(platRow.rtoUnits).toBe(expReturns.rtoUnits);
 
+      const expCustRate = expDispatched > 0 ? expReturns.customerReturnUnits / expDispatched : 0;
+      const expRtoRate = expDispatched > 0 ? expReturns.rtoUnits / expDispatched : 0;
+      expect(platRow.customerReturnRate).toBeCloseTo(expCustRate, 4);
+      expect(platRow.rtoRate).toBeCloseTo(expRtoRate, 4);
+
       // Per-marketplace sum of return loss equals buildLedger return-loss total
       expect(platRow.returnLoss).toBeCloseTo(expectedP.returnLoss, 2);
     }
 
-    // Assert TOTAL return loss equals sum of SKU rows + Non-SKU + Unresolved
-    const sumSkuReturnLoss = groupedAll.skuRows.reduce((sum, r) => sum + r.returnLoss, 0);
-    const calculatedTotalReturnLoss =
-      sumSkuReturnLoss + groupedAll.nonSkuRow.returnLoss + groupedAll.unresolvedRow.returnLoss;
-
-    expect(groupedAll.totals.returnLoss).toBeCloseTo(calculatedTotalReturnLoss, 2);
+    // Total return loss equals buildLedger total
     expect(groupedAll.totals.returnLoss).toBeCloseTo(ledgerResult.totals.returnLoss, 2);
+
+    // TOTAL row = sum of the SKU rows + Non-SKU + Unresolved for every numeric column
+    const sumDispatched =
+      groupedAll.skuRows.reduce((sum, r) => sum + r.dispatchedUnits, 0) +
+      groupedAll.nonSkuRow.dispatchedUnits +
+      groupedAll.unresolvedRow.dispatchedUnits;
+    expect(groupedAll.totals.dispatchedUnits).toBe(sumDispatched);
+
+    const sumUnitsSold =
+      groupedAll.skuRows.reduce((sum, r) => sum + r.unitsSold, 0) +
+      groupedAll.nonSkuRow.unitsSold +
+      groupedAll.unresolvedRow.unitsSold;
+    expect(groupedAll.totals.unitsSold).toBe(sumUnitsSold);
+
+    const sumCustReturns =
+      groupedAll.skuRows.reduce((sum, r) => sum + r.customerReturnUnits, 0) +
+      groupedAll.nonSkuRow.customerReturnUnits +
+      groupedAll.unresolvedRow.customerReturnUnits;
+    expect(groupedAll.totals.customerReturnUnits).toBe(sumCustReturns);
+
+    const sumRtoUnits =
+      groupedAll.skuRows.reduce((sum, r) => sum + r.rtoUnits, 0) +
+      groupedAll.nonSkuRow.rtoUnits +
+      groupedAll.unresolvedRow.rtoUnits;
+    expect(groupedAll.totals.rtoUnits).toBe(sumRtoUnits);
+
+    const sumReturnLoss =
+      groupedAll.skuRows.reduce((sum, r) => sum + r.returnLoss, 0) +
+      groupedAll.nonSkuRow.returnLoss +
+      groupedAll.unresolvedRow.returnLoss;
+    expect(groupedAll.totals.returnLoss).toBeCloseTo(sumReturnLoss, 2);
+
+    const sumLineCount =
+      groupedAll.skuRows.reduce((sum, r) => sum + r.lineCount, 0) +
+      groupedAll.nonSkuRow.lineCount +
+      groupedAll.unresolvedRow.lineCount;
+    expect(groupedAll.totals.lineCount).toBe(sumLineCount);
   });
 });
