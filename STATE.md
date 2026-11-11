@@ -138,6 +138,8 @@
     vs Return Performance 226 (TM-ST-002 67): definitions differ.
   * 8R-1d (read-only audit A-G) issued, NOT YET RUN OR REPORTED. Pending
     prompt text is in the handover message.
+  * 8R-1e (11 Nov) reviewed. Its SUMMARY lacked the header fields. Contradicts 8R-1d D on Amazon non-SKU rows (see defect 52).
+  * 8R-2 (UI: SKU Name, one Return Units helper, sortable Return Performance, remove badges) issued. Queue: 8R-2a (Flipkart cancelled fix + golden), 8R-1f (Amazon MTR Cancel evidence), 8R-3 (Non-SKU split by marketplace/type), then close Stage 8.
 - Owner requests, 11 Nov (to build after 8R-1d): (1) cancelled-before-dispatch
   never counted as dispatched (verify); (2) SKU Name instead of Category in
   SKU Performance and Return Performance (keep the category filter dropdown
@@ -255,9 +257,7 @@
     unknown keys); ParsedLedgerSettings has duplicate fields returnLoss and
     returnLossRates; ledger/types.ts:101 comment "default 5% (0.05)" is stale.
 35. "Packing on Returns" column removed (undefined metric).
-36. Amazon RTO = 0 in Sep 2026; explanation (no unified row for undelivered
-    returns) is asserted, not shown. 15 MTR Cancel rows: evidence requested
-    (8R-1d A7).
+36. Amazon RTO = 0 in Sep is NOT proven; see defect 46 (MTR Cancel rows). Evidence in 8R-1f.
 37. RTO lines carry shipping 0.00 for Flipkart and Meesho (Sep), so no shipping loss is recorded in settlement. Proposed: RTO cost = packing only. Owner to confirm.
 38. SKU Performance "Return Units" (233; TM-ST-002 61) vs Return
     Performance customer returns (226; TM-ST-002 67). To be unified.
@@ -269,14 +269,15 @@
     source-type field (8R-1d D).
 43. Screens still show stage badges ("STAGE 7R-2", "STAGE 8R-1"); remove in
     cleanup.
-44. Cancelled-before-dispatch orders: must not count as dispatched; expected
-    already true (no settlement row), unproven (8R-1d B).
-45. Repo vs AI Studio divergence suspected (20/287 CI vs 18/272 local). Resolve in 8R-1e E + owner GitHub check before approving 8.
-46. Cancelled-before-dispatch rule broken: Flipkart 5 of 44 CANCELLED items have Sep lines (3 rto, 2 sale, packing 6 each); Amazon 11 of 15 MTR Cancel rows have Released Order sale lines; Meesho 0. Cause unproven (8R-1e A, B).
-47. Amazon SAFE-T +90.01 and reimbursement +5.00 sit in kind "adjustment" with claims = 0; 37 raw Amazon non-SKU rows = 35 ledger lines (unexplained). Cross-Account Debt Adjustment -171.12 counted as expense (likely balance movement; decide).
-48. Meesho return lines have units = 0, counted as 1 (|| 1 in returnGrouping.ts:152). Quantity source unverified (8R-1e C).
+44. Cancelled-before-dispatch: Flipkart BUG (defect 46), Meesho 0, Amazon unproven.
+45. CONFIRMED: deletions in AI Studio never reached GitHub. returnEngine.ts and returnEngine.test.ts (6 tests) still on main; storageDeduplication.test.ts does NOT exist. CI 20/287 vs local 18/272: 1 file / 9 tests unexplained (suspect taxEngine.test.ts, deleted in Prompt A-2). Owner deletes stale files on GitHub; 8R-2 pastes find src -type f | sort to compare trees.
+46. Flipkart cancelled-before-dispatch BUG (8R-1e A): 3 items (not 5; items 4 and 5 are siblings). Orders file CANCELLED, no dispatch date or tracking ID, yet settled as zero-net sale/refund pair; buildLedger sets packing 6 and counts units from the settled file only (isNewDispatch by orderItemId, buildLedger.ts:245). Effect about 3 dispatched units, 18 packing, 3 RTO units. Fix 8R-2a: orders file CANCELLED + empty dispatched_date = not dispatched (units 0, packing 0, cost 0, not sale/rto/return); keep money fields; goldenDispatch to exclude the same from raw. Amazon: 11 of 15 MTR Cancel rows have Released Order rows and Easy Ship fees; 3 have a Sep refund, 8 do not (about 2,127 of order amounts). Not proven a bug; 8R-1f needs MTR rows per order. Meesho: 0.
+47. Amazon SAFE-T and FBA reimbursement: 8R-1d D says SKU-less adjustment (90.01, 5.00); 8R-1e D says they carry SKU TM-MR-001 (105.55 claim, 101.69 adjustment). Unresolved. See 52.
+48. Meesho return lines: ledger units = 0, returnGrouping counts 1 (|| 1). Returns file Qty is 1 on all 544 + 62 rows, so numerically right but a hidden fallback. 8R-2 isolates it in returnUnits.ts; real fix (line carries source qty) later.
 49. Return Units mismatch explained: skuGrouping.ts:102 counts units < 0 (includes FK RTO 162); returnGrouping counts kind customer_return. Fix in 8R-2: both screens customer returns only, RTO separate column.
 50. cost_master parser fallback sku_name || code (PnLDashboardScreen); SKU names verified from sku_master_v3.csv only, not Firestore.
+51. Return loss code uses mfgCostToUse (buildLedger: fkLossRate * mfgCostToUse * qty); screen proves it (TM-ST-002 22 x 120 x 5% = 132.00; FK base 8,225 = sum of mfg x units). STATE rule says landed; 8R-1d F wrongly labelled the base "landed". Owner to decide base (Claude recommends landed; Sep change about +56.50).
+52. 8R-1d D and 8R-1e D disagree on Amazon non-SKU rows (SAFE-T 90.01 vs 105.55; Debt -171.12 vs +-64.90; Service Fee -293.82 vs 0.00; FBA storage -78.69 vs -25.38). Only the -7,047.78 total foots. Non-SKU split (8R-3) must be tested against raw sample sums.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -303,11 +304,11 @@ ms_batches, ms_uploads. (sku_variants unused.)
   pnlEngine, pipelineEngine, costCalculator, skuResolver}.ts.
 
 ## Open decisions
-- Return loss: Claude recommends keeping the editable 5% provision on customer-returned units (no condition/sellable data: Flipkart final_condition empty 204/204, Amazon none, Meesho reasons only). Awaiting owner answer.
+- Return loss: OWNER CONFIRMED 11 Nov: keep the editable 5% provision on customer-returned units, claims counted when credited. Still open: cost base (mfg as coded, or landed per STATE; Claude recommends landed).
 - GST: deduct output GST from revenue using the marketplace's reported tax
   columns? Owner and CA to decide after the 8R-1d E audit.
 - Category filter: keep the dropdown when SKU Name replaces the Category
   column? Default: keep.
 
-## Last result (12 Nov 2026)
-- 8R-1d reviewed (see defects 45-50). 8R-1e issued. Owner actions: GitHub check of returnEngine*/storageDeduplication* and CI #89 file list; answer return-loss question. Next: 8R-2 build after 8R-1e and owner answers.
+## Last result (11 Nov 2026)
+- 8R-1e reviewed. Owner: stale files on GitHub (returnEngine*) confirmed; return-loss 5% kept; SKU Name and sort were not built yet (8R-2 issued). Pending: owner answer on return-loss cost base; owner deletes stale GitHub files; 8R-2 SUMMARY.
