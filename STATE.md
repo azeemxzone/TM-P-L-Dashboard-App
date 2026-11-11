@@ -160,6 +160,9 @@
   deleted in Prompt A-2 (recoverable from git history). Rates: Sec 194-O
   TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS (Sec 52) 0.5%
   of net taxable supplies since 10 Jul 2024. No buyer-state IGST/CGST.
+  * 8R-1c: code ACCEPTED 12 Nov (no typed numbers, parseLedgerSettings, rawPercentages). Stage 8 still NOT approved.
+  * 8R-1d SUMMARY received and reviewed. 8R-1e (read-only: cancelled evidence, units source, Amazon classification, repo sync) issued.
+  * Agent local: 18 files / 272 tests. CI #89: 20 / 287. Agent's explanation (returnEngine.test.ts + storageDeduplication.test.ts) is inconsistent; repo and AI Studio copy may have diverged. Owner to check GitHub.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -255,16 +258,10 @@
 36. Amazon RTO = 0 in Sep 2026; explanation (no unified row for undelivered
     returns) is asserted, not shown. 15 MTR Cancel rows: evidence requested
     (8R-1d A7).
-37. RTO shipping fee: STATE says RTO loses packing + shipping fees; the
-    column showed 0.00 from non-LedgerLine fields and was removed. Real
-    shipping sums on rto lines requested (8R-1d A5), then a decision.
+37. RTO lines carry shipping 0.00 for Flipkart and Meesho (Sep), so no shipping loss is recorded in settlement. Proposed: RTO cost = packing only. Owner to confirm.
 38. SKU Performance "Return Units" (233; TM-ST-002 61) vs Return
     Performance customer returns (226; TM-ST-002 67). To be unified.
-40. Revenue = marketplace settlement as reported; likely includes output GST
-    collected from customers, so revenue and profit may be overstated; fees
-    carry GST (input credit). The reference workbook seems to share the same
-    basis (gap = packing only). Unverified. Audit in 8R-1d E; decision with
-    the CA; would change all golden numbers.
+40. CONFIRMED (8R-1d E): Flipkart reconciles exactly (cols 9-17 = 63,229.35 = Bank Settlement Value; minus fines/ads = 61,423.71). Customer sale amount includes GST; no output GST deducted. Revenue/profit include output   GST. Amazon reports tax exactly (MTR 1,317.59); Flipkart/Meesho have no tax split (need GST rate per SKU). Correct basis is ex-GST revenue and cost. Needs CA input (purchase cost incl. GST? input credit claimed?). Would change all golden numbers.
 41. CI 20 files / 287 tests vs agent-reported 18 / 272: 2 files and 15
     tests unexplained (8R-1d A2).
 42. "Non-SKU charges" (Sep 2026 -7,047.78) is one line in SKU Performance;
@@ -274,6 +271,12 @@
     cleanup.
 44. Cancelled-before-dispatch orders: must not count as dispatched; expected
     already true (no settlement row), unproven (8R-1d B).
+45. Repo vs AI Studio divergence suspected (20/287 CI vs 18/272 local). Resolve in 8R-1e E + owner GitHub check before approving 8.
+46. Cancelled-before-dispatch rule broken: Flipkart 5 of 44 CANCELLED items have Sep lines (3 rto, 2 sale, packing 6 each); Amazon 11 of 15 MTR Cancel rows have Released Order sale lines; Meesho 0. Cause unproven (8R-1e A, B).
+47. Amazon SAFE-T +90.01 and reimbursement +5.00 sit in kind "adjustment" with claims = 0; 37 raw Amazon non-SKU rows = 35 ledger lines (unexplained). Cross-Account Debt Adjustment -171.12 counted as expense (likely balance movement; decide).
+48. Meesho return lines have units = 0, counted as 1 (|| 1 in returnGrouping.ts:152). Quantity source unverified (8R-1e C).
+49. Return Units mismatch explained: skuGrouping.ts:102 counts units < 0 (includes FK RTO 162); returnGrouping counts kind customer_return. Fix in 8R-2: both screens customer returns only, RTO separate column.
+50. cost_master parser fallback sku_name || code (PnLDashboardScreen); SKU names verified from sku_master_v3.csv only, not Firestore.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -300,16 +303,11 @@ ms_batches, ms_uploads. (sku_variants unused.)
   pnlEngine, pipelineEngine, costCalculator, skuResolver}.ts.
 
 ## Open decisions
-- Return loss: keep the 5% provision on customer-returned units, or move to
-  actual loss per return (depends on the 8R-1d F column list). Owner to
-  answer.
+- Return loss: Claude recommends keeping the editable 5% provision on customer-returned units (no condition/sellable data: Flipkart final_condition empty 204/204, Amazon none, Meesho reasons only). Awaiting owner answer.
 - GST: deduct output GST from revenue using the marketplace's reported tax
   columns? Owner and CA to decide after the 8R-1d E audit.
 - Category filter: keep the dropdown when SKU Name replaces the Category
   column? Default: keep.
 
-## Last result (11 Nov 2026)
-- 8R-1c screens and CI #89 reviewed: 8R-1 family NOT approved (SUMMARY for
-  8R-1c missing; test count unexplained).
-- 8R-1d (read-only audit A-G) prompt issued; not yet run. Owner to paste the
-  full SUMMARY to the new Claude account.
+## Last result (12 Nov 2026)
+- 8R-1d reviewed (see defects 45-50). 8R-1e issued. Owner actions: GitHub check of returnEngine*/storageDeduplication* and CI #89 file list; answer return-loss question. Next: 8R-2 build after 8R-1e and owner answers.
