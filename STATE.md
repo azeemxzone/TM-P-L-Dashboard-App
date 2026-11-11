@@ -130,8 +130,23 @@
 - CI (owner screenshot, 11 Nov): runs #85 9286233 (7R-2g), #86 595c6de, #87
   2eeb30a (return performance) and #88 dd266b3 all green. Test-count line not
   yet read (expect 272).
-- Next: 8R-1c SUMMARY + CI #88 test line + Return Performance screenshots.
-  Then close 8, then 6, defect 33 cleanup, 4c, 9, 10.
+- Owner requests (11 Nov, after 8R-1c screens): (1) cancelled-before-dispatch
+  orders never count as dispatched (verify, 8R-1d B); (2) SKU Name replaces the
+  Category column in SKU Performance and Return Performance (category filter
+  kept unless the owner says otherwise); (3) discuss how return loss is
+  calculated; (4) GST not deducted from revenue: audit first, then decide with
+  the CA; (5) sortable A-Z / Z-A columns in Return Performance; (6) break down
+  "Non-SKU charges" in SKU Performance by type.
+- CI #89 (28486a5 "remove redundant return loss metrics") green: 20 files /
+  287 tests (agent claimed 18 / 272 after 8R-1). Return screen after 8R-1c
+  (screenshots): packing and RTO shipping columns removed; header "Return loss:
+  FK 5% | AZ 5% | MS 5%"; Flipkart TOTAL 598 / 462 / 60 (10.0%) / 162 (27.1%) /
+  411.25. 8R-1c SUMMARY not received.
+- 8R-1d (read-only audit A-G) issued: re-send of 8R-1c outputs, cancelled
+  orders, sku_name availability, Non-SKU split, GST columns, return-loss
+  inputs. Then a build stage (SKU Name, sorting, Non-SKU split).
+- Next: 8R-1d SUMMARY, owner answer on return loss, then build stage, then
+  close 8, 6, defect 33 cleanup, 4c, 9 (scope changes after the GST audit), 10.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -259,6 +274,18 @@
     explained / unified (8R-1c task 6).
 39. ReturnPerformanceScreen used its own settings state pattern and lowercase
     marketplace keys; moved to parseLedgerSettings in 8R-1c.
+40. Revenue = marketplace settlement as reported; likely includes output GST
+    collected from customers, so revenue and profit may be overstated; fees
+    carry GST (input credit). The reference workbook shares the same basis.
+    GST audit in 8R-1d E; decision with the CA; would change all golden
+    numbers. (Replaces "Stage 9 on hold" for the revenue question.)
+41. CI test count 20 files / 287 vs agent-reported 18 / 272: two files and 15
+    tests unexplained (8R-1d A2).
+42. "Non-SKU charges" (Sep 2026 -7,047.78) is a single line in SKU Performance;
+    needs a per-marketplace, per-type breakdown. LedgerLine may lack a
+    source-type field (8R-1d D).
+43. Return Performance screen header still shows the "STAGE 8R-1" badge;
+    remove stage badges from screens in the cleanup stage.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -289,7 +316,10 @@ ms_batches, ms_uploads. (sku_variants unused.)
   src/utils/costCalculator.ts, src/utils/skuResolver.ts.
 
 ## Open decisions
-- None.
+- Return loss: keep the 5% provision on customer-returned units, or move to
+  actual loss per return (depends on the 8R-1d F column list). Owner to answer.
+- GST: deduct output GST from revenue using the marketplace's reported tax
+  columns? Owner and CA to decide after the 8R-1d E audit.
 
 ## Last result (11 Nov 2026)
 - 8R-1b reviewed: NOT approved (CI green #85-#88; screen consistent with the
