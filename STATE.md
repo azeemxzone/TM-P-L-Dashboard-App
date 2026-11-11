@@ -99,7 +99,7 @@
     "Return loss: FK 5% | AZ 5% | MS 5%", totals unchanged 47,041.30.
     Tests 18 files / 277 (273 + 4). Settings audit log shows Flipkart 5->6->5
     test (11 Nov 01:20-01:21).
-- Not approved: 4c, 6, 8 (Stage 8R-1 issued 11 Nov, awaiting SUMMARY).
+- Not approved: 4c, 6, 8 (8R-1b reviewed, 8R-1c issued).
 - Stage 8R-1 scope: return performance as a ledger grouping
   (returnGrouping.ts, returnGolden.ts from raw samples, screen rebuilt like
   SkuPerformance); read-only audit of LedgerLine fields, Dashboard loading /
@@ -107,22 +107,31 @@
   returnEngine.ts / pnlEngine.ts and their synthetic tests only if no
   importer remains (removes fallback cost 100 and "damaged/lost = 100% COGS").
 - Not approved: 4c, 6, 8 (8R-1 reviewed 11 Nov, not approved; 8R-1b issued).
-- Stage 8R-1 (11 Nov) SUMMARY: returnGrouping.ts, returnGrouping.test.ts,
-  returnGolden.ts created; ReturnPerformanceScreen rebuilt on buildLedger +
-  parseLedgerSettings; returnEngine.ts and returnEngine.test.ts DELETED (6
-  synthetic tests: date diff, courier RTO vs customer return, claim recovery,
-  aging flags, multi-channel, FY filter). pnlEngine.ts KEPT (pipelineEngine
-  imports getSkuCost; fallback cost 100 and v2 data remain, Stage 6).
-  Sep 2026 table: dispatched 598 / 35 / 977 (1,610); sold 462 / 32 / 565
-  (1,059); customer-return units 60 / 7 / 159 (226); RTO 162 / 0 / 257 (419);
-  return loss 411.25 / 42.20 / 1,126.25 (1,579.70) = dashboard; "packing on
-  returns" 1,188 / 18 / 2,472 (3,678) does not reconcile with return units
-  (1,332 / 42 / 2,496) and leaves FK 400 units on sale lines vs 462 sold.
-  Tests 18 files / 272 (277 - 6 + 1). Missing: fallback-100 and damaged|lost
-  greps, screen lines 1-140, test assertions, CI, screen screenshot.
-- Next: 8R-1b SUMMARY (packing decomposition, greps, assertions, Amazon RTO),
-  owner CI + Return Performance screenshots. Then close 8, then 6, defect 33
-  cleanup, 4c, 9, 10.
+- Stage 8R-1 / 8R-1b (11 Nov): screen evidence consistent with the ledger.
+  Return Performance Sep 2026: dispatched 598 / 35 / 977 (1,610); customer
+  returns 60 / 7 / 159 (226); RTO 162 / 0 / 257 (419); return loss 411.25 /
+  42.20 / 1,126.25 (1,579.70); lines 692 / 76 / 1,082 = 1,850. Screen rates
+  are on dispatched units (FK 10.0% / 27.1%, total 14.0% / 26.0%). Per-SKU
+  dispatched, sold and return loss match SKU Performance.
+  Packing decomposition (Sep, buildLedger): FK sale 400 + customer-return 43
+  + RTO 155 = 598 packing units; AZ 32 + 3 + 0 = 35; MS 565 + 155 + 257 =
+  977. Return-kind lines carry packing only where they hold the item's
+  dispatch (about 86 FK items have both a sale and a return line).
+  returnEngine.ts and its 6 synthetic tests deleted; no "damaged/lost COGS"
+  logic remains (only status filters in the tracking screens). pnlEngine.ts
+  stays (pipelineEngine imports getSkuCost; fallback cost 100 at
+  pnlEngine.ts:22,38, Stage 6).
+  Rejected in 8R-1b: "Packing on Returns" column (undefined metric); "RTO
+  Shipping Loss" = 0 on every row (code uses packingCost / marketplaceFee,
+  not LedgerLine fields); tests with typed literals (21.907, 39.565, 13.015,
+  35.130, 3678, 1188) and a sold-unit rate basis that differs from the screen;
+  settings header reads lowercase keys; error panel is not the missing-keys
+  list; SUMMARY lacked header fields.
+- CI (owner screenshot, 11 Nov): runs #85 9286233 (7R-2g), #86 595c6de, #87
+  2eeb30a (return performance) and #88 dd266b3 all green. Test-count line not
+  yet read (expect 272).
+- Next: 8R-1c SUMMARY + CI #88 test line + Return Performance screenshots.
+  Then close 8, then 6, defect 33 cleanup, 4c, 9, 10.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -237,12 +246,19 @@
     unknown keys); ParsedLedgerSettings has duplicate fields returnLoss and
     returnLossRates; ledger/types.ts:101 comment "default 5% (0.05)" is
     stale.
-35. Return Performance "packing on returns" column is undefined and does not
-    match return-kind units (FK 1,188 = 198 units vs 222 return units; AZ 18
-    vs 7; MS 2,472 = 412 vs 416). 8R-1b explains it; column renamed or
-    redefined if needed.
-36. Amazon RTO = 0 in Sep 2026 samples; no RTO signal identified yet; the 15
-    MTR Cancel rows are unexplained (8R-1b task 4).
+35. (replaces earlier text) "Packing on Returns" column removed in 8R-1c
+    (depends on which line carries the dispatch).
+36. Amazon RTO = 0 in Sep 2026; the explanation (no unified row for undelivered
+    returns) is asserted, not shown. 15 MTR Cancel rows: evidence requested in
+    8R-1c task 7.
+37. RTO shipping fee: STATE says RTO loses packing + shipping fees; the
+    return screen showed 0.00 from non-LedgerLine fields. Real shipping sums on
+    rto lines to be reported in 8R-1c task 2, then a decision.
+38. SKU Performance "Return Units" (total 233; TM-ST-002 61) differs from
+    Return Performance customer returns (226; TM-ST-002 67). Definitions to be
+    explained / unified (8R-1c task 6).
+39. ReturnPerformanceScreen used its own settings state pattern and lowercase
+    marketplace keys; moved to parseLedgerSettings in 8R-1c.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -276,10 +292,10 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - None.
 
 ## Last result (11 Nov 2026)
-- 8R-1 SUMMARY reviewed: NOT approved. Return loss and units reconcile with
-  the ledger and the golden units; packing-on-returns column does not
-  reconcile; required greps and assertions missing; no CI or screen
-  screenshot.
-- Issued 8R-1b (read-only). Owner: CI screenshot (expect 272 passed) and
-  Return Performance screenshots (Sep 2026, All Channels and Flipkart).
-- Next: 8R-1b SUMMARY, then close 8 with a full STATE.md.
+- 8R-1b reviewed: NOT approved (CI green #85-#88; screen consistent with the
+  ledger; packing-on-returns undefined, RTO shipping loss shows 0 from
+  invalid fields, typed-literal tests, rate basis mismatch, settings header
+  bug, SKU vs Return units 233 vs 226).
+- Issued 8R-1c. Owner: CI #88 test line (expect 272), Return Performance
+  screenshots after the fix. Owner to answer the dispatched-basis rate
+  question.
