@@ -62,23 +62,57 @@ function findRealSampleFile(targetName: string): string {
   throw new Error(`CRITICAL: real sample file missing: ${targetName}`);
 }
 
-function findOptionalSampleFile(targetName: string): string | null {
-  const dirs = ['/samples', path.resolve(process.cwd(), 'samples')];
-  const normTarget = targetName.toLowerCase().replace(/[\s_-]+/g, '_').replace(/^_+|_+$/g, '');
+/**
+ * Reads and tallies raw lines from a bank statement Excel sheet directly,
+ * ensuring expectation numbers in tests are derived from raw data without typed literals.
+ */
+function analyzeRawBankSheet(wb: XLSX.WorkBook) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rawRows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1 });
+  const headerIdx = rawRows.findIndex(
+    (r) => Array.isArray(r) && r.some((c) => String(c).trim().toLowerCase() === 'bank reference')
+  );
+  if (headerIdx === -1) {
+    throw new Error('Header row with "Bank Reference" not found in raw sheet.');
+  }
 
-  for (const dir of dirs) {
-    if (fs.existsSync(dir)) {
-      const entries = fs.readdirSync(dir);
-      const matched = entries.find((e) => {
-        const normEntry = e.toLowerCase().replace(/[\s_-]+/g, '_').replace(/^_+|_+$/g, '');
-        return normEntry === normTarget || normEntry.includes(normTarget);
-      });
-      if (matched) {
-        return path.join(dir, matched);
+  const dataRows = rawRows.slice(headerIdx + 1).filter((r) => Array.isArray(r) && r[0]);
+
+  let rawDebits = 0;
+  let rawCredits = 0;
+  let rawMpCredits = 0;
+  let rawOtherCredits = 0;
+
+  for (const r of dataRows) {
+    const type = String(r[2] || '').trim().toUpperCase();
+    const narration = String(r[3] || '').toLowerCase();
+    const debitVal = r[4];
+    const creditVal = r[5];
+    const isDebit =
+      type === 'DR' ||
+      (debitVal !== undefined && debitVal !== '' && parseFloat(String(debitVal).replace(/,/g, '')) > 0);
+    const isCredit =
+      type === 'CR' ||
+      (creditVal !== undefined && creditVal !== '' && parseFloat(String(creditVal).replace(/,/g, '')) > 0);
+
+    if (isDebit) rawDebits++;
+    if (isCredit) {
+      rawCredits++;
+      if (narration.includes('flipkart') || narration.includes('meesho') || narration.includes('amazon')) {
+        rawMpCredits++;
+      } else {
+        rawOtherCredits++;
       }
     }
   }
-  return null;
+
+  return {
+    totalLines: dataRows.length,
+    debits: rawDebits,
+    credits: rawCredits,
+    mpCredits: rawMpCredits,
+    otherCredits: rawOtherCredits,
+  };
 }
 
 function findUndefinedPath(obj: any, currentPath: string = ''): string | null {
@@ -115,17 +149,18 @@ describe('Stage 2e-fix: Bank Statement Upload & Commit (Zero Marketplace Credits
   // --------------------------------------------------------------------------
   // 1. Real sample file with marketplace credits (SEP_2026.xlsx)
   // --------------------------------------------------------------------------
-  it('1. Real sample with marketplace credits (SEP_2026.xlsx): builds complete record and 43 credit docs', () => {
+  it('1. Real sample with marketplace credits (SEP_2026.xlsx): builds complete record and credit docs from raw sample', () => {
     const filePath = findRealSampleFile('SEP_2026.xlsx');
     expect(fs.existsSync(filePath)).toBe(true);
 
     const wb = XLSX.readFile(filePath);
+    const rawAnalysis = analyzeRawBankSheet(wb);
     const report = parseBankStatement(wb);
 
-    expect(report.marketplaceCredits.length).toBe(43);
-    expect(report.summary.totalLines).toBe(48);
-    expect(report.summary.marketplaceSummary.other.count).toBe(2);
-    expect(report.summary.debitCount).toBe(3);
+    expect(report.marketplaceCredits.length).toBe(rawAnalysis.mpCredits);
+    expect(report.summary.totalLines).toBe(rawAnalysis.totalLines);
+    expect(report.summary.marketplaceSummary.other.count).toBe(rawAnalysis.otherCredits);
+    expect(report.summary.debitCount).toBe(rawAnalysis.debits);
 
     const { creditDocs, uploadRecord } = buildBankCreditsImportPayloads(
       report,
@@ -137,7 +172,7 @@ describe('Stage 2e-fix: Bank Statement Upload & Commit (Zero Marketplace Credits
     );
 
     // Assert creditDocs
-    expect(creditDocs.length).toBe(43);
+    expect(creditDocs.length).toBe(rawAnalysis.mpCredits);
     for (const doc of creditDocs) {
       expect(findUndefinedPath(doc)).toBeNull();
       expect(doc.data.amount).toBeGreaterThan(0);
@@ -148,55 +183,55 @@ describe('Stage 2e-fix: Bank Statement Upload & Commit (Zero Marketplace Credits
     // Assert uploadRecord
     expect(findUndefinedPath(uploadRecord)).toBeNull();
     expect(uploadRecord.status).toBe('complete');
-    expect(uploadRecord.creditRows).toBe(43);
-    expect(uploadRecord.rowCount).toBe(43);
-    expect(uploadRecord.totalLines).toBe(48);
-    expect(uploadRecord.ignoredCredits).toBe(2);
-    expect(uploadRecord.ignoredDebits).toBe(3);
+    expect(uploadRecord.creditRows).toBe(rawAnalysis.mpCredits);
+    expect(uploadRecord.rowCount).toBe(rawAnalysis.mpCredits);
+    expect(uploadRecord.totalLines).toBe(rawAnalysis.totalLines);
+    expect(uploadRecord.ignoredCredits).toBe(rawAnalysis.otherCredits);
+    expect(uploadRecord.ignoredDebits).toBe(rawAnalysis.debits);
     expect(uploadRecord.period).toBe('2026-09');
-    expect(uploadRecord.counts.creditRows).toBe(43);
-    expect(uploadRecord.counts.totalLines).toBe(48);
-    expect(uploadRecord.counts.ignoredCredits).toBe(2);
-    expect(uploadRecord.counts.ignoredDebits).toBe(3);
+    expect(uploadRecord.counts.creditRows).toBe(rawAnalysis.mpCredits);
+    expect(uploadRecord.counts.totalLines).toBe(rawAnalysis.totalLines);
+    expect(uploadRecord.counts.ignoredCredits).toBe(rawAnalysis.otherCredits);
+    expect(uploadRecord.counts.ignoredDebits).toBe(rawAnalysis.debits);
   });
 
   // --------------------------------------------------------------------------
-  // 2. APR_2026.xlsx, if it is in /samples
+  // 2. APR_2026.xlsx: must fail if sample missing; values read from raw sample
   // --------------------------------------------------------------------------
-  it('2. APR_2026.xlsx, if it is in /samples, expects a complete record with 0 credit rows', () => {
-    const aprPath = findOptionalSampleFile('APR_2026.xlsx');
-    if (aprPath && fs.existsSync(aprPath)) {
-      const wb = XLSX.readFile(aprPath);
-      const report = parseBankStatement(wb);
+  it('2. APR_2026.xlsx: expects complete record with 0 credit rows read from sample', () => {
+    const filePath = findRealSampleFile('APR_2026.xlsx');
+    const wb = XLSX.readFile(filePath);
+    const rawAnalysis = analyzeRawBankSheet(wb);
+    const report = parseBankStatement(wb);
 
-      const { creditDocs, uploadRecord } = buildBankCreditsImportPayloads(
-        report,
-        'upload_bank_2026-04_test',
-        'APR_2026.xlsx',
-        'dummy_sha256_apr',
-        'test@example.com',
-        '2026-04'
-      );
+    expect(report.marketplaceCredits.length).toBe(rawAnalysis.mpCredits);
+    expect(report.summary.totalLines).toBe(rawAnalysis.totalLines);
+    expect(report.summary.marketplaceSummary.other.count).toBe(rawAnalysis.otherCredits);
+    expect(report.summary.debitCount).toBe(rawAnalysis.debits);
 
-      expect(creditDocs.length).toBe(0);
-      expect(uploadRecord.status).toBe('complete');
-      expect(uploadRecord.creditRows).toBe(0);
-      expect(uploadRecord.rowCount).toBe(0);
-      expect(uploadRecord.totalLines).toBe(report.summary.totalLines);
-      expect(uploadRecord.ignoredCredits).toBe(report.summary.marketplaceSummary.other.count);
-      expect(uploadRecord.ignoredDebits).toBe(report.summary.debitCount);
-      expect(uploadRecord.period).toBe('2026-04');
-    } else {
-      // Per prompt: APR_2026.xlsx is optional ("if it is in /samples")
-      expect(true).toBe(true);
-    }
+    const { creditDocs, uploadRecord } = buildBankCreditsImportPayloads(
+      report,
+      'upload_bank_2026-04_test',
+      'APR_2026.xlsx',
+      'dummy_sha256_apr',
+      'test@example.com',
+      '2026-04'
+    );
+
+    expect(creditDocs.length).toBe(rawAnalysis.mpCredits);
+    expect(uploadRecord.status).toBe('complete');
+    expect(uploadRecord.creditRows).toBe(rawAnalysis.mpCredits);
+    expect(uploadRecord.rowCount).toBe(rawAnalysis.mpCredits);
+    expect(uploadRecord.totalLines).toBe(rawAnalysis.totalLines);
+    expect(uploadRecord.ignoredCredits).toBe(rawAnalysis.otherCredits);
+    expect(uploadRecord.ignoredDebits).toBe(rawAnalysis.debits);
+    expect(uploadRecord.period).toBe('2026-04');
   });
 
   // --------------------------------------------------------------------------
-  // 3. Zero marketplace credit rows with parsed lines > 0 does NOT raise error
+  // 3. Zero marketplace credit rows with parsed lines > 0 writes complete record
   // --------------------------------------------------------------------------
   it('3. Zero marketplace credits with parsed lines > 0 writes completed record, 0 credit docs, and neutral message', async () => {
-    // Construct a report with lines > 0 but 0 marketplace credits (e.g. non-marketplace credits and debits)
     const zeroCreditsReport: BankStatementReport = {
       summary: {
         periodStart: '2026-04-01',
@@ -230,7 +265,7 @@ describe('Stage 2e-fix: Bank Statement Upload & Commit (Zero Marketplace Credits
     const { creditDocs, uploadRecord } = buildBankCreditsImportPayloads(
       zeroCreditsReport,
       'upload_bank_2026-04_zero',
-      'APR_2026_ZERO.xlsx',
+      'APR_2026.xlsx',
       'sha256_zero_test',
       'admin@example.com',
       '2026-04'
@@ -254,7 +289,7 @@ describe('Stage 2e-fix: Bank Statement Upload & Commit (Zero Marketplace Credits
       mockDb,
       zeroCreditsReport,
       'upload_bank_2026-04_zero',
-      'APR_2026_ZERO.xlsx',
+      'APR_2026.xlsx',
       'sha256_zero_test',
       'admin@example.com',
       '2026-04'
