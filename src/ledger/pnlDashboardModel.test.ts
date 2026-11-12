@@ -14,7 +14,8 @@ import { parseFirestoreAliases, parseFirestoreCostMaster } from '../components/P
 import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { cleanSku } from '../flipkart/normalizers';
-import { goldenReturnLossRate } from './goldenDispatch';
+import { independentDispatched, goldenReturnLossRate } from './goldenDispatch';
+import { independentReturns } from './returnGolden';
 
 const goldenReturnLossRates = {
   Flipkart: goldenReturnLossRate,
@@ -106,12 +107,16 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       XLSX.readFile(findRealSampleFile('previous_payment'))
     );
 
+    const freightSetting = 5;
+    const packingSetting = 6;
+    const returnLossRate = goldenReturnLossRate;
+
     const ledgerResult = buildLedger({
       settlementMonth: '2026-09',
       aliasMap,
       costLookup: costMasterItems,
       masterCodes,
-      settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRates },
+      settings: { freight: freightSetting, packing: packingSetting, returnLoss: goldenReturnLossRates },
       flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
@@ -122,18 +127,45 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     const ms = ledgerResult.totals.byPlatform.Meesho;
     const totalProfit = ledgerResult.totals.profitAfterTcsTds;
 
+    const refPath = findRealSampleFile('September_2026_Reference_PnL.xlsx');
+    const refWb = XLSX.readFile(refPath);
+    const ws = refWb.Sheets['Summary'];
+
+    const refProfit = {
+      Flipkart: Number(ws['B12'].v),
+      Amazon: Number(ws['C12'].v),
+      Meesho: Number(ws['D12'].v),
+    };
+
+    const refPacking = {
+      Flipkart: Number(ws['B9'].v),
+      Amazon: Number(ws['C9'].v),
+      Meesho: Number(ws['D9'].v),
+    };
+
+    const refSoldUnits = {
+      Flipkart: refPacking.Flipkart / packingSetting,
+      Amazon: refPacking.Amazon / packingSetting,
+      Meesho: refPacking.Meesho / packingSetting,
+    };
+
+    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits;
+    const expectedAz = refProfit.Amazon - (independentDispatched.Amazon - refSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits;
+    const expectedMs = refProfit.Meesho - (independentDispatched.Meesho - refSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits;
+    const expectedTotal = expectedFk + expectedAz + expectedMs;
+
     console.log('\n========================================================================================');
     console.log('PnL DASHBOARD SCREEN DATA MODEL VALUES (Sep 2026):');
-    console.log(`- Flipkart Profit After Tax: ₹${fk.profitAfterTcsTds.toFixed(2)} (Target: ~26,646.46)`);
-    console.log(`- Amazon Profit After Tax: ₹${az.profitAfterTcsTds.toFixed(2)} (Target: ~2,305.65)`);
-    console.log(`- Meesho Profit After Tax: ₹${ms.profitAfterTcsTds.toFixed(2)} (Target: ~18,089.19)`);
-    console.log(`- Consolidated Total Profit After Tax: ₹${totalProfit.toFixed(2)} (Target: ~47,041.30)`);
+    console.log(`- Flipkart Profit After Tax: ₹${fk.profitAfterTcsTds.toFixed(2)} (Expected: ₹${expectedFk.toFixed(2)})`);
+    console.log(`- Amazon Profit After Tax: ₹${az.profitAfterTcsTds.toFixed(2)} (Expected: ₹${expectedAz.toFixed(2)})`);
+    console.log(`- Meesho Profit After Tax: ₹${ms.profitAfterTcsTds.toFixed(2)} (Expected: ₹${expectedMs.toFixed(2)})`);
+    console.log(`- Consolidated Total Profit After Tax: ₹${totalProfit.toFixed(2)} (Expected: ₹${expectedTotal.toFixed(2)})`);
     console.log('========================================================================================\n');
 
-    expect(Math.abs(fk.profitAfterTcsTds - 26646.46)).toBeLessThanOrEqual(1.00);
-    expect(Math.abs(az.profitAfterTcsTds - 2305.65)).toBeLessThanOrEqual(1.00);
-    expect(Math.abs(ms.profitAfterTcsTds - 18089.19)).toBeLessThanOrEqual(1.00);
-    expect(Math.abs(totalProfit - 47041.30)).toBeLessThanOrEqual(1.00);
+    expect(Math.abs(fk.profitAfterTcsTds - expectedFk)).toBeLessThanOrEqual(0.05);
+    expect(Math.abs(az.profitAfterTcsTds - expectedAz)).toBeLessThanOrEqual(0.05);
+    expect(Math.abs(ms.profitAfterTcsTds - expectedMs)).toBeLessThanOrEqual(0.05);
+    expect(Math.abs(totalProfit - expectedTotal)).toBeLessThanOrEqual(0.05);
   });
 
   it('asserts Unresolved SKUs = 0 for Sep 2026 samples when loading aliases through screen parseFirestoreAliases function', () => {
@@ -230,13 +262,17 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       XLSX.readFile(findRealSampleFile('previous_payment'))
     );
 
+    const freightSetting = 5;
+    const packingSetting = 6;
+    const returnLossRate = goldenReturnLossRate;
+
     // 4. Run buildLedger
     const ledgerResult = buildLedger({
       settlementMonth: '2026-09',
       aliasMap,
       costLookup,
       masterCodes,
-      settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRates },
+      settings: { freight: freightSetting, packing: packingSetting, returnLoss: goldenReturnLossRates },
       flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
@@ -247,10 +283,37 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     const ms = ledgerResult.totals.byPlatform.Meesho;
     const totalProfit = ledgerResult.totals.profitAfterTcsTds;
 
-    expect(Math.abs(fk.profitAfterTcsTds - 26646.46)).toBeLessThanOrEqual(1.00);
-    expect(Math.abs(az.profitAfterTcsTds - 2305.65)).toBeLessThanOrEqual(1.00);
-    expect(Math.abs(ms.profitAfterTcsTds - 18089.19)).toBeLessThanOrEqual(1.00);
-    expect(Math.abs(totalProfit - 47041.30)).toBeLessThanOrEqual(1.00);
+    const refPath = findRealSampleFile('September_2026_Reference_PnL.xlsx');
+    const refWb = XLSX.readFile(refPath);
+    const ws = refWb.Sheets['Summary'];
+
+    const refProfit = {
+      Flipkart: Number(ws['B12'].v),
+      Amazon: Number(ws['C12'].v),
+      Meesho: Number(ws['D12'].v),
+    };
+
+    const refPacking = {
+      Flipkart: Number(ws['B9'].v),
+      Amazon: Number(ws['C9'].v),
+      Meesho: Number(ws['D9'].v),
+    };
+
+    const refSoldUnits = {
+      Flipkart: refPacking.Flipkart / packingSetting,
+      Amazon: refPacking.Amazon / packingSetting,
+      Meesho: refPacking.Meesho / packingSetting,
+    };
+
+    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits;
+    const expectedAz = refProfit.Amazon - (independentDispatched.Amazon - refSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits;
+    const expectedMs = refProfit.Meesho - (independentDispatched.Meesho - refSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits;
+    const expectedTotal = expectedFk + expectedAz + expectedMs;
+
+    expect(Math.abs(fk.profitAfterTcsTds - expectedFk)).toBeLessThanOrEqual(0.05);
+    expect(Math.abs(az.profitAfterTcsTds - expectedAz)).toBeLessThanOrEqual(0.05);
+    expect(Math.abs(ms.profitAfterTcsTds - expectedMs)).toBeLessThanOrEqual(0.05);
+    expect(Math.abs(totalProfit - expectedTotal)).toBeLessThanOrEqual(0.05);
     expect(ledgerResult.unresolved.length).toBe(0);
   });
 
