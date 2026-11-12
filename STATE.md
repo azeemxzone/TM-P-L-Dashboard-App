@@ -147,6 +147,8 @@
   in Prompt A-2 and from GitHub by owner 11 Nov. Recoverable from git
   history. Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar);
   GST TCS (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024.
+  * 8R-2a-3b (12 Nov) reviewed, NOT accepted: header filled, but items 1-5 and 8 not pasted. Item 6: 595 units = 594 items (one qty-2 item). Item 7: of the 394 settledRowsWithoutOrderRecord, 356 are Aug orders and 38 Jul orders, 0 Sep, so only Jul and Aug Orders files are needed. 8R-2a-3c (raw re-send) issued.
+  * Owner upload (12 Nov): Orders_July2026.xlsx preview OK (1,981 lines, 100% SKUs mapped) but PARTIAL import 1,980 of 1,981 written for fk_order_items; owner to Retry once. Settled_Transaction_May2026.xlsx rejected ("could not detect a valid Flipkart report format"); May2026_structured.xlsx rejected in the Bank Statement slot (not a bank statement). Neither needed for Sep.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -293,6 +295,8 @@
     files through eval('require') / fs / xlsx in production code: rule is on
     in tests, off in the browser. Remove in 8R-2a-3; rule must use passed-in
     order records only.
+61. Owner uploads Jul and Aug Orders only (356 Aug + 38 Jul of the 394 rows). July import partial (1,980 of 1,981); retry pending. Re-check Sep screens afterwards.
+62. Flipkart Orders_July2026 upload: partial import 1,980 of 1,981 (fk_order_items). Cause unknown; owner Retry once, else send the error.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -327,7 +331,4 @@ ms_batches, ms_uploads. (sku_variants unused.)
   RTO cost = packing only.
 
 ## Last result (12 Nov 2026)
-- 8R-2a-2 reviewed: agent's stop correct; screens still old because no screen
-  passes order data and buildLedger has an eval/fs sample fallback. 8R-2a-3
-  issued. Owner pending: failed-test names from the CI Summary page; new
-  screenshots (Return Performance, P&L Dashboard) after 8R-2a-3.
+- 8R-2a-3b SUMMARY incomplete; 8R-2a-3c issued. Owner: Retry July (1,980/1,981), then upload Aug; send Sep screenshots after; answer whether the Settled May file was meant for the Settled slot.
