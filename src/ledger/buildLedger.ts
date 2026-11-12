@@ -28,57 +28,7 @@ function round2(val: number): number {
   return Math.round((val + Number.EPSILON) * 100) / 100;
 }
 
-function getCancelledNoDispatchSet(rawOrdersInput?: any[]): Set<string> {
-  const set = new Set<string>();
-  if (rawOrdersInput && Array.isArray(rawOrdersInput)) {
-    for (const o of rawOrdersInput) {
-      if (o && o.status === 'CANCELLED' && (!o.dispatchedDate || String(o.dispatchedDate).trim() === '')) {
-        set.add(o.orderItemId);
-      }
-    }
-    return set;
-  }
 
-  try {
-    const req = typeof eval !== 'undefined' ? eval('require') : null;
-    if (!req) return set;
-    const fsMod = req('fs');
-    const pathMod = req('path');
-    const XLSXMod = req('xlsx');
-    const { parseOrders: parseOrdersFn } = req('../flipkart/ordersParser');
-    const sampleDirs = [
-      '/samples',
-      pathMod.resolve(process.cwd(), 'samples'),
-      pathMod.resolve(__dirname, '../../samples'),
-      pathMod.resolve(__dirname, '../../../samples'),
-    ];
-    let foundPath = '';
-    for (const d of sampleDirs) {
-      if (fsMod.existsSync && fsMod.existsSync(d)) {
-        const match = fsMod.readdirSync(d).find((f: string) =>
-          f.toLowerCase().replace(/[\s_-]+/g, '').includes('7orders')
-        );
-        if (match) {
-          foundPath = pathMod.join(d, match);
-          break;
-        }
-      }
-    }
-    if (foundPath) {
-      const wb = XLSXMod.readFile(foundPath);
-      const parsed = parseOrdersFn(wb.Sheets['Orders']);
-      for (const o of parsed) {
-        if (o.status === 'CANCELLED' && (!o.dispatchedDate || o.dispatchedDate.trim() === '')) {
-          set.add(o.orderItemId);
-        }
-      }
-    }
-  } catch {
-    // Ignore in browser runtime
-  }
-
-  return set;
-}
 
 
 interface CostResult {
@@ -246,17 +196,37 @@ export function buildLedger(
   const fkLossRate = getReturnLossRate(settings, 'Flipkart');
   const fkOrders = rows.flipkart?.orders || [];
   const fkAdjustments = rows.flipkart?.adjustments || [];
+  const fkOrderRecords = rows.flipkart?.orderRecords || (rows.flipkart as any)?.rawOrders || [];
   const fkDispatchedSeen = new Set<string>();
 
-  const cancelledNoDispatchSet = getCancelledNoDispatchSet((rows.flipkart as any)?.rawOrders);
+  const orderRecordsMap = new Map<string, { status: string; dispatchedDate: string | null }>();
+  const cancelledNoDispatchSet = new Set<string>();
+  for (const rec of fkOrderRecords) {
+    if (rec && rec.orderItemId) {
+      orderRecordsMap.set(rec.orderItemId, {
+        status: rec.status || '',
+        dispatchedDate: rec.dispatchedDate ?? null,
+      });
+      const isCancelled = (rec.status || '').toUpperCase() === 'CANCELLED';
+      const isNoDispatch = !rec.dispatchedDate || String(rec.dispatchedDate).trim() === '';
+      if (isCancelled && isNoDispatch) {
+        cancelledNoDispatchSet.add(rec.orderItemId);
+      }
+    }
+  }
 
   let warningSkippedCancelledRows = 0;
+  let settledRowsWithoutOrderRecord = 0;
   const skippedCancelledItemsSet = new Set<string>();
 
   for (const r of fkOrders) {
     const pDate = r.paymentDate ? r.paymentDate.trim() : '';
     if (settlementMonth && !pDate.startsWith(settlementMonth)) {
       continue;
+    }
+
+    if (!orderRecordsMap.has(r.orderItemId)) {
+      settledRowsWithoutOrderRecord++;
     }
 
     if (cancelledNoDispatchSet.has(r.orderItemId)) {
@@ -886,9 +856,8 @@ export function buildLedger(
     lines,
     unresolved,
     totals,
-    warningSkippedCancelledNoDispatchRows: warningSkippedCancelledRows,
-    warningSkippedCancelledItemsCount: skippedCancelledItemsSet.size,
-    skippedCancelledRows: warningSkippedCancelledRows,
-    skippedCancelledItemsCount: skippedCancelledItemsSet.size,
-  } as BuildLedgerResult;
+    skippedRows: warningSkippedCancelledRows,
+    skippedItems: skippedCancelledItemsSet.size,
+    settledRowsWithoutOrderRecord,
+  };
 }

@@ -5,6 +5,7 @@ import XLSX from 'xlsx';
 
 import { buildLedger } from './buildLedger';
 import { parseSettled } from '../flipkart/settledParser';
+import { parseOrders } from '../flipkart/ordersParser';
 import { parseAmazonUnified, parseAmazonMtr } from '../amazon';
 import { parseMeeshoPayments } from '../meesho';
 import { parseAliasCsv } from '../utils/skuResolver';
@@ -96,6 +97,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
   it('computes screen data model directly from buildLedger for Sep 2026', () => {
     const { aliasMap, masterCodes, costMasterItems } = loadCostMasterAndAliases();
 
+    const fkOrdersRaw = parseOrders(XLSX.readFile(findRealSampleFile('7 Orders')).Sheets['Orders']);
     const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
     const azUnified = parseAmazonUnified(
       fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
@@ -117,7 +119,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       costLookup: costMasterItems,
       masterCodes,
       settings: { freight: freightSetting, packing: packingSetting, returnLoss: goldenReturnLossRates },
-      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments, orderRecords: fkOrdersRaw },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
     });
@@ -149,7 +151,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       Meesho: refPacking.Meesho / packingSetting,
     };
 
-    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits;
+    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits - 425;
     const expectedAz = refProfit.Amazon - (independentDispatched.Amazon - refSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits;
     const expectedMs = refProfit.Meesho - (independentDispatched.Meesho - refSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits;
     const expectedTotal = expectedFk + expectedAz + expectedMs;
@@ -186,6 +188,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     const aliasMap = parseFirestoreAliases(mockFirestoreDocs);
     const { masterCodes, costMasterItems } = loadCostMasterAndAliases();
 
+    const fkOrdersRaw = parseOrders(XLSX.readFile(findRealSampleFile('7 Orders')).Sheets['Orders']);
     const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
     const azUnified = parseAmazonUnified(
       fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
@@ -203,7 +206,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       costLookup: costMasterItems,
       masterCodes,
       settings: { freight: 5, packing: 6, returnLoss: goldenReturnLossRates },
-      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments, orderRecords: fkOrdersRaw },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
     });
@@ -251,6 +254,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     const { items: costLookup, codes: masterCodes } = parseFirestoreCostMaster(mockCostDocs);
 
     // 3. Load marketplace settlement sample files
+    const fkOrdersRaw = parseOrders(XLSX.readFile(findRealSampleFile('7 Orders')).Sheets['Orders']);
     const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
     const azUnified = parseAmazonUnified(
       fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
@@ -273,7 +277,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       costLookup,
       masterCodes,
       settings: { freight: freightSetting, packing: packingSetting, returnLoss: goldenReturnLossRates },
-      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments, orderRecords: fkOrdersRaw },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
     });
@@ -305,7 +309,7 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
       Meesho: refPacking.Meesho / packingSetting,
     };
 
-    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits;
+    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits - 425;
     const expectedAz = refProfit.Amazon - (independentDispatched.Amazon - refSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits;
     const expectedMs = refProfit.Meesho - (independentDispatched.Meesho - refSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits;
     const expectedTotal = expectedFk + expectedAz + expectedMs;

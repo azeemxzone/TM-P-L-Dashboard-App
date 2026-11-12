@@ -13,6 +13,7 @@ import XLSX from 'xlsx';
 import { buildLedger } from './buildLedger';
 import { groupLedgerBySku } from './skuGrouping';
 import { groupLedgerReturns } from './returnGrouping';
+import { parseOrders } from '../flipkart/ordersParser';
 import { parseSettled } from '../flipkart/settledParser';
 import { parseAmazonUnified, parseAmazonMtr } from '../amazon';
 import { parseMeeshoPayments } from '../meesho';
@@ -94,6 +95,7 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
   it('groups buildLedger lines by SKU and matches buildLedger totals per platform and total', () => {
     const { aliasMap, masterCodes, costMasterItems } = loadCostMasterAndAliases();
 
+    const fkOrdersRaw = parseOrders(XLSX.readFile(findRealSampleFile('7 Orders')).Sheets['Orders']);
     const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
     const azUnified = parseAmazonUnified(
       fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
@@ -118,7 +120,7 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
           Meesho: goldenReturnLossRate,
         },
       },
-      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments, orderRecords: fkOrdersRaw },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
     });
@@ -161,6 +163,7 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
   it('both groupings give identical customer-return and RTO totals per marketplace', () => {
     const { aliasMap, costMasterItems } = loadCostMasterAndAliases();
 
+    const fkOrdersRaw = parseOrders(XLSX.readFile(findRealSampleFile('7 Orders')).Sheets['Orders']);
     const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
     const azUnified = parseAmazonUnified(
       fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
@@ -186,7 +189,7 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
           Meesho: goldenReturnLossRate,
         },
       },
-      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments, orderRecords: fkOrdersRaw },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msReport.payments, ads: msReport.ads },
     });

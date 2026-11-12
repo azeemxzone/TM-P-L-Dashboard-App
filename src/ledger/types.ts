@@ -107,10 +107,17 @@ export type CostLookup =
   | Map<string, number>
   | Record<string, number>;
 
+export interface FlipkartOrderRecord {
+  orderItemId: string;
+  status: string;
+  dispatchedDate: string | null;
+}
+
 export interface PlatformRowsInput {
   flipkart?: {
     orders?: FlipkartSettledOrderRow[];
     adjustments?: FlipkartAdjustmentRow[];
+    orderRecords?: FlipkartOrderRecord[];
   };
   amazon?: {
     unifiedRows?: AmazonUnifiedRow[];
@@ -135,4 +142,7 @@ export interface BuildLedgerResult {
   lines: LedgerLine[];
   unresolved: UnresolvedSku[];
   totals: LedgerTotals;
+  skippedRows: number;
+  skippedItems: number;
+  settledRowsWithoutOrderRecord: number;
 }

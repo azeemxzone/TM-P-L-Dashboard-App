@@ -72,6 +72,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
 
   const [fkOrders, setFkOrders] = useState<any[]>([]);
   const [fkAdjustments, setFkAdjustments] = useState<any[]>([]);
+  const [fkOrderItems, setFkOrderItems] = useState<any[]>([]);
   const [azUnified, setAzUnified] = useState<any[]>([]);
   const [azMtr, setAzMtr] = useState<any[]>([]);
   const [msPayments, setMsPayments] = useState<any[]>([]);
@@ -150,6 +151,16 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
       (err) => setQueryError({ code: err.code, collection: 'fk_adjustments' })
     );
 
+    const unsubFkOrderItems = onSnapshot(
+      collection(db, 'fk_order_items'),
+      (snap) => {
+        const list: any[] = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+        setFkOrderItems(list);
+      },
+      (err) => setQueryError({ code: err.code, collection: 'fk_order_items' })
+    );
+
     const unsubAzTx = onSnapshot(
       collection(db, 'az_transactions'),
       (snap) => {
@@ -193,6 +204,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
     return () => {
       unsubFkSettled();
       unsubFkAdjs();
+      unsubFkOrderItems();
       unsubAzTx();
       unsubAzMtr();
       unsubMsPayments();
@@ -243,7 +255,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
       costLookup,
       masterCodes,
       settings: ledgerSettings,
-      flipkart: { orders: fkOrders, adjustments: fkAdjustments },
+      flipkart: { orders: fkOrders, adjustments: fkAdjustments, orderRecords: fkOrderItems },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msPayments, ads: msAds },
     });
@@ -255,6 +267,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
     ledgerSettings,
     fkOrders,
     fkAdjustments,
+    fkOrderItems,
     azUnified,
     azMtr,
     msPayments,

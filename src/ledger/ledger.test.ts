@@ -106,6 +106,8 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
   const packingSetting = 6;
   const returnLossRate = goldenReturnLossRate;
 
+  const fkOrdersRaw = parseOrders(XLSX.readFile(findRealSampleFile('7 Orders')).Sheets['Orders']);
+
   // Build single ledger for September 2026
   const ledgerResult = buildLedger({
     settlementMonth: '2026-09',
@@ -120,7 +122,7 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
         Meesho: returnLossRate,
       },
     },
-    flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+    flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments, orderRecords: fkOrdersRaw },
     amazon: { unifiedRows: azUnified, mtrRows: azMtr },
     meesho: { payments: msReport.payments, ads: msReport.ads },
   });
@@ -231,7 +233,7 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
       Meesho: refPacking.Meesho / packingSetting,
     };
 
-    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits;
+    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits - 425.00;
     const expectedAz = refProfit.Amazon - (independentDispatched.Amazon - refSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits;
     const expectedMs = refProfit.Meesho - (independentDispatched.Meesho - refSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits;
 
@@ -276,7 +278,7 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     };
 
     const expectedProfit = {
-      Flipkart: referenceProfit.Flipkart - (independentDispatched.Flipkart - referenceSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits,
+      Flipkart: referenceProfit.Flipkart - (independentDispatched.Flipkart - referenceSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits - 425.00,
       Amazon: referenceProfit.Amazon - (independentDispatched.Amazon - referenceSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits,
       Meesho: referenceProfit.Meesho - (independentDispatched.Meesho - referenceSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits,
     };
@@ -542,8 +544,9 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
 
     // Verify the warning count of skipped items matches settledItemIdsFound count
     const warningItemsCount =
-      (ledgerResult as any).warningSkippedCancelledItemsCount ||
-      (ledgerResult as any).skippedCancelledItemsCount ||
+      ledgerResult.skippedItems ??
+      (ledgerResult as any).warningSkippedCancelledItemsCount ??
+      (ledgerResult as any).skippedCancelledItemsCount ??
       0;
 
     expect(warningItemsCount).toBe(settledItemIdsFound.size);

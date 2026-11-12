@@ -125,6 +125,7 @@ export const PnLDashboardScreen: React.FC = () => {
 
   const [fkOrders, setFkOrders] = useState<any[]>([]);
   const [fkAdjustments, setFkAdjustments] = useState<any[]>([]);
+  const [fkOrderItems, setFkOrderItems] = useState<any[]>([]);
   const [azUnified, setAzUnified] = useState<any[]>([]);
   const [azMtr, setAzMtr] = useState<any[]>([]);
   const [msPayments, setMsPayments] = useState<any[]>([]);
@@ -192,6 +193,16 @@ export const PnLDashboardScreen: React.FC = () => {
       (err) => setQueryError({ code: err.code, collection: 'fk_adjustments' })
     );
 
+    const unsubFkOrderItems = onSnapshot(
+      collection(db, 'fk_order_items'),
+      (snap) => {
+        const list: any[] = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+        setFkOrderItems(list);
+      },
+      (err) => setQueryError({ code: err.code, collection: 'fk_order_items' })
+    );
+
     const unsubAzTx = onSnapshot(
       collection(db, 'az_transactions'),
       (snap) => {
@@ -238,6 +249,7 @@ export const PnLDashboardScreen: React.FC = () => {
       unsubCostMaster();
       unsubFkSettled();
       unsubFkAdjs();
+      unsubFkOrderItems();
       unsubAzTx();
       unsubAzMtr();
       unsubMsPayments();
@@ -256,11 +268,11 @@ export const PnLDashboardScreen: React.FC = () => {
       costLookup,
       masterCodes,
       settings: settingsState.settings,
-      flipkart: { orders: fkOrders, adjustments: fkAdjustments },
+      flipkart: { orders: fkOrders, adjustments: fkAdjustments, orderRecords: fkOrderItems },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msPayments, ads: msAds },
     });
-  }, [selectedMonth, aliasMap, costLookup, masterCodes, settingsState, fkOrders, fkAdjustments, azUnified, azMtr, msPayments, msAds]);
+  }, [selectedMonth, aliasMap, costLookup, masterCodes, settingsState, fkOrders, fkAdjustments, fkOrderItems, azUnified, azMtr, msPayments, msAds]);
 
   const totals = ledgerResult?.totals;
   const ledgerUnresolved = ledgerResult?.unresolved || [];

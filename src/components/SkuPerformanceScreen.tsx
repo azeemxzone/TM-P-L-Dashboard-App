@@ -67,6 +67,7 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
 
   const [fkOrders, setFkOrders] = useState<any[]>([]);
   const [fkAdjustments, setFkAdjustments] = useState<any[]>([]);
+  const [fkOrderItems, setFkOrderItems] = useState<any[]>([]);
   const [azUnified, setAzUnified] = useState<any[]>([]);
   const [azMtr, setAzMtr] = useState<any[]>([]);
   const [msPayments, setMsPayments] = useState<any[]>([]);
@@ -134,6 +135,12 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       setFkAdjustments(list);
     });
 
+    const unsubFkOrderItems = onSnapshot(collection(db, 'fk_order_items'), (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setFkOrderItems(list);
+    });
+
     const unsubAzTx = onSnapshot(collection(db, 'az_transactions'), (snap) => {
       const list: any[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
@@ -162,6 +169,7 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     return () => {
       unsubFkSettled();
       unsubFkAdjs();
+      unsubFkOrderItems();
       unsubAzTx();
       unsubAzMtr();
       unsubMsPayments();
@@ -214,11 +222,11 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       costLookup,
       masterCodes,
       settings: ledgerSettings,
-      flipkart: { orders: fkOrders, adjustments: fkAdjustments },
+      flipkart: { orders: fkOrders, adjustments: fkAdjustments, orderRecords: fkOrderItems },
       amazon: { unifiedRows: azUnified, mtrRows: azMtr },
       meesho: { payments: msPayments, ads: msAds },
     });
-  }, [selectedMonth, aliasMap, costLookup, masterCodes, ledgerSettings, fkOrders, fkAdjustments, azUnified, azMtr, msPayments, msAds]);
+  }, [selectedMonth, aliasMap, costLookup, masterCodes, ledgerSettings, fkOrders, fkAdjustments, fkOrderItems, azUnified, azMtr, msPayments, msAds]);
 
   // SKU Grouping via groupLedgerBySku
   const groupingResult = useMemo(() => {
