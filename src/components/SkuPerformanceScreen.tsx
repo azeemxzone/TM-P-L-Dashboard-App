@@ -479,6 +479,20 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
         </div>
       </div>
 
+      {/* Cancelled / Missing Order Records Warning Banner */}
+      {ledgerResult && ((ledgerResult.skippedRows ?? 0) > 0 || (ledgerResult.settledRowsWithoutOrderRecord ?? 0) > 0) && (
+        <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 flex items-center justify-between text-xs text-amber-800 dark:text-amber-200">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <span>
+              {(ledgerResult.skippedRows ?? 0) > 0 && `Skipped cancelled-no-dispatch rows: ${ledgerResult.skippedRows} (items: ${ledgerResult.skippedItems})`}
+              {(ledgerResult.skippedRows ?? 0) > 0 && (ledgerResult.settledRowsWithoutOrderRecord ?? 0) > 0 && ' | '}
+              {(ledgerResult.settledRowsWithoutOrderRecord ?? 0) > 0 && `Settled rows without order record: ${ledgerResult.settledRowsWithoutOrderRecord}`}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Query Error Warning Banner with Code, Collection, & Retry */}
       {queryError && (
         <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 flex items-center justify-between gap-4">

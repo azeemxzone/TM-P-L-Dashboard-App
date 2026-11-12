@@ -108,6 +108,36 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
 
   const fkOrdersRaw = parseOrders(XLSX.readFile(findRealSampleFile('7 Orders')).Sheets['Orders']);
 
+  // Compute the skipped-rows amount independently from the raw Flipkart Settled Transaction sample
+  // by reading the sample rows whose order item id is cancelled with no dispatch date in the Orders sample.
+  const independentCancelledNoDispatch = new Set(
+    fkOrdersRaw
+      .filter((o) => (o.status || '').toUpperCase() === 'CANCELLED' && (!o.dispatchedDate || String(o.dispatchedDate).trim() === ''))
+      .map((o) => o.orderItemId)
+  );
+
+  // Sign logic: In the reference workbook (Summary B12), after-tax profit is:
+  //   Profit = Net Settlement - Product Cost - Packing - Return Loss + TCS + TDS
+  // For refund/RTO rows, the reference logic booked negative units and negative product cost (-landedCost * qty).
+  // In the profit equation, subtracting a negative product cost effectively credited profit (+425).
+  // Because these items were cancelled before dispatch, they were never dispatched and must incur no product cost.
+  // Skipping these rows removes the 425 credit from profit.
+  // Hence, the adjustment to reference profit is:
+  //   + sum(signedUnits * landedCostToUse) = (-235 + 165 - 165 - 190) = -425
+  let independentSkippedRowsCostAdjustment = 0;
+  for (const r of fkReport.orders) {
+    const pDate = r.paymentDate ? r.paymentDate.trim() : '';
+    if (!pDate.startsWith('2026-09')) continue;
+    if (!independentCancelledNoDispatch.has(r.orderItemId)) continue;
+
+    const isRefund = r.refund !== 0;
+    const signedUnits = isRefund ? -r.qty : r.qty;
+    const resolvedMaster = r.sellerSku ? resolveMasterSku(r.sellerSku, masterCodes, aliasMap) : null;
+    const costItem = costMasterItems.find((c) => c.sku_code === resolvedMaster);
+    const landedCost = (costItem?.mfg_cost || 0) + freightSetting;
+    independentSkippedRowsCostAdjustment += signedUnits * landedCost;
+  }
+
   // Build single ledger for September 2026
   const ledgerResult = buildLedger({
     settlementMonth: '2026-09',
@@ -199,11 +229,11 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     console.log('1. REFERENCE WORKBOOK CELL MAPPINGS & VALUES (Summary B5:D16)');
     console.log('========================================================================================');
     console.table([
-      { Metric: 'Packing', FlipkartCell: 'B9 (2772)', AmazonCell: 'C9 (192)', MeeshoCell: 'D9 (5862)' },
-      { Metric: 'Profit After Tax', FlipkartCell: 'B12 (27462.47)', AmazonCell: 'C12 (2323.65)', MeeshoCell: 'D12 (18089.19)' },
-      { Metric: 'TCS (Tax Credit)', FlipkartCell: 'B13 (-286.67)', AmazonCell: 'C13 (-36.64)', MeeshoCell: 'D13 (-687.20)' },
-      { Metric: 'TDS (Tax Credit)', FlipkartCell: 'B14 (-2866.54)', AmazonCell: 'C14 (0.00)', MeeshoCell: 'D14 (-137.29)' },
-      { Metric: 'Net Units Sold', FlipkartCell: 'B6 (240)', AmazonCell: 'C6 (25)', MeeshoCell: 'D6 (561)' },
+      { Metric: 'Packing', FlipkartCell: `B9 (${ref.Flipkart.packing})`, AmazonCell: `C9 (${ref.Amazon.packing})`, MeeshoCell: `D9 (${ref.Meesho.packing})` },
+      { Metric: 'Profit After Tax', FlipkartCell: `B12 (${ref.Flipkart.profit})`, AmazonCell: `C12 (${ref.Amazon.profit})`, MeeshoCell: `D12 (${ref.Meesho.profit})` },
+      { Metric: 'TCS (Tax Credit)', FlipkartCell: `B13 (${ref.Flipkart.tcs})`, AmazonCell: `C13 (${ref.Amazon.tcs})`, MeeshoCell: `D13 (${ref.Meesho.tcs})` },
+      { Metric: 'TDS (Tax Credit)', FlipkartCell: `B14 (${ref.Flipkart.tds})`, AmazonCell: `C14 (${ref.Amazon.tds})`, MeeshoCell: `D14 (${ref.Meesho.tds})` },
+      { Metric: 'Net Units Sold', FlipkartCell: `B6 (${ref.Flipkart.netUnits})`, AmazonCell: `C6 (${ref.Amazon.netUnits})`, MeeshoCell: `D6 (${ref.Meesho.netUnits})` },
     ]);
   });
 
@@ -233,7 +263,7 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
       Meesho: refPacking.Meesho / packingSetting,
     };
 
-    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits - 425.00;
+    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits + independentSkippedRowsCostAdjustment;
     const expectedAz = refProfit.Amazon - (independentDispatched.Amazon - refSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits;
     const expectedMs = refProfit.Meesho - (independentDispatched.Meesho - refSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits;
 
@@ -266,19 +296,19 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     };
 
     const referenceSoldUnits = {
-      Flipkart: referencePacking.Flipkart / packingSetting, // 2772 / 6 = 462
-      Amazon: referencePacking.Amazon / packingSetting,     // 192 / 6 = 32
-      Meesho: referencePacking.Meesho / packingSetting,     // 5862 / 6 = 977
+      Flipkart: referencePacking.Flipkart / packingSetting,
+      Amazon: referencePacking.Amazon / packingSetting,
+      Meesho: referencePacking.Meesho / packingSetting,
     };
 
     const referenceProfit = {
-      Flipkart: Number(ws['B12'].v), // 27462.47
-      Amazon: Number(ws['C12'].v),   // 2323.65
-      Meesho: Number(ws['D12'].v),   // 18089.19
+      Flipkart: Number(ws['B12'].v),
+      Amazon: Number(ws['C12'].v),
+      Meesho: Number(ws['D12'].v),
     };
 
     const expectedProfit = {
-      Flipkart: referenceProfit.Flipkart - (independentDispatched.Flipkart - referenceSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits - 425.00,
+      Flipkart: referenceProfit.Flipkart - (independentDispatched.Flipkart - referenceSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits + independentSkippedRowsCostAdjustment,
       Amazon: referenceProfit.Amazon - (independentDispatched.Amazon - referenceSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits,
       Meesho: referenceProfit.Meesho - (independentDispatched.Meesho - referenceSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits,
     };

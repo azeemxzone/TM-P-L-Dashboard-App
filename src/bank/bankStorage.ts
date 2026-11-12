@@ -18,6 +18,7 @@ export interface BankUploadCommitResult {
   totalMarketplaceCredits: number;
   writtenCount: number;
   uploadId: string;
+  message?: string;
   error?: string;
 }
 
@@ -55,6 +56,10 @@ export function buildBankCreditsImportPayloads(
     }),
   }));
 
+  const totalLines = report.summary?.totalLines ?? report.allRows?.length ?? 0;
+  const ignoredCredits = report.summary?.marketplaceSummary?.other?.count ?? 0;
+  const ignoredDebits = report.summary?.debitCount ?? 0;
+
   const uploadRecord = stripUndefined({
     id: uploadId,
     uploadId,
@@ -63,7 +68,11 @@ export function buildBankCreditsImportPayloads(
     fileSha256,
     sha256: fileSha256,
     period: selectedMonth,
+    creditRows: credits.length,
     rowCount: credits.length,
+    totalLines,
+    ignoredCredits,
+    ignoredDebits,
     status: 'complete',
     date: todayDate,
     user: userEmail,
@@ -72,20 +81,26 @@ export function buildBankCreditsImportPayloads(
     counts: {
       total: credits.length,
       valid: credits.length,
+      creditRows: credits.length,
+      totalLines,
+      ignoredCredits,
+      ignoredDebits,
       statusCounts: {},
       returnTypeCounts: { courier: 0, customer: 0 },
       batchesCount: 0,
       storedCounts: { bank_credits: credits.length },
     },
     details: {
-      totalLines: report.summary.totalLines,
-      flipkartCount: report.summary.marketplaceSummary.flipkart.count,
-      flipkartTotal: report.summary.marketplaceSummary.flipkart.total,
-      meeshoCount: report.summary.marketplaceSummary.meesho.count,
-      meeshoTotal: report.summary.marketplaceSummary.meesho.total,
-      amazonCount: report.summary.marketplaceSummary.amazon.count,
-      amazonTotal: report.summary.marketplaceSummary.amazon.total,
-      otherCount: report.summary.marketplaceSummary.other.count,
+      totalLines,
+      ignoredCredits,
+      ignoredDebits,
+      flipkartCount: report.summary?.marketplaceSummary?.flipkart?.count ?? 0,
+      flipkartTotal: report.summary?.marketplaceSummary?.flipkart?.total ?? 0,
+      meeshoCount: report.summary?.marketplaceSummary?.meesho?.count ?? 0,
+      meeshoTotal: report.summary?.marketplaceSummary?.meesho?.total ?? 0,
+      amazonCount: report.summary?.marketplaceSummary?.amazon?.count ?? 0,
+      amazonTotal: report.summary?.marketplaceSummary?.amazon?.total ?? 0,
+      otherCount: ignoredCredits,
     },
   });
 
@@ -98,6 +113,8 @@ export function buildBankCreditsImportPayloads(
  * Verified writes with BATCH_SIZE = 400.
  * Verifies count via getCountFromServer before creating the completed upload audit record.
  * Supports retry without re-writing already verified batches.
+ * When parsed lines > 0 and marketplace credit rows = 0: writes completed upload record with creditRows = 0 and no bank_credits docs.
+ * Throws only when file has 0 parseable lines or an unreadable header.
  */
 export async function commitBankCreditsImport(
   db: Firestore,
@@ -110,12 +127,14 @@ export async function commitBankCreditsImport(
 ): Promise<BankUploadCommitResult> {
   const credits = report.marketplaceCredits;
   const totalCredits = credits.length;
+  const totalLines = report.summary?.totalLines ?? report.allRows?.length ?? 0;
 
-  if (totalCredits === 0) {
-    throw new Error('No marketplace credits (Flipkart, Meesho, Amazon) found to store.');
+  // 3. Keep the error only when the file has 0 parseable lines or an unreadable header
+  if (totalLines === 0) {
+    throw new Error('No parseable lines found in bank statement.');
   }
 
-  // 1. Check SHA-256 duplicate (only complete uploads count)
+  // 1. Check SHA-256 duplicate (only complete uploads count) - Keep the SHA-256 guard
   const dupQ = query(
     collection(db, 'fk_uploads'),
     where('fileSha256', '==', fileSha256),
@@ -137,6 +156,31 @@ export async function commitBankCreditsImport(
     userEmail,
     selectedMonth
   );
+
+  const ignoredCredits = report.summary?.marketplaceSummary?.other?.count ?? 0;
+  const ignoredDebits = report.summary?.debitCount ?? 0;
+  const ignoredOtherLines = ignoredCredits + ignoredDebits;
+  const neutralMessage = totalCredits === 0
+    ? `0 marketplace credits found; ${ignoredOtherLines} other lines ignored (not stored)`
+    : `${totalCredits} marketplace credits found; ${ignoredOtherLines} other lines ignored (not stored)`;
+
+  // 2. When parsed lines > 0 and marketplace credit rows = 0: do not raise error, write no bank_credits documents, write upload record as complete
+  if (totalCredits === 0) {
+    const uploadDocRef = doc(collection(db, 'fk_uploads'), uploadId);
+    try {
+      await setDoc(uploadDocRef, stripUndefined(uploadRecord));
+    } catch (err: any) {
+      throw new Error(`Data verified, but failed to create upload record for bank statement (${uploadId}): ${err.message}`);
+    }
+
+    return {
+      success: true,
+      totalMarketplaceCredits: 0,
+      writtenCount: 0,
+      uploadId,
+      message: neutralMessage,
+    };
+  }
 
   const creditsCollection = collection(db, 'bank_credits');
 
