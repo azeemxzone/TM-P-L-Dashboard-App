@@ -117,8 +117,12 @@
     after sort screenshot. Screens seen: Return Performance Sep totals
     1,610 / 226 / 419 / 1,579.70 unchanged; SKU Name column and sort headers
     visible.
-  * 8R-2c ISSUED: return loss on LANDED cost; read-only checks first (golden
-    reference basis, sku_name fallback in screens).
+  * 8R-2c audit (12 Nov): agent stopped correctly. Reference workbook return
+    loss uses MFG cost (Flipkart!K5 = G5 x rate), golden tests assert typed
+    literals (ledger.test.ts:203-209, 225-227) and test 6 compares to reference
+    profit. 8R-2c-2 ISSUED: edit buildLedger.ts + ledger.test.ts only; return loss
+    on landed cost; golden expected = reference cell - packing delta - rate x freight
+    x independent customer-return units; typed literals removed.
   * Queue: 8R-2a (Flipkart cancelled-before-dispatch fix + golden), 8R-1f
     (Amazon MTR Cancel evidence, read-only), 8R-3 (Non-SKU split by
     marketplace/type, tested against raw sums), then close Stage 8.
@@ -263,11 +267,8 @@
 48. Meesho return lines: ledger units 0, helper counts 1 (returnUnits.ts).
     Returns Qty is 1 on all rows so numbers are right, but hidden fallback;
     real fix later (line carries source qty).
-50. Screens' cost_master parse may fall back sku_name to the SKU code
-    (parseFirestoreCostMaster in PnLDashboardScreen: sku_name || code);
-    8R-2c step A3 checks the two ledger screens.
-51. Return loss in code uses mfg cost. OWNER AGREED 12 Nov: landed. Built in
-    8R-2c; golden reference basis checked first.
+50. RESOLVED for SkuPerformanceScreen/ReturnPerformanceScreen (8R-2c A3): sku_name has no fallback to the code ("-" shown). PnLDashboardScreen parseFirestoreCostMaster still has sku_name || code (not displayed).
+51. Return loss code uses mfg cost; reference workbook also uses mfg (K5 = G5 x rate). OWNER AGREED landed 12 Nov. 8R-2c-2 changes the code and re-bases the golden test (typed literals removed).
 52. 8R-1d D and 8R-1e D disagree on Amazon non-SKU rows (SAFE-T 90.01 vs
     105.55; Debt -171.12 vs +-64.90; Service Fee -293.82 vs 0.00; FBA storage
     -78.69 vs -25.38). Only the -7,047.78 total foots. 8R-3 must test against
@@ -275,6 +276,7 @@
 53. skuGrouping.test.ts:138 compares totals.profitBeforeTax with
     profitAfterTcsTds (naming mismatch); tests use structural literals
     (toBe(3), toBe(true)): accepted.
+54. Typed financial literals in ledger.test.ts (203-209: 2772/192/5862, 27462.47/2323.65/18089.19; 225-227: 26646.46/2305.65/18089.19) violate the no-typed-numbers rule; removed in 8R-2c-2.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -309,6 +311,4 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - DECIDED: return loss = 5% provision, landed cost, customer returns only.
 
 ## Last result (12 Nov 2026)
-- 8R-2 SUMMARY reviewed: code accepted; evidence pending (push + CI 18/275,
-  SKU Performance TOTAL row, pinned rows after sort, CI #98 line). 8R-2c
-  issued. Owner question: confirm RTO = packing only.
+- 8R-2c audit accepted (STOP was correct). 8R-2c-2 issued. Pending owner evidence: CI line (expect 18/275), SKU Performance TOTAL row screenshot, pinned rows after sort. Still open: RTO = packing only (defect 37).
