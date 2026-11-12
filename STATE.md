@@ -20,12 +20,14 @@
 - Packing per DISPATCHED unit (sold, customer return, RTO, replacement).
   OWNER CONFIRMED 6 Nov 2026. Reference workbook charges sold units only;
   the ledger intentionally differs. Orders cancelled BEFORE dispatch never
-  count as dispatched (owner, 11 Nov; Flipkart bug open, defect 46).
+  count as dispatched (owner, 11 Nov). Flipkart rule: Orders file status
+  CANCELLED + empty dispatched_date = never dispatched; its settled rows
+  (all-zero money, verified) are skipped (defect 46, 8R-2a/8R-2a-3).
 - Return loss: OWNER CONFIRMED 11-12 Nov: editable % (per marketplace) x
   LANDED product cost x customer-returned units (provision that % of returned
-  units is not sellable). Code still uses mfg cost until 8R-2c (defect 51).
-  RTO = packing only (shipping loss is 0 in settlement; owner to confirm,
-  defect 37). Claims (SPF, SAFE-T) count when credited. No actual-loss method
+  units is not sellable). Built in 8R-2c-2. RTO = packing only: OWNER
+  CONFIRMED 12 Nov (settlement carries 0 shipping loss on FK and MS RTO
+  lines). Claims (SPF, SAFE-T) count when credited. No actual-loss method
   possible (Flipkart final_condition empty on 204/204 rows, Amazon no
   condition field, Meesho reasons only).
 - Rates on Return Performance are on DISPATCHED units (owner accepted
@@ -44,6 +46,7 @@
 - No default cost, no estimates, no fallbacks. Unknown SKU, missing cost or
   missing effective_from goes to "Unresolved SKUs" (MISSING_ALIAS,
   MISSING_EFFECTIVE_DATE), excluded from profit with a visible warning.
+- Production code never reads sample files (defect 60).
 - Seller SKU resolved via resolveMasterSku (master code, then sku_aliases)
   for all three platforms. Master SKU resolved at read time.
 - SKU Name on screens = cost_master sku_name (field in Firestore docs); if
@@ -68,8 +71,9 @@
   stage per chat. Owner pastes the agent's SUMMARY, CI screenshots and
   screen screenshots to Claude.
 - Owner: Tabbymart. Does everything needing the Firebase console, GitHub
-  web, or the running app. Owner pushes AI Studio changes to GitHub and
-  deletes files there; deletions made in AI Studio do NOT reach GitHub.
+  web, or the running app. Deletions made in AI Studio do NOT reach GitHub;
+  owner deletes files there. Owner says AI Studio created the 8R-2a commit
+  (not pushed by the owner); sync mechanism unclear.
 
 ## Agent (AI Studio) rules
 - Standing rules live in AI Studio Custom instructions. Prompt lists only
@@ -86,9 +90,10 @@
   SUMMARY before: check the Stage name and content match the current prompt.
 - The agent container has NO .git: never ask for git output. Git proof
   (commits, CI test counts) comes from the owner via GitHub web (Actions ->
-  run -> test job -> npm test step, bottom lines).
-- Agent line-number citations and summary-style grep output have been wrong
-  before. Require raw output (cat -n, grep -n, wc, md5sum). Two agent audits
+  run -> Summary page, or the test job's npm test step).
+- Agent line-number citations, summary tables and signs have been wrong
+  before (8R-2a-2: sale cost sign, packing). Require raw output (cat -n,
+  grep -n, wc, md5sum); tests compute, never copy agent tables. Two audits
   have contradicted each other (defect 52): cross-check numbers.
 - Never touch auth, Firebase config or deploy rules. Owner publishes rules
   in the console; new blocks go INSIDE the documents block.
@@ -102,27 +107,35 @@
 
 ## Stage status
 - Verified: 1, 1.1, 1.2, 1.3, 2, 2b, 2c, 3a, 3b, 3c, 4a, 4b, 5R, 7R.
-- Prompt A: APPROVED. 5R-1, 5R-3, 5R-3g: APPROVED (golden Sep 2026 after
-  TCS/TDS FK 26,646.46 / AZ 2,305.65 / MS 18,089.19 / total 47,041.30).
+- Prompt A: APPROVED. 5R-1, 5R-3, 5R-3g: APPROVED.
 - 7R family (SKU Performance on the ledger): ACCEPTED 11 Nov.
 - Stage 8 (return performance on the ledger): IN PROGRESS, NOT CLOSED.
-  * 8R-1, 8R-1b, 8R-1c (code), 8R-1d, 8R-1e: reviewed. 8R-1c code ACCEPTED
-    (no typed numbers, parseLedgerSettings, rawPercentages).
-  * 8R-2 (SKU Name on both screens, one Return Units helper, RTO Units
-    column in SKU Performance, sortable Return Performance with pinned rows,
-    stage badges removed): CODE ACCEPTED 12 Nov. Agent: 18 files / 275 tests,
-    tsc clean, files within the allowed list. PENDING owner evidence: push
-    to GitHub and CI line (expect 18 / 275), SKU Performance TOTAL row
-    screenshot (Cust. Returns 226, RTO 419), Return Performance pinned rows
-    after sort screenshot. Screens seen: Return Performance Sep totals
-    1,610 / 226 / 419 / 1,579.70 unchanged; SKU Name column and sort headers
-    visible.
-  * 8R-2c-2 (12 Nov): CODE ACCEPTED. Return loss on LANDED cost (buildLedger), ledger.test.ts typed literals removed, test 7 added. Screen (owner): SKU Performance TOTAL sold 1,059 / cust returns 226 / RTO 419 / dispatched 1,610 / revenue 171,731.00 / product cost 113,450.00 / packing 9,660.00 / return loss 1,636.20 / profit 46,984.80; Non-SKU -7,047.78; Unresolved 0. Local 18 files / 276 tests: 2 FAIL in pnlDashboardModel.test.ts (typed old profit literals, lines ~133-136, ~250-253). CI red (same 2 failures; "Map.groupBy" error is only the reporter). 8R-2c-3 ISSUED (edit pnlDashboardModel.test.ts only, computed expectations).
-  * 8R-2 evidence: SKU Performance TOTAL seen (226/419). Pending: Return Performance pinned rows after sort, green CI line.
-  * Queue: 8R-2c-3, 8R-2a, 8R-1f, 8R-3, then close Stage 8.
-  * Queue: 8R-2a (Flipkart cancelled-before-dispatch fix + golden), 8R-1f
-    (Amazon MTR Cancel evidence, read-only), 8R-3 (Non-SKU split by
-    marketplace/type, tested against raw sums), then close Stage 8.
+  * 8R-1 to 8R-1e: reviewed (audits). 8R-1c code accepted.
+  * 8R-2 family (8R-2, 8R-2c, 8R-2c-2, 8R-2c-3): APPROVED 12 Nov. CI #103
+    (3d1219d) green 18 files / 276 tests. Return loss on LANDED cost; typed
+    literals removed from ledger.test.ts and pnlDashboardModel.test.ts.
+    Screens agree (sold 1,059; dispatched 1,610; customer returns 226; RTO
+    419; return loss 1,636.20; profit 46,984.80); pinned rows stay at the
+    bottom after sorting.
+  * 8R-2a (12 Nov): NOT approved. Agent proved the 3 CANCELLED/no-dispatch
+    Flipkart items have all-zero money fields and skips their 4 settled rows
+    (3 items). Flipkart after skip: dispatched 595, sold 461, customer returns
+    60, RTO 159, packing 3,570, 688 lines, profit 26,224.46 (-407.00: removes
+    a false product-cost credit of 425 for never-shipped returns, saves 18
+    packing). Golden helpers (goldenDispatch, returnGolden) already exclude
+    them. 4 tests fail locally (golden formula lacks the credit term); CI
+    showed 7 (hypothesis: in CI the eval/require sample fallback finds no
+    samples, rule off).
+  * 8R-2a-2 (read-only audit): the agent STOPPED correctly: none of the 3
+    screens pass rawOrders, so the rule is off in the app (screens still show
+    FK 598/162/692 lines, profit 26,631.46). buildLedger.ts has an
+    eval('require')/fs sample fallback in production code (defect 60).
+  * 8R-2a-3 ISSUED: remove the fallback; required flipkart.orderRecords input
+    from fk_order_items; screens load and pass it; tests pass parsed sample
+    orders; golden re-base (+ sum of signed units x landed over skipped rows);
+    warnings skippedRows / skippedItems / settledRowsWithoutOrderRecord.
+  * Queue: 8R-1f (Amazon MTR Cancel evidence, read-only), 8R-3 (Non-SKU split
+    by marketplace/type, tested against raw sums), then close Stage 8.
 - Not approved: 4c, 6, 8.
 - Planned next (in order): finish queue above -> close 8 with full STATE.md
   -> GST decision (changes all golden numbers; needs CA) -> 6 (pipeline
@@ -131,10 +144,9 @@
   (`?? 5` literals) -> 4c -> 9 (GST/TDS/TCS as CA reconciliation report) ->
   10 (hardening, backup, deploy, own Firebase project with billing).
 - Stage 9 files (taxEngine*, TaxReconciliationScreen) deleted from AI Studio
-  in Prompt A-2 and from GitHub by owner 11 Nov (CI #94-#98; red runs
-  expected). Recoverable from git history. Rates: Sec 194-O TDS 0.1% of
-  gross sales (5% without PAN/Aadhaar); GST TCS (Sec 52) 0.5% of net
-  taxable supplies since 10 Jul 2024.
+  in Prompt A-2 and from GitHub by owner 11 Nov. Recoverable from git
+  history. Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar);
+  GST TCS (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -143,25 +155,32 @@
   Settlement Value, minus fines 150.00 and ads 1,655.64); Meesho 105,394.44
   (incl. ads -3,582.46); Amazon Released activity 4,912.85 (transfers
   -5,781.57; released movement -868.72 NOT revenue; Deferred 1,765.78).
-- Reference (Summary sheet): packing FK 2,772 / AZ 192 / MS 5,862;
-  after-tax profit FK 27,462.47 / AZ 2,323.65 / MS 18,089.19 (47,875.31);
-  TCS FK -286.67 / AZ -36.64 / MS -687.20; TDS FK -2,866.54 / AZ 0 /
-  MS -137.29.
-- Ledger after-tax (return loss on mfg cost, current): FK 26,646.46; AZ
-  2,305.65; MS 18,089.19; total 47,041.30. Gap -834.01 = packing basis only
-  (FK 598 vs 462 sold = 816; AZ 35 vs 32 = 18; MS 0).
-- Ledger before TCS/TDS: FK 29,799.67; AZ 2,333.67; MS 18,913.68; total
-  51,047.02. Revenue 61,423.71 / 4,912.85 / 105,394.44 (171,731.00).
-  Product cost 30,778 / 2,355 / 80,317 (113,450); packing 3,588 / 210 /
-  5,862 (9,660); return loss 411.25 / 42.20 / 1,126.25 (1,579.70). TCS
-  -286.67 / -28.02 / -687.20 (-1,001.89); TDS -2,866.54 / 0 / -137.29
-  (-3,003.83). Cash to bank 172,599.80.
-- Return loss base now: mfg cost of returned units FK 8,225 (60 units), AZ
-  844 (7), MS 22,525 (159) x 5%.
-- EXPECTED after 8R-2c (screen check only; tests must compute): landed =
-  +5 per returned unit, return loss FK 426.25 / AZ 43.95 / MS 1,166.00 =
-  1,636.20; after-tax FK 26,631.46 / AZ 2,303.90 / MS 18,049.44 = 46,984.80.
-- CURRENT ledger (landed-cost return loss, 12 Nov, screen-confirmed): return loss FK 426.25 / AZ 43.95 / MS 1,166.00 = 1,636.20; after-tax FK 26,631.46 / AZ 2,303.90 / MS 18,049.44 = 46,984.80. Old mfg-cost figures above are superseded (kept for history).
+- Reference (Summary sheet; uses MFG cost for return loss, sold-units
+  packing, and credits cost for the 3 never-dispatched Flipkart returns):
+  packing FK 2,772 / AZ 192 / MS 5,862; after-tax profit FK 27,462.47 /
+  AZ 2,323.65 / MS 18,089.19 (47,875.31); TCS FK -286.67 / AZ -36.64 /
+  MS -687.20; TDS FK -2,866.54 / AZ 0 / MS -137.29.
+- CURRENT ledger (landed-cost return loss, screen-confirmed 12 Nov, cancelled
+  rule NOT yet live in the app): return loss FK 426.25 / AZ 43.95 / MS
+  1,166.00 = 1,636.20; after-tax FK 26,631.46 / AZ 2,303.90 / MS 18,049.44 =
+  46,984.80; before TCS/TDS FK 29,784.67 / AZ 2,331.92 / MS 18,873.93 =
+  50,990.52; revenue 61,423.71 / 4,912.85 / 105,394.44 (171,731.00); product
+  cost 30,778 / 2,355 / 80,317 (113,450); packing 3,588 / 210 / 5,862
+  (9,660); TCS -286.67 / -28.02 / -687.20 (-1,001.89); TDS -2,866.54 / 0 /
+  -137.29 (-3,003.83); cash to bank 172,599.80 (61,423.79 / 5,781.57 /
+  105,394.44).
+- EXPECTED after 8R-2a-3 (screen check only; tests must compute): FK
+  dispatched 595, sold 461, RTO 159, customer returns 60, packing 3,570,
+  product cost 31,203, lines 688, after-tax 26,224.46; total product cost
+  113,875, packing 9,642, lines 1,846, after-tax 46,577.80; return loss
+  1,636.20 unchanged.
+- SKU/Return totals Sep (current): lines 1,850; dispatched FK 598 / AZ 35 /
+  MS 977 = 1,610; customer returns 60 / 7 / 159 = 226 (14.0%); RTO 162 / 0 /
+  257 = 419 (26.0%); sold 1,059. Non-SKU charges -7,047.78 (total foots;
+  breakdown unreliable, defect 52). Unresolved 0.
+- Cancelled items (8R-2a): 3 Flipkart items, 4 settled rows (OI ...473100,
+  ...472103, ...404100): all money fields 0; old booking: product cost credit
+  -425 (rto -235, sale +165, rto -165, rto -190 at landed cost), packing 18.
 - Dispatch detail: FK 410 sale items + 187 return-only = 597 items, one
   qty-2 item = 598 units; AZ 32 Released Order units + 3 prior-month
   return-only = 35; MS 565 sale + 412 return-only = 977 (5 claims rows
@@ -169,12 +188,13 @@
   43 + rto 155 = 598; AZ 32 + 3 + 0 = 35; MS 565 + 155 + 257 = 977.
 - Amazon TCS: Released -28.02 in P&L, Deferred -8.62 pipeline.
 - Counts: Flipkart orders 493 raw rows (DELIVERED 258, READY_TO_SHIP 58,
-  RETURN_REQUESTED 49, RETURNED 83, CANCELLED 44, APPROVAL_HOLD 1); 683
-  settled rows (461 sale / 222 return); 18 batches; 204 return records.
-  Meesho 1,426 orders (189 cancelled), 544 returns delivered (Qty = 1 on all
-  rows), 62 in transit (Qty 1), 986 payment rows, 96 ads rows, 17 batches.
-  Amazon unified 94 rows (84 Released / 10 Deferred), MTR 60 (Shipment 37,
-  Cancel 15, Refund 7, FreeReplacement 1). cost_master 34, sku_aliases 67.
+  RETURN_REQUESTED 49, RETURNED 83, CANCELLED 44 (all with empty
+  dispatched_date), APPROVAL_HOLD 1); 683 settled rows (461 sale / 222
+  return); 18 batches; 204 return records. Meesho 1,426 orders (189
+  cancelled, 0 ledger lines), 544 returns delivered (Qty = 1 on all rows), 62
+  in transit (Qty 1), 986 payment rows, 96 ads rows, 17 batches. Amazon
+  unified 94 rows (84 Released / 10 Deferred), MTR 60 (Shipment 37, Cancel
+  15, Refund 7, FreeReplacement 1). cost_master 34, sku_aliases 67.
 
 ## Known defects / open items
 1. Parity tests compare the ledger with its own grouping; the screen is the
@@ -204,20 +224,20 @@
     header); confirm.
 17. P&L Dashboard table does not foot visually: Revenue (Settlement) is
     net of TCS/TDS; "Profit Before TCS/TDS" adds TCS/TDS back with no
-    add-back line shown. Numbers correct (golden). Fix labels later.
+    add-back line shown. Numbers correct. Fix labels later.
 19. SKU Performance Dispatched column = packing / rate per row (no
     dispatched-units field on LedgerLine).
 20. SKU rows can show negative net units or sold above dispatched
     (TM-TG-001, TM-CA-003, TM-MBT-002): sale dispatched earlier month
     settles later (settlement basis). Consistent with the rules.
-21. Loss-making SKUs Sep 2026: TM-ST-002 -2,813.66, TM-PC-004 -2,136.00
-    (alias unverified, defect 2). Business review later.
+21. Loss-making SKUs Sep 2026: TM-ST-002, TM-PC-004 (alias unverified,
+    defect 2), TM-CM-001, TM-MBT-002. Business review later.
 22. goldenReturnLossRate = 5/100 is a typed test fixture (goldenDispatch.ts
     line 136); replace with a value read from a settings fixture later.
-24. Test count truth: local 18 files / 275 tests (after 8R-2). CI #89 had
-    20 / 287 because deletions in AI Studio never reached GitHub.
+24. Test count truth: CI #103 green 18 files / 276 tests; local after 8R-2a
+    18 / 277 (4 failing until 8R-2a-3).
 30. goldenDispatch.ts reads sample files via fs at import time; imported by
-    tests only.
+    tests only (OK in tests; NOT OK in production code, see 60).
 33. Literal `?? 5` freight defaults at purchase entry: PurchasesScreen:84,
     AverageCostScreen:47, OpeningStockScreen:73, CostMasterScreen:76;
     SettingsScreen:41-45 display defaults. Legacy keys
@@ -228,9 +248,6 @@
     returnLossRates; ledger/types.ts:101 comment "default 5% (0.05)" is stale.
 36. Amazon RTO = 0 in Sep is NOT proven (the "no unified row" explanation is
     asserted); see 46 and 8R-1f.
-37. RTO lines carry shipping 0.00 for Flipkart and Meesho (Sep), so no
-    shipping loss is in settlement. Proposed: RTO = packing only. Owner to
-    confirm.
 40. CONFIRMED (8R-1d E): customer sale amount includes GST; no output GST is
     deducted; revenue/profit include output GST. Amazon reports tax exactly
     (MTR total tax 1,317.59); Flipkart/Meesho have no tax split (need GST
@@ -239,21 +256,13 @@
     golden numbers.
 42. "Non-SKU charges" (Sep -7,047.78) is one line in SKU Performance; split
     by marketplace and type in 8R-3. LedgerLine has no source-row-type field.
-45. Repo vs AI Studio divergence RESOLVED in cause: owner deleted
-    returnEngine*, taxEngine* on GitHub (CI #94 and #96 red as expected,
-    #95, #97, #98 green). Pending: owner paste of CI #98 line (expect
-    18 / 272), then 18 / 275 after the 8R-2 push.
-46. Flipkart cancelled-before-dispatch BUG (8R-1e A): 3 items (not 5) with
-    status CANCELLED, no dispatch date, no tracking ID, yet settled as
-    zero-net sale/refund pairs; buildLedger sets packing 6 and counts units
-    from the settled file only (isNewDispatch by orderItemId,
-    buildLedger.ts:245). Effect about 3 dispatched units, 18 packing, 3 RTO
-    units. Fix 8R-2a: orders file CANCELLED + empty dispatched_date = not
-    dispatched (units 0, packing 0, cost 0, not sale/rto/return); keep money
-    fields; goldenDispatch excludes the same from raw. Amazon: 11 of 15 MTR
-    Cancel rows have Released Order rows and Easy Ship fees; 3 have a Sep
-    refund, 8 do not (about 2,127 of order amounts); not proven a bug (8R-1f).
-    Meesho: 0.
+46. Flipkart cancelled-before-dispatch: 3 items (CANCELLED, no dispatch date,
+    no tracking ID) were settled as zero-net sale/refund pairs and booked
+    packing + a cost credit. Rule built in buildLedger (8R-2a) but OFF in the
+    app because screens do not pass order data (57, 60); fixed in 8R-2a-3.
+    Amazon: 11 of 15 MTR Cancel rows have Released Order rows and Easy Ship
+    fees; 3 have a Sep refund, 8 do not (about 2,127 of order amounts); not
+    proven a bug (8R-1f). Meesho: 0.
 47. Amazon SAFE-T and FBA reimbursement classification: 8R-1d D says
     SKU-less (90.01, 5.00); 8R-1e D says they carry SKU TM-MR-001 (105.55
     claim, 101.69 adjustment). Unresolved. Amazon "Cross-Account Debt
@@ -261,8 +270,6 @@
 48. Meesho return lines: ledger units 0, helper counts 1 (returnUnits.ts).
     Returns Qty is 1 on all rows so numbers are right, but hidden fallback;
     real fix later (line carries source qty).
-50. RESOLVED for SkuPerformanceScreen/ReturnPerformanceScreen (8R-2c A3): sku_name has no fallback to the code ("-" shown). PnLDashboardScreen parseFirestoreCostMaster still has sku_name || code (not displayed).
-51. Return loss code uses mfg cost; reference workbook also uses mfg (K5 = G5 x rate). OWNER AGREED landed 12 Nov. 8R-2c-2 changes the code and re-bases the golden test (typed literals removed).
 52. 8R-1d D and 8R-1e D disagree on Amazon non-SKU rows (SAFE-T 90.01 vs
     105.55; Debt -171.12 vs +-64.90; Service Fee -293.82 vs 0.00; FBA storage
     -78.69 vs -25.38). Only the -7,047.78 total foots. 8R-3 must test against
@@ -270,8 +277,22 @@
 53. skuGrouping.test.ts:138 compares totals.profitBeforeTax with
     profitAfterTcsTds (naming mismatch); tests use structural literals
     (toBe(3), toBe(true)): accepted.
-54. Typed financial literals: removed from ledger.test.ts in 8R-2c-2. Still in pnlDashboardModel.test.ts (~133-136, ~250-253: 26646.46/2305.65/18089.19/47041.30), failing since the landed-cost change; fixed in 8R-2c-3.
-55. CI log shows "TypeError: Map.groupBy is not a function" from Vitest's reporter (old Node on the runner) when tests fail. Likely vanishes on green; otherwise owner sets node-version 22 in the workflow.
+56. 8R-2c-3 SUMMARY lacked its header fields; "Files changed" taken as
+    pnlDashboardModel.test.ts only (not proven by GitHub file list).
+57. CONFIRMED (8R-2a-2): PnLDashboardScreen, SkuPerformanceScreen and
+    ReturnPerformanceScreen call buildLedger without rawOrders / order data.
+    Fixed in 8R-2a-3.
+58. 8R-2a SUMMARY per-marketplace table used naive unit sums (AZ 39, MS
+    569/4/0): ignored. 8R-2a-2 per-row table has the +1 sale cost sign wrong
+    (booked -165, should be +165) and packing 24 (should be 18); "425.01" is
+    the golden-helper gap (+18 expected vs -407 actual), not a ledger value.
+59. CI showed 7 failed tests vs 4 local after 8R-2a. Hypothesis: sample
+    fallback finds no samples in CI. Owner to send failed-test names (CI
+    Summary page).
+60. buildLedger.ts getCancelledNoDispatchSet (lines ~31-81) reads sample
+    files through eval('require') / fs / xlsx in production code: rule is on
+    in tests, off in the browser. Remove in 8R-2a-3; rule must use passed-in
+    order records only.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -284,13 +305,13 @@ ms_batches, ms_uploads. (sku_variants unused.)
 ## Environment
 - GitHub private repo azeemxzone/TM-P-L-Dashboard-App (branch main);
   workflow runs npm install then npm test -- --run. Local AI Studio git has
-  no remote; owner pushes. Claude cannot open the repo.
+  no remote. Claude cannot open the repo.
 - Firebase project continual-medium-b61jg (AI Studio Starter Tier);
   sign out/in each session. Own project with billing planned for Stage 10.
 - Roles: admin = owner; 2 viewers read-only. allowedUsers/default holds
   emails, admins, roles (lowercase).
-- Tests: local 18 files / 275 tests green, tsc clean (agent). CI #98 green
-  (line pending), #99+ after 8R-2 push (expect 18 / 275).
+- Tests: CI #103 green 18 files / 276 tests (before 8R-2a); local after 8R-2a
+  18 / 277 with 4 failing; tsc clean (agent).
 - Code paths: src/components/{SkuPerformanceScreen, PnLDashboardScreen,
   SettingsScreen, ReturnPerformanceScreen}.tsx, src/ledger/{buildLedger,
   ledgerSettings, skuGrouping, returnGrouping, returnUnits, returnGolden,
@@ -299,11 +320,14 @@ ms_batches, ms_uploads. (sku_variants unused.)
   skuResolver}.ts.
 
 ## Open decisions
-- RTO cost = packing only? Owner to confirm (defect 37).
 - GST: deduct output GST from revenue, ex-GST cost? Owner and CA (defect 40).
 - Amazon Debt adjustment and SAFE-T classification (defects 47, 52).
 - Category filter: kept (default).
-- DECIDED: return loss = 5% provision, landed cost, customer returns only.
+- DECIDED: return loss = 5% provision, landed cost, customer returns only;
+  RTO cost = packing only.
 
 ## Last result (12 Nov 2026)
-- 8R-2c-2 reviewed: code accepted, screen matches (1,636.20 / 46,984.80), CI red from 2 stale literals in pnlDashboardModel.test.ts. 8R-2c-3 issued. Owner pending: CI line (expect 18/276), Return Performance pinned-rows screenshot, confirm RTO = packing only.
+- 8R-2a-2 reviewed: agent's stop correct; screens still old because no screen
+  passes order data and buildLedger has an eval/fs sample fallback. 8R-2a-3
+  issued. Owner pending: failed-test names from the CI Summary page; new
+  screenshots (Return Performance, P&L Dashboard) after 8R-2a-3.
