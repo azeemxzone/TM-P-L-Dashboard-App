@@ -117,12 +117,9 @@
     after sort screenshot. Screens seen: Return Performance Sep totals
     1,610 / 226 / 419 / 1,579.70 unchanged; SKU Name column and sort headers
     visible.
-  * 8R-2c audit (12 Nov): agent stopped correctly. Reference workbook return
-    loss uses MFG cost (Flipkart!K5 = G5 x rate), golden tests assert typed
-    literals (ledger.test.ts:203-209, 225-227) and test 6 compares to reference
-    profit. 8R-2c-2 ISSUED: edit buildLedger.ts + ledger.test.ts only; return loss
-    on landed cost; golden expected = reference cell - packing delta - rate x freight
-    x independent customer-return units; typed literals removed.
+  * 8R-2c-2 (12 Nov): CODE ACCEPTED. Return loss on LANDED cost (buildLedger), ledger.test.ts typed literals removed, test 7 added. Screen (owner): SKU Performance TOTAL sold 1,059 / cust returns 226 / RTO 419 / dispatched 1,610 / revenue 171,731.00 / product cost 113,450.00 / packing 9,660.00 / return loss 1,636.20 / profit 46,984.80; Non-SKU -7,047.78; Unresolved 0. Local 18 files / 276 tests: 2 FAIL in pnlDashboardModel.test.ts (typed old profit literals, lines ~133-136, ~250-253). CI red (same 2 failures; "Map.groupBy" error is only the reporter). 8R-2c-3 ISSUED (edit pnlDashboardModel.test.ts only, computed expectations).
+  * 8R-2 evidence: SKU Performance TOTAL seen (226/419). Pending: Return Performance pinned rows after sort, green CI line.
+  * Queue: 8R-2c-3, 8R-2a, 8R-1f, 8R-3, then close Stage 8.
   * Queue: 8R-2a (Flipkart cancelled-before-dispatch fix + golden), 8R-1f
     (Amazon MTR Cancel evidence, read-only), 8R-3 (Non-SKU split by
     marketplace/type, tested against raw sums), then close Stage 8.
@@ -164,10 +161,7 @@
 - EXPECTED after 8R-2c (screen check only; tests must compute): landed =
   +5 per returned unit, return loss FK 426.25 / AZ 43.95 / MS 1,166.00 =
   1,636.20; after-tax FK 26,631.46 / AZ 2,303.90 / MS 18,049.44 = 46,984.80.
-- SKU/Return totals Sep: lines 1,850; dispatched FK 598 / AZ 35 / MS 977 =
-  1,610; customer returns 60 / 7 / 159 = 226 (14.0%); RTO 162 / 0 / 257 =
-  419 (26.0%); sold 1,059 (SKU Performance). Non-SKU charges -7,047.78
-  (total foots; breakdown unreliable, defect 52). Unresolved 0.
+- CURRENT ledger (landed-cost return loss, 12 Nov, screen-confirmed): return loss FK 426.25 / AZ 43.95 / MS 1,166.00 = 1,636.20; after-tax FK 26,631.46 / AZ 2,303.90 / MS 18,049.44 = 46,984.80. Old mfg-cost figures above are superseded (kept for history).
 - Dispatch detail: FK 410 sale items + 187 return-only = 597 items, one
   qty-2 item = 598 units; AZ 32 Released Order units + 3 prior-month
   return-only = 35; MS 565 sale + 412 return-only = 977 (5 claims rows
@@ -276,7 +270,8 @@
 53. skuGrouping.test.ts:138 compares totals.profitBeforeTax with
     profitAfterTcsTds (naming mismatch); tests use structural literals
     (toBe(3), toBe(true)): accepted.
-54. Typed financial literals in ledger.test.ts (203-209: 2772/192/5862, 27462.47/2323.65/18089.19; 225-227: 26646.46/2305.65/18089.19) violate the no-typed-numbers rule; removed in 8R-2c-2.
+54. Typed financial literals: removed from ledger.test.ts in 8R-2c-2. Still in pnlDashboardModel.test.ts (~133-136, ~250-253: 26646.46/2305.65/18089.19/47041.30), failing since the landed-cost change; fixed in 8R-2c-3.
+55. CI log shows "TypeError: Map.groupBy is not a function" from Vitest's reporter (old Node on the runner) when tests fail. Likely vanishes on green; otherwise owner sets node-version 22 in the workflow.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -311,4 +306,4 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - DECIDED: return loss = 5% provision, landed cost, customer returns only.
 
 ## Last result (12 Nov 2026)
-- 8R-2c audit accepted (STOP was correct). 8R-2c-2 issued. Pending owner evidence: CI line (expect 18/275), SKU Performance TOTAL row screenshot, pinned rows after sort. Still open: RTO = packing only (defect 37).
+- 8R-2c-2 reviewed: code accepted, screen matches (1,636.20 / 46,984.80), CI red from 2 stale literals in pnlDashboardModel.test.ts. 8R-2c-3 issued. Owner pending: CI line (expect 18/276), Return Performance pinned-rows screenshot, confirm RTO = packing only.
