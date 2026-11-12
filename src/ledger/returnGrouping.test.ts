@@ -3,7 +3,13 @@ import * as fs from 'fs';
 import XLSX from 'xlsx';
 
 import { buildLedger } from './buildLedger';
-import { groupLedgerReturns } from './returnGrouping';
+import {
+  groupLedgerReturns,
+  sortReturnSkuRows,
+  ReturnSortColumn,
+  ReturnGroupedRow,
+} from './returnGrouping';
+import { groupLedgerBySku } from './skuGrouping';
 import { independentReturns } from './returnGolden';
 import { independentDispatched, goldenReturnLossRate, findRealSampleFile } from './goldenDispatch';
 import { parseSettled } from '../flipkart/settledParser';
@@ -176,5 +182,212 @@ describe('Stage 8R-1: Return Performance Grouping on Single Ledger (Sep 2026)', 
       groupedAll.nonSkuRow.lineCount +
       groupedAll.unresolvedRow.lineCount;
     expect(groupedAll.totals.lineCount).toBe(sumLineCount);
+  });
+
+  it('both groupings give identical customer-return and RTO totals per marketplace', () => {
+    const { aliasMap, masterCodes, costMasterItems } = loadCostMasterAndAliases();
+
+    const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
+    const azUnified = parseAmazonUnified(
+      fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
+    );
+    const azMtr = parseAmazonMtr(
+      fs.readFileSync(findRealSampleFile('2-MTR_B2C-SEPTEMBER-2026'), 'utf8')
+    );
+    const msReport = parseMeeshoPayments(
+      XLSX.readFile(findRealSampleFile('previous_payment'))
+    );
+
+    const packingRate = 6;
+    const ledgerResult = buildLedger({
+      settlementMonth: '2026-09',
+      aliasMap,
+      costLookup: costMasterItems,
+      masterCodes,
+      settings: {
+        freight: 5,
+        packing: packingRate,
+        returnLoss: {
+          Flipkart: goldenReturnLossRate,
+          Amazon: goldenReturnLossRate,
+          Meesho: goldenReturnLossRate,
+        },
+      },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      amazon: { unifiedRows: azUnified, mtrRows: azMtr },
+      meesho: { payments: msReport.payments, ads: msReport.ads },
+    });
+
+    const channels: ('all' | Marketplace)[] = ['Flipkart', 'Amazon', 'Meesho', 'all'];
+
+    for (const ch of channels) {
+      const skuGrouping = groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, ch, packingRate);
+      const retGrouping = groupLedgerReturns(ledgerResult.lines, {
+        month: '2026-09',
+        channel: ch,
+        packingRate,
+        unresolved: ledgerResult.unresolved,
+      });
+
+      expect(skuGrouping.totals.customerReturnUnits).toBe(retGrouping.totals.customerReturnUnits);
+      expect(skuGrouping.totals.rtoUnits).toBe(retGrouping.totals.rtoUnits);
+
+      const skuSumCust = skuGrouping.skuRows.reduce((sum, r) => sum + r.customerReturnUnits, 0);
+      const retSumCust = retGrouping.skuRows.reduce((sum, r) => sum + r.customerReturnUnits, 0);
+      expect(skuSumCust).toBe(retSumCust);
+
+      const skuSumRto = skuGrouping.skuRows.reduce((sum, r) => sum + r.rtoUnits, 0);
+      const retSumRto = retGrouping.skuRows.reduce((sum, r) => sum + r.rtoUnits, 0);
+      expect(skuSumRto).toBe(retSumRto);
+
+      expect(skuGrouping.nonSkuRow.customerReturnUnits).toBe(retGrouping.nonSkuRow.customerReturnUnits);
+      expect(skuGrouping.nonSkuRow.rtoUnits).toBe(retGrouping.nonSkuRow.rtoUnits);
+      expect(skuGrouping.unresolvedRow.customerReturnUnits).toBe(retGrouping.unresolvedRow.customerReturnUnits);
+      expect(skuGrouping.unresolvedRow.rtoUnits).toBe(retGrouping.unresolvedRow.rtoUnits);
+    }
+  });
+
+  it('sortReturnSkuRows ascending and descending is monotonic and keeps pinned rows last', () => {
+    const { aliasMap, masterCodes, costMasterItems } = loadCostMasterAndAliases();
+
+    const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
+    const azUnified = parseAmazonUnified(
+      fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
+    );
+    const azMtr = parseAmazonMtr(
+      fs.readFileSync(findRealSampleFile('2-MTR_B2C-SEPTEMBER-2026'), 'utf8')
+    );
+    const msReport = parseMeeshoPayments(
+      XLSX.readFile(findRealSampleFile('previous_payment'))
+    );
+
+    const packingRate = 6;
+    const ledgerResult = buildLedger({
+      settlementMonth: '2026-09',
+      aliasMap,
+      costLookup: costMasterItems,
+      masterCodes,
+      settings: {
+        freight: 5,
+        packing: packingRate,
+        returnLoss: {
+          Flipkart: goldenReturnLossRate,
+          Amazon: goldenReturnLossRate,
+          Meesho: goldenReturnLossRate,
+        },
+      },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      amazon: { unifiedRows: azUnified, mtrRows: azMtr },
+      meesho: { payments: msReport.payments, ads: msReport.ads },
+    });
+
+    const grouped = groupLedgerReturns(ledgerResult.lines, {
+      month: '2026-09',
+      channel: 'all',
+      packingRate,
+      unresolved: ledgerResult.unresolved,
+    });
+
+    const allRows: ReturnGroupedRow[] = [
+      ...grouped.skuRows,
+      grouped.nonSkuRow,
+      grouped.unresolvedRow,
+      grouped.totals,
+    ];
+
+    const columns: ReturnSortColumn[] = [
+      'masterSku',
+      'skuName',
+      'dispatchedUnits',
+      'unitsSold',
+      'customerReturnUnits',
+      'customerReturnRate',
+      'rtoUnits',
+      'rtoRate',
+      'returnLoss',
+    ];
+
+    const skuNameLookup = (sku: string) => {
+      const found = costMasterItems.find((c) => c.sku_code === sku);
+      return found ? found.sku_name || '' : '';
+    };
+
+    for (const col of columns) {
+      // Ascending sort
+      const asc = sortReturnSkuRows(allRows, col, 'asc', skuNameLookup);
+      expect(asc.length).toBe(allRows.length);
+
+      // Verify pinned rows are at the end
+      const pinnedAsc = asc.slice(grouped.skuRows.length);
+      expect(pinnedAsc.length).toBe(3);
+      for (const p of pinnedAsc) {
+        expect(p.isNonSku || p.isUnresolved || p.masterSku === 'Total').toBe(true);
+      }
+
+      // Verify regular rows are monotonically ascending
+      const regularAsc = asc.slice(0, grouped.skuRows.length);
+      for (let i = 0; i < regularAsc.length - 1; i++) {
+        const a = regularAsc[i];
+        const b = regularAsc[i + 1];
+        if (col === 'masterSku') {
+          expect(a.masterSku.localeCompare(b.masterSku)).toBeLessThanOrEqual(0);
+        } else if (col === 'skuName') {
+          const nameA = skuNameLookup(a.masterSku).toLowerCase();
+          const nameB = skuNameLookup(b.masterSku).toLowerCase();
+          const cmp = nameA.localeCompare(nameB);
+          if (cmp === 0) {
+            expect(a.masterSku.localeCompare(b.masterSku)).toBeLessThanOrEqual(0);
+          } else {
+            expect(cmp).toBeLessThanOrEqual(0);
+          }
+        } else {
+          const valA = a[col];
+          const valB = b[col];
+          if (valA === valB) {
+            expect(a.masterSku.localeCompare(b.masterSku)).toBeLessThanOrEqual(0);
+          } else {
+            expect(valA).toBeLessThanOrEqual(valB);
+          }
+        }
+      }
+
+      // Descending sort
+      const desc = sortReturnSkuRows(allRows, col, 'desc', skuNameLookup);
+      expect(desc.length).toBe(allRows.length);
+
+      // Verify pinned rows are at the end
+      const pinnedDesc = desc.slice(grouped.skuRows.length);
+      expect(pinnedDesc.length).toBe(3);
+      for (const p of pinnedDesc) {
+        expect(p.isNonSku || p.isUnresolved || p.masterSku === 'Total').toBe(true);
+      }
+
+      // Verify regular rows are monotonically descending
+      const regularDesc = desc.slice(0, grouped.skuRows.length);
+      for (let i = 0; i < regularDesc.length - 1; i++) {
+        const a = regularDesc[i];
+        const b = regularDesc[i + 1];
+        if (col === 'masterSku') {
+          expect(a.masterSku.localeCompare(b.masterSku)).toBeGreaterThanOrEqual(0);
+        } else if (col === 'skuName') {
+          const nameA = skuNameLookup(a.masterSku).toLowerCase();
+          const nameB = skuNameLookup(b.masterSku).toLowerCase();
+          const cmp = nameA.localeCompare(nameB);
+          if (cmp === 0) {
+            expect(a.masterSku.localeCompare(b.masterSku)).toBeLessThanOrEqual(0);
+          } else {
+            expect(cmp).toBeGreaterThanOrEqual(0);
+          }
+        } else {
+          const valA = a[col];
+          const valB = b[col];
+          if (valA === valB) {
+            expect(a.masterSku.localeCompare(b.masterSku)).toBeLessThanOrEqual(0);
+          } else {
+            expect(valA).toBeGreaterThanOrEqual(valB);
+          }
+        }
+      }
+    }
   });
 });

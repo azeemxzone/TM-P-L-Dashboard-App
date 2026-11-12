@@ -8,6 +8,7 @@
 
 import { LedgerLine, UnresolvedSku } from './types';
 import { Marketplace } from '../types';
+import { getCustomerReturnUnits, getRtoUnits } from './returnUnits';
 
 function round2(val: number): number {
   if (isNaN(val) || !isFinite(val)) return 0;
@@ -18,6 +19,8 @@ export interface SkuGroupedRow {
   masterSku: string;
   platform: Marketplace | 'All';
   unitsSold: number;
+  customerReturnUnits: number;
+  rtoUnits: number;
   unitsReturned: number;
   dispatchedUnits: number;
   netUnits: number;
@@ -52,6 +55,8 @@ export function groupLedgerBySku(
     masterSku: string;
     platform: Marketplace | 'All';
     unitsSold: number;
+    customerReturnUnits: number;
+    rtoUnits: number;
     unitsReturned: number;
     netUnits: number;
     revenue: number;
@@ -80,6 +85,8 @@ export function groupLedgerBySku(
           masterSku: code,
           platform: pFilter || 'All',
           unitsSold: 0,
+          customerReturnUnits: 0,
+          rtoUnits: 0,
           unitsReturned: 0,
           netUnits: 0,
           revenue: 0,
@@ -99,9 +106,12 @@ export function groupLedgerBySku(
       acc.netUnits += line.units || 0;
       if (line.units > 0) {
         acc.unitsSold += line.units;
-      } else if (line.units < 0) {
-        acc.unitsReturned += Math.abs(line.units);
       }
+      const custRet = getCustomerReturnUnits(line);
+      const rto = getRtoUnits(line);
+      acc.customerReturnUnits += custRet;
+      acc.rtoUnits += rto;
+      acc.unitsReturned += custRet;
     } else {
       nonSkuAcc.revenue += line.netSettlement || 0;
       nonSkuAcc.productCost += line.productCost || 0;
@@ -115,12 +125,21 @@ export function groupLedgerBySku(
     revenue: 0,
     netUnits: 0,
     unitsSold: 0,
+    customerReturnUnits: 0,
+    rtoUnits: 0,
     unitsReturned: 0,
     lineCount: filteredUnresolved.length,
   };
   for (const u of filteredUnresolved) {
     unresolvedAcc.revenue += u.netSettlement || 0;
     unresolvedAcc.netUnits += u.units || 0;
+    if (u.units > 0) {
+      unresolvedAcc.unitsSold += u.units;
+    } else if (u.units < 0) {
+      const ret = Math.abs(u.units);
+      unresolvedAcc.customerReturnUnits += ret;
+      unresolvedAcc.unitsReturned += ret;
+    }
   }
 
   // Accumulate total unrounded sums across nonSkuAcc, unresolvedAcc, and all SKU accs
@@ -129,6 +148,8 @@ export function groupLedgerBySku(
   let totPacking = nonSkuAcc.packing;
   let totReturnLoss = nonSkuAcc.returnLoss;
   let totUnitsSold = unresolvedAcc.unitsSold;
+  let totCustReturns = unresolvedAcc.customerReturnUnits;
+  let totRto = unresolvedAcc.rtoUnits;
   let totUnitsReturned = unresolvedAcc.unitsReturned;
   let totNetUnits = unresolvedAcc.netUnits;
   let totLineCount = nonSkuAcc.lineCount + unresolvedAcc.lineCount;
@@ -140,6 +161,8 @@ export function groupLedgerBySku(
     totPacking += acc.packing;
     totReturnLoss += acc.returnLoss;
     totUnitsSold += acc.unitsSold;
+    totCustReturns += acc.customerReturnUnits;
+    totRto += acc.rtoUnits;
     totUnitsReturned += acc.unitsReturned;
     totNetUnits += acc.netUnits;
     totLineCount += acc.lineCount;
@@ -154,6 +177,8 @@ export function groupLedgerBySku(
       masterSku: acc.masterSku,
       platform: acc.platform,
       unitsSold: acc.unitsSold,
+      customerReturnUnits: acc.customerReturnUnits,
+      rtoUnits: acc.rtoUnits,
       unitsReturned: acc.unitsReturned,
       dispatchedUnits: Math.round(acc.packing / packingRate),
       netUnits: acc.netUnits,
@@ -178,6 +203,8 @@ export function groupLedgerBySku(
     masterSku: 'Non-SKU charges',
     platform: pFilter || 'All',
     unitsSold: 0,
+    customerReturnUnits: 0,
+    rtoUnits: 0,
     unitsReturned: 0,
     dispatchedUnits: Math.round(nonSkuAcc.packing / packingRate),
     netUnits: 0,
@@ -196,6 +223,8 @@ export function groupLedgerBySku(
     masterSku: 'Unresolved SKUs',
     platform: pFilter || 'All',
     unitsSold: unresolvedAcc.unitsSold,
+    customerReturnUnits: unresolvedAcc.customerReturnUnits,
+    rtoUnits: unresolvedAcc.rtoUnits,
     unitsReturned: unresolvedAcc.unitsReturned,
     dispatchedUnits: 0,
     netUnits: unresolvedAcc.netUnits,
@@ -217,6 +246,8 @@ export function groupLedgerBySku(
     masterSku: 'Total',
     platform: pFilter || 'All',
     unitsSold: totUnitsSold,
+    customerReturnUnits: totCustReturns,
+    rtoUnits: totRto,
     unitsReturned: totUnitsReturned,
     dispatchedUnits: Math.round(totPacking / packingRate),
     netUnits: totNetUnits,

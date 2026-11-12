@@ -12,10 +12,17 @@ import { useAuth } from '../context/AuthContext';
 import { formatINR } from '../utils/costCalculator';
 import { exportToCSV } from '../utils/csvParser';
 import { buildLedger } from '../ledger/buildLedger';
-import { groupLedgerReturns, ReturnGroupedRow } from '../ledger/returnGrouping';
+import {
+  groupLedgerReturns,
+  ReturnGroupedRow,
+  sortReturnSkuRows,
+  ReturnSortColumn,
+  SortDirection,
+} from '../ledger/returnGrouping';
 import { parseLedgerSettings, ParseLedgerSettingsResult } from '../ledger/ledgerSettings';
 import { parseFirestoreAliases, parseFirestoreCostMaster } from './PnLDashboardScreen';
 import { getCategoryFromSku } from '../utils/skuEngine';
+import { cleanSku } from '../flipkart/normalizers';
 import { CostMasterItem, Marketplace } from '../types';
 import {
   RotateCcw,
@@ -29,6 +36,8 @@ import {
   Download,
   TrendingDown,
   Truck,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 
 interface ReturnPerformanceScreenProps {
@@ -48,8 +57,9 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
   const [selectedChannel, setSelectedChannel] = useState<'all' | Marketplace>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'return_loss' | 'cust_ret' | 'rto' | 'dispatched' | 'sku'>('return_loss');
-  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
+  const [sortCol, setSortCol] = useState<ReturnSortColumn>('returnLoss');
+  const [sortDir, setSortDir] = useState<SortDirection>('desc');
+  const [skuNameMap, setSkuNameMap] = useState<Map<string, string>>(new Map());
 
   // Firestore raw datasets
   const [settingsState, setSettingsState] = useState<ParseLedgerSettingsResult | null>(null);
@@ -102,6 +112,16 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
         const { items, codes } = parseFirestoreCostMaster(snap.docs);
         setCostLookup(items);
         setMasterCodes(codes);
+        const nameMap = new Map<string, string>();
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          const code = cleanSku(data.sku_code || d.id || data.master_sku || '');
+          const name = typeof data.sku_name === 'string' && data.sku_name.trim().length > 0 ? data.sku_name.trim() : '';
+          if (code && name) {
+            nameMap.set(code, name);
+          }
+        });
+        setSkuNameMap(nameMap);
       },
       (err) => setQueryError({ code: err.code, collection: 'cost_master' })
     );
@@ -262,6 +282,22 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
     return Array.from(set).sort();
   }, [groupingResult]);
 
+  // Missing SKU Name Count
+  const missingSkuNameCount = useMemo(() => {
+    if (!groupingResult) return 0;
+    return groupingResult.skuRows.filter((s) => !skuNameMap.get(cleanSku(s.masterSku))).length;
+  }, [groupingResult, skuNameMap]);
+
+  // Handle Sort
+  const handleSort = (col: ReturnSortColumn) => {
+    if (sortCol === col) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortCol(col);
+      setSortDir(col === 'masterSku' || col === 'skuName' ? 'asc' : 'desc');
+    }
+  };
+
   // Filtered & Sorted Rows
   const displaySkuRows = useMemo(() => {
     if (!groupingResult) return [];
@@ -278,41 +314,20 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
       list = list.filter(
         (s) =>
           s.masterSku.toLowerCase().includes(q) ||
-          getCategoryFromSku(s.masterSku).toLowerCase().includes(q)
+          getCategoryFromSku(s.masterSku).toLowerCase().includes(q) ||
+          (skuNameMap.get(cleanSku(s.masterSku)) || '').toLowerCase().includes(q)
       );
     }
 
-    // Sort
-    list.sort((a, b) => {
-      let valA = 0;
-      let valB = 0;
-      if (sortBy === 'return_loss') {
-        valA = a.returnLoss;
-        valB = b.returnLoss;
-      } else if (sortBy === 'cust_ret') {
-        valA = a.customerReturnUnits;
-        valB = b.customerReturnUnits;
-      } else if (sortBy === 'rto') {
-        valA = a.rtoUnits;
-        valB = b.rtoUnits;
-      } else if (sortBy === 'dispatched') {
-        valA = a.dispatchedUnits;
-        valB = b.dispatchedUnits;
-      } else if (sortBy === 'sku') {
-        return sortDir === 'asc' ? a.masterSku.localeCompare(b.masterSku) : b.masterSku.localeCompare(a.masterSku);
-      }
-      return sortDir === 'desc' ? valB - valA : valA - valB;
-    });
-
-    return list;
-  }, [groupingResult, selectedCategory, searchQuery, sortBy, sortDir]);
+    return sortReturnSkuRows(list, sortCol, sortDir, (sku) => skuNameMap.get(cleanSku(sku)) || '');
+  }, [groupingResult, selectedCategory, searchQuery, sortCol, sortDir, skuNameMap]);
 
   // Export to CSV
   const handleExportCSV = () => {
     if (!groupingResult) return;
     const headers = [
       'Master SKU',
-      'Category',
+      'SKU Name',
       'Platform',
       'Dispatched Units',
       'Units Sold',
@@ -326,7 +341,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
     const rows: (string | number)[][] = [
       ...displaySkuRows.map((s) => [
         `"${s.masterSku}"`,
-        getCategoryFromSku(s.masterSku),
+        `"${skuNameMap.get(cleanSku(s.masterSku)) || '-'}"`,
         s.platform,
         s.dispatchedUnits,
         s.unitsSold,
@@ -338,7 +353,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
       ]),
       [
         '"Non-SKU charges"',
-        'Non-SKU',
+        '"-"',
         groupingResult.nonSkuRow.platform,
         groupingResult.nonSkuRow.dispatchedUnits,
         groupingResult.nonSkuRow.unitsSold,
@@ -350,7 +365,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
       ],
       [
         '"Unresolved SKUs"',
-        'Unresolved',
+        '"-"',
         groupingResult.unresolvedRow.platform,
         groupingResult.unresolvedRow.dispatchedUnits,
         groupingResult.unresolvedRow.unitsSold,
@@ -362,7 +377,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
       ],
       [
         '"Total"',
-        'Consolidated',
+        '"Consolidated"',
         groupingResult.totals.platform,
         groupingResult.totals.dispatchedUnits,
         groupingResult.totals.unitsSold,
@@ -385,6 +400,39 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
     document.body.removeChild(link);
   };
 
+  const renderSortHeader = (label: string, col: ReturnSortColumn, align: 'left' | 'right' = 'left') => {
+    const isActive = sortCol === col;
+    return (
+      <th
+        key={col}
+        onClick={() => handleSort(col)}
+        className={`py-3 px-3 cursor-pointer select-none hover:bg-slate-100 dark:hover:bg-slate-900 transition-colors ${
+          align === 'right' ? 'text-right' : 'text-left'
+        } ${isActive ? 'text-rose-600 dark:text-rose-400 font-bold' : ''}`}
+      >
+        <button
+          type="button"
+          className={`inline-flex items-center gap-1 font-semibold text-xs focus:outline-none cursor-pointer ${
+            align === 'right' ? 'flex-row-reverse w-full justify-start' : 'flex-row'
+          }`}
+        >
+          <span>{label}</span>
+          <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0">
+            {isActive ? (
+              sortDir === 'asc' ? (
+                <ArrowUp className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+              ) : (
+                <ArrowDown className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+              )
+            ) : (
+              <span className="text-slate-300 dark:text-slate-600 text-[10px]">↕</span>
+            )}
+          </span>
+        </button>
+      </th>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header Card */}
@@ -396,9 +444,6 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                 <RotateCcw className="w-6 h-6 text-rose-600 dark:text-rose-400" />
                 Return Performance &amp; Logistics Loss Tracker (Single Ledger)
               </h1>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                Stage 8R-1
-              </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Logistics return loss, customer return rates, and RTO unit economics directly grouped from the single ledger.
@@ -406,6 +451,13 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {missingSkuNameCount > 0 && (
+              <div className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <span>{missingSkuNameCount} SKUs Missing Name</span>
+              </div>
+            )}
+
             {ledgerResult?.unresolved && ledgerResult.unresolved.length > 0 && (
               <div className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30">
                 <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
@@ -683,22 +735,24 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
               <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                 <thead className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-semibold">
                   <tr>
-                    <th className="py-3 px-4 text-left">Master SKU</th>
-                    <th className="py-3 px-3 text-left">Category</th>
-                    <th className="py-3 px-3 text-right">Dispatched</th>
-                    <th className="py-3 px-3 text-right">Sold</th>
-                    <th className="py-3 px-3 text-right">Cust. Returns</th>
-                    <th className="py-3 px-3 text-right">Cust. Ret. %</th>
-                    <th className="py-3 px-3 text-right">RTO Units</th>
-                    <th className="py-3 px-3 text-right">RTO %</th>
-                    <th className="py-3 px-4 text-right">Return Loss (₹)</th>
+                    {renderSortHeader('Master SKU', 'masterSku', 'left')}
+                    {renderSortHeader('SKU Name', 'skuName', 'left')}
+                    {renderSortHeader('Dispatched', 'dispatchedUnits', 'right')}
+                    {renderSortHeader('Sold', 'unitsSold', 'right')}
+                    {renderSortHeader('Cust. Returns', 'customerReturnUnits', 'right')}
+                    {renderSortHeader('Cust. Ret. %', 'customerReturnRate', 'right')}
+                    {renderSortHeader('RTO Units', 'rtoUnits', 'right')}
+                    {renderSortHeader('RTO %', 'rtoRate', 'right')}
+                    {renderSortHeader('Return Loss (₹)', 'returnLoss', 'right')}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
                   {displaySkuRows.map((s) => (
                     <tr key={s.masterSku} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-white font-sans">{s.masterSku}</td>
-                      <td className="py-3 px-3 text-slate-500 font-sans">{getCategoryFromSku(s.masterSku)}</td>
+                      <td className="py-3 px-3 font-bold text-slate-900 dark:text-white font-sans">{s.masterSku}</td>
+                      <td className="py-3 px-3 text-slate-600 dark:text-slate-300 font-sans">
+                        {skuNameMap.get(cleanSku(s.masterSku)) || '-'}
+                      </td>
                       <td className="py-3 px-3 text-right">{s.dispatchedUnits}</td>
                       <td className="py-3 px-3 text-right">{s.unitsSold}</td>
                       <td className="py-3 px-3 text-right text-amber-600 dark:text-amber-400">{s.customerReturnUnits}</td>
@@ -709,7 +763,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                       <td className="py-3 px-3 text-right text-slate-600 dark:text-slate-400">
                         {(s.rtoRate * 100).toFixed(1)}%
                       </td>
-                      <td className="py-3 px-4 text-right font-bold text-rose-600 dark:text-rose-400">
+                      <td className="py-3 px-3 text-right font-bold text-rose-600 dark:text-rose-400">
                         {formatINR(s.returnLoss)}
                       </td>
                     </tr>
@@ -717,20 +771,20 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
 
                   {/* Non-SKU charges Row */}
                   <tr className="bg-slate-50/80 dark:bg-slate-950/80 font-bold border-t border-slate-200 dark:border-slate-800">
-                    <td className="py-3 px-4 text-slate-900 dark:text-white font-sans">{groupingResult.nonSkuRow.masterSku}</td>
-                    <td className="py-3 px-3 text-slate-400 font-sans italic">Platform Charges</td>
+                    <td className="py-3 px-3 text-slate-900 dark:text-white font-sans">{groupingResult.nonSkuRow.masterSku}</td>
+                    <td className="py-3 px-3 text-slate-400 font-sans italic">-</td>
                     <td className="py-3 px-3 text-right">{groupingResult.nonSkuRow.dispatchedUnits > 0 ? groupingResult.nonSkuRow.dispatchedUnits : '-'}</td>
                     <td className="py-3 px-3 text-right">-</td>
                     <td className="py-3 px-3 text-right">{groupingResult.nonSkuRow.customerReturnUnits || '-'}</td>
                     <td className="py-3 px-3 text-right">-</td>
                     <td className="py-3 px-3 text-right">{groupingResult.nonSkuRow.rtoUnits || '-'}</td>
                     <td className="py-3 px-3 text-right">-</td>
-                    <td className="py-3 px-4 text-right">{formatINR(groupingResult.nonSkuRow.returnLoss)}</td>
+                    <td className="py-3 px-3 text-right">{formatINR(groupingResult.nonSkuRow.returnLoss)}</td>
                   </tr>
 
                   {/* Unresolved SKUs Row */}
                   <tr className="bg-amber-50/40 dark:bg-amber-950/20 font-bold">
-                    <td className="py-3 px-4 text-amber-900 dark:text-amber-300 font-sans flex items-center gap-1.5">
+                    <td className="py-3 px-3 text-amber-900 dark:text-amber-300 font-sans flex items-center gap-1.5">
                       <span>{groupingResult.unresolvedRow.masterSku}</span>
                       {ledgerResult.unresolved.length > 0 && (
                         <span className="text-[9px] bg-amber-500 text-white px-1.5 py-0.2 rounded uppercase tracking-wider font-extrabold">
@@ -738,21 +792,21 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-3 text-amber-700/60 dark:text-amber-400/60 font-sans italic">Unresolved</td>
+                    <td className="py-3 px-3 text-amber-700/60 dark:text-amber-400/60 font-sans italic">-</td>
                     <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.dispatchedUnits}</td>
                     <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.unitsSold}</td>
                     <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.customerReturnUnits}</td>
                     <td className="py-3 px-3 text-right">-</td>
                     <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.rtoUnits}</td>
                     <td className="py-3 px-3 text-right">-</td>
-                    <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.returnLoss)}</td>
+                    <td className="py-3 px-3 text-right">{formatINR(groupingResult.unresolvedRow.returnLoss)}</td>
                   </tr>
                 </tbody>
 
                 {/* Consolidated Footer Totals */}
                 <tfoot className="bg-slate-100 dark:bg-slate-950 font-bold text-slate-900 dark:text-white border-t-2 border-slate-300 dark:border-slate-700">
                   <tr>
-                    <td className="py-3.5 px-4 font-sans uppercase tracking-wider">
+                    <td className="py-3.5 px-3 font-sans uppercase tracking-wider">
                       Total ({groupingResult.totals.platform})
                     </td>
                     <td className="py-3.5 px-3 font-sans font-normal text-slate-500">
@@ -772,7 +826,7 @@ export const ReturnPerformanceScreen: React.FC<ReturnPerformanceScreenProps> = (
                     <td className="py-3.5 px-3 text-right text-slate-600 dark:text-slate-400">
                       {(groupingResult.totals.rtoRate * 100).toFixed(1)}%
                     </td>
-                    <td className="py-3.5 px-4 text-right text-rose-600 dark:text-rose-400 font-bold text-sm">
+                    <td className="py-3.5 px-3 text-right text-rose-600 dark:text-rose-400 font-bold text-sm">
                       {formatINR(groupingResult.totals.returnLoss)}
                     </td>
                   </tr>

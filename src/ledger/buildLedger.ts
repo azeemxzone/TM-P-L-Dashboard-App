@@ -236,7 +236,6 @@ export function buildLedger(
     }
 
     const landedCostToUse = costInfo?.landedCost ?? 0;
-    const mfgCostToUse = costInfo?.mfgCost ?? 0;
     const isRefund = r.refund !== 0;
     const returnTypeStr = (r.returnType || '').toLowerCase();
     const isCustomerReturn = isRefund && returnTypeStr.includes('customer');
@@ -264,7 +263,7 @@ export function buildLedger(
       units = -r.qty;
       productCost = round2(-landedCostToUse * r.qty);
       packing = isNewDispatch ? round2(packingRate * r.qty) : 0;
-      returnLoss = isCustomerReturn && costInfo ? round2(fkLossRate * mfgCostToUse * r.qty) : 0;
+      returnLoss = isCustomerReturn && costInfo ? round2(fkLossRate * landedCostToUse * r.qty) : 0;
     }
 
     lines.push({
@@ -410,7 +409,6 @@ export function buildLedger(
     }
 
     const landedCostToUse = costInfo?.landedCost ?? 0;
-    const mfgCostToUse = costInfo?.mfgCost ?? 0;
     let kind: LedgerKind = 'adjustment';
     let units = 0;
     let productCost = 0;
@@ -436,7 +434,7 @@ export function buildLedger(
       units = -q;
       productCost = round2(-landedCostToUse * q);
       packing = isNewDispatch ? round2(packingRate * q) : 0;
-      returnLoss = costInfo ? round2(azLossRate * mfgCostToUse * q) : 0;
+      returnLoss = costInfo ? round2(azLossRate * landedCostToUse * q) : 0;
     } else if (r.type === 'SAFE-T Reimbursement') {
       kind = 'claim';
       claimsAmount = r.total;
@@ -519,7 +517,6 @@ export function buildLedger(
     }
 
     const landedCostToUse = costInfo?.landedCost ?? 0;
-    const mfgCostToUse = costInfo?.mfgCost ?? 0;
     const isReturn = r.liveOrderStatus === 'Return';
     const isRto = r.liveOrderStatus === 'RTO';
     const isDeliveredOrShipped = r.liveOrderStatus === 'Delivered' || r.liveOrderStatus === 'Shipped';
@@ -549,7 +546,7 @@ export function buildLedger(
 
     const productCost = round2(landedCostToUse * units);
     const packing = isNewDispatch ? round2(packingRate * r.qty) : 0;
-    const returnLoss = isReturn && costInfo ? round2(msLossRate * mfgCostToUse * r.qty) : 0;
+    const returnLoss = isReturn && costInfo ? round2(msLossRate * landedCostToUse * r.qty) : 0;
 
     let kind: LedgerKind;
     if (isReturn) {

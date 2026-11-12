@@ -12,6 +12,7 @@ import XLSX from 'xlsx';
 
 import { buildLedger } from './buildLedger';
 import { groupLedgerBySku } from './skuGrouping';
+import { groupLedgerReturns } from './returnGrouping';
 import { parseSettled } from '../flipkart/settledParser';
 import { parseAmazonUnified, parseAmazonMtr } from '../amazon';
 import { parseMeeshoPayments } from '../meesho';
@@ -155,5 +156,67 @@ describe('Stage 7R-2: SKU Grouping on Single Ledger (Sep 2026)', () => {
     const sumAllSkuDispatched = totalGrouped.skuRows.reduce((sum, r) => sum + r.dispatchedUnits, 0);
     expect(sumAllSkuDispatched).toBe(totalIndependentDispatched);
     expect(totalGrouped.totals.dispatchedUnits).toBe(totalIndependentDispatched);
+  });
+
+  it('both groupings give identical customer-return and RTO totals per marketplace', () => {
+    const { aliasMap, costMasterItems } = loadCostMasterAndAliases();
+
+    const fkReport = parseSettled(XLSX.readFile(findRealSampleFile('2 Settled Transaction')));
+    const azUnified = parseAmazonUnified(
+      fs.readFileSync(findRealSampleFile('1-2026SepMonthlyUnifiedTransaction'), 'utf8')
+    );
+    const azMtr = parseAmazonMtr(
+      fs.readFileSync(findRealSampleFile('2-MTR_B2C-SEPTEMBER-2026'), 'utf8')
+    );
+    const msReport = parseMeeshoPayments(
+      XLSX.readFile(findRealSampleFile('previous_payment'))
+    );
+
+    const packingRate = 6;
+    const ledgerResult = buildLedger({
+      settlementMonth: '2026-09',
+      aliasMap,
+      costLookup: costMasterItems,
+      settings: {
+        freight: 5,
+        packing: packingRate,
+        returnLoss: {
+          Flipkart: goldenReturnLossRate,
+          Amazon: goldenReturnLossRate,
+          Meesho: goldenReturnLossRate,
+        },
+      },
+      flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
+      amazon: { unifiedRows: azUnified, mtrRows: azMtr },
+      meesho: { payments: msReport.payments, ads: msReport.ads },
+    });
+
+    const channels: ('all' | Marketplace)[] = ['Flipkart', 'Amazon', 'Meesho', 'all'];
+
+    for (const ch of channels) {
+      const skuGrouping = groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, ch, packingRate);
+      const retGrouping = groupLedgerReturns(ledgerResult.lines, {
+        month: '2026-09',
+        channel: ch,
+        packingRate,
+        unresolved: ledgerResult.unresolved,
+      });
+
+      expect(skuGrouping.totals.customerReturnUnits).toBe(retGrouping.totals.customerReturnUnits);
+      expect(skuGrouping.totals.rtoUnits).toBe(retGrouping.totals.rtoUnits);
+
+      const skuSumCust = skuGrouping.skuRows.reduce((sum, r) => sum + r.customerReturnUnits, 0);
+      const retSumCust = retGrouping.skuRows.reduce((sum, r) => sum + r.customerReturnUnits, 0);
+      expect(skuSumCust).toBe(retSumCust);
+
+      const skuSumRto = skuGrouping.skuRows.reduce((sum, r) => sum + r.rtoUnits, 0);
+      const retSumRto = retGrouping.skuRows.reduce((sum, r) => sum + r.rtoUnits, 0);
+      expect(skuSumRto).toBe(retSumRto);
+
+      expect(skuGrouping.nonSkuRow.customerReturnUnits).toBe(retGrouping.nonSkuRow.customerReturnUnits);
+      expect(skuGrouping.nonSkuRow.rtoUnits).toBe(retGrouping.nonSkuRow.rtoUnits);
+      expect(skuGrouping.unresolvedRow.customerReturnUnits).toBe(retGrouping.unresolvedRow.customerReturnUnits);
+      expect(skuGrouping.unresolvedRow.rtoUnits).toBe(retGrouping.unresolvedRow.rtoUnits);
+    }
   });
 });

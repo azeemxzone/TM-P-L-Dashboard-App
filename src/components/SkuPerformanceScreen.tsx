@@ -63,6 +63,7 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
   const [aliasMap, setAliasMap] = useState<Map<string, string>>(new Map());
   const [masterCodes, setMasterCodes] = useState<Set<string>>(new Set());
   const [costLookup, setCostLookup] = useState<CostMasterItem[]>([]);
+  const [skuNameMap, setSkuNameMap] = useState<Map<string, string>>(new Map());
 
   const [fkOrders, setFkOrders] = useState<any[]>([]);
   const [fkAdjustments, setFkAdjustments] = useState<any[]>([]);
@@ -103,6 +104,16 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       const { items, codes } = parseFirestoreCostMaster(snap.docs);
       setCostLookup(items);
       setMasterCodes(codes);
+      const nameMap = new Map<string, string>();
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const code = cleanSku(data.sku_code || d.id || data.master_sku || '');
+        const name = typeof data.sku_name === 'string' && data.sku_name.trim().length > 0 ? data.sku_name.trim() : '';
+        if (code && name) {
+          nameMap.set(code, name);
+        }
+      });
+      setSkuNameMap(nameMap);
     });
     return () => unsub();
   }, []);
@@ -217,6 +228,12 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     return groupLedgerBySku(ledgerResult.lines, ledgerResult.unresolved, selectedChannel, ledgerSettings.packing);
   }, [ledgerResult, selectedChannel, ledgerSettings]);
 
+  // Count missing SKU names in current grouping
+  const missingSkuNameCount = useMemo(() => {
+    if (!groupingResult) return 0;
+    return groupingResult.skuRows.filter((s) => !skuNameMap.get(cleanSku(s.masterSku))).length;
+  }, [groupingResult, skuNameMap]);
+
   // Extract Categories
   const allCategories = useMemo(() => {
     if (!groupingResult) return [];
@@ -274,10 +291,11 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     if (!groupingResult || !ledgerResult) return;
     const headers = [
       'Master SKU',
-      'Category',
+      'SKU Name',
       'Platform',
       'Units Sold',
-      'Units Returned',
+      'Cust. Returns',
+      'RTO Units',
       'Dispatched Units',
       'Revenue (₹)',
       'Product Cost (₹)',
@@ -289,10 +307,11 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
     const rows: (string | number)[][] = [
       ...displaySkuRows.map((s) => [
         `"${s.masterSku}"`,
-        getCategoryFromSku(s.masterSku),
+        `"${skuNameMap.get(cleanSku(s.masterSku)) || '-'}"`,
         s.platform,
         s.unitsSold,
-        s.unitsReturned,
+        s.customerReturnUnits,
+        s.rtoUnits,
         s.dispatchedUnits,
         s.revenue,
         s.productCost,
@@ -302,10 +321,11 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       ]),
       [
         '"Non-SKU charges"',
-        'Non-SKU',
+        '-',
         groupingResult.nonSkuRow.platform,
         groupingResult.nonSkuRow.unitsSold,
-        groupingResult.nonSkuRow.unitsReturned,
+        groupingResult.nonSkuRow.customerReturnUnits,
+        groupingResult.nonSkuRow.rtoUnits,
         groupingResult.nonSkuRow.dispatchedUnits,
         groupingResult.nonSkuRow.revenue,
         groupingResult.nonSkuRow.productCost,
@@ -315,10 +335,11 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       ],
       [
         '"Unresolved SKUs"',
-        'Unresolved',
+        '-',
         groupingResult.unresolvedRow.platform,
         groupingResult.unresolvedRow.unitsSold,
-        groupingResult.unresolvedRow.unitsReturned,
+        groupingResult.unresolvedRow.customerReturnUnits,
+        groupingResult.unresolvedRow.rtoUnits,
         groupingResult.unresolvedRow.dispatchedUnits,
         groupingResult.unresolvedRow.revenue,
         groupingResult.unresolvedRow.productCost,
@@ -328,10 +349,11 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
       ],
       [
         '"Total"',
-        'Consolidated',
+        `${groupingResult.totals.lineCount} lines`,
         groupingResult.totals.platform,
         groupingResult.totals.unitsSold,
-        groupingResult.totals.unitsReturned,
+        groupingResult.totals.customerReturnUnits,
+        groupingResult.totals.rtoUnits,
         groupingResult.totals.dispatchedUnits,
         groupingResult.totals.revenue,
         groupingResult.totals.productCost,
@@ -363,9 +385,6 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
                 <Layers className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                 Master SKU Performance &amp; Channel Profitability (Single Ledger)
               </h1>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                Stage 7R-2
-              </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Unit-level unit economics grouped directly from the single ledger across Flipkart, Amazon, and Meesho.
@@ -377,6 +396,13 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
               <div className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 border border-rose-500/30">
                 <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
                 <span>{ledgerResult.unresolved.length} Unresolved SKUs</span>
+              </div>
+            )}
+
+            {missingSkuNameCount > 0 && (
+              <div className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <span>{missingSkuNameCount} SKU{missingSkuNameCount > 1 ? 's' : ''} missing name</span>
               </div>
             )}
 
@@ -577,9 +603,10 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
             <thead className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-semibold">
               <tr>
                 <th className="py-3 px-4 text-left">Master SKU</th>
-                <th className="py-3 px-3 text-left">Category</th>
+                <th className="py-3 px-3 text-left">SKU Name</th>
                 <th className="py-3 px-3 text-right">Sold Units</th>
-                <th className="py-3 px-3 text-right">Return Units</th>
+                <th className="py-3 px-3 text-right">Cust. Returns</th>
+                <th className="py-3 px-3 text-right">RTO Units</th>
                 <th className="py-3 px-3 text-right">Dispatched</th>
                 <th className="py-3 px-4 text-right">Revenue (₹)</th>
                 <th className="py-3 px-4 text-right">Product Cost (₹)</th>
@@ -589,27 +616,32 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
-              {displaySkuRows.map((s) => (
-                <tr key={s.masterSku} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
-                  <td className="py-3 px-4 font-bold text-slate-900 dark:text-white font-sans">{s.masterSku}</td>
-                  <td className="py-3 px-3 text-slate-500 font-sans">{getCategoryFromSku(s.masterSku)}</td>
-                  <td className="py-3 px-3 text-right">{s.unitsSold}</td>
-                  <td className="py-3 px-3 text-right text-rose-600 dark:text-rose-400">{s.unitsReturned}</td>
-                  <td className="py-3 px-3 text-right">{s.dispatchedUnits}</td>
-                  <td className="py-3 px-4 text-right font-semibold">{formatINR(s.revenue)}</td>
-                  <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">{formatINR(s.productCost)}</td>
-                  <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">{formatINR(s.packing)}</td>
-                  <td className="py-3 px-4 text-right text-amber-600 dark:text-amber-400">{formatINR(s.returnLoss)}</td>
-                  <td className={`py-3 px-4 text-right font-bold ${s.profitBeforeTax >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-                    {formatINR(s.profitBeforeTax)}
-                  </td>
-                </tr>
-              ))}
+              {displaySkuRows.map((s) => {
+                const skuName = skuNameMap.get(cleanSku(s.masterSku)) || '-';
+                return (
+                  <tr key={s.masterSku} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                    <td className="py-3 px-4 font-bold text-slate-900 dark:text-white font-sans">{s.masterSku}</td>
+                    <td className="py-3 px-3 text-slate-600 dark:text-slate-400 font-sans">{skuName}</td>
+                    <td className="py-3 px-3 text-right">{s.unitsSold}</td>
+                    <td className="py-3 px-3 text-right text-rose-600 dark:text-rose-400">{s.customerReturnUnits}</td>
+                    <td className="py-3 px-3 text-right text-slate-600 dark:text-slate-400">{s.rtoUnits}</td>
+                    <td className="py-3 px-3 text-right">{s.dispatchedUnits}</td>
+                    <td className="py-3 px-4 text-right font-semibold">{formatINR(s.revenue)}</td>
+                    <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">{formatINR(s.productCost)}</td>
+                    <td className="py-3 px-4 text-right text-slate-600 dark:text-slate-400">{formatINR(s.packing)}</td>
+                    <td className="py-3 px-4 text-right text-amber-600 dark:text-amber-400">{formatINR(s.returnLoss)}</td>
+                    <td className={`py-3 px-4 text-right font-bold ${s.profitBeforeTax >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                      {formatINR(s.profitBeforeTax)}
+                    </td>
+                  </tr>
+                );
+              })}
 
               {/* Non-SKU charges Row */}
               <tr className="bg-slate-50/80 dark:bg-slate-950/80 font-bold border-t border-slate-200 dark:border-slate-800">
                 <td className="py-3 px-4 text-slate-900 dark:text-white font-sans">{groupingResult.nonSkuRow.masterSku}</td>
-                <td className="py-3 px-3 text-slate-400 font-sans italic">Platform Charges</td>
+                <td className="py-3 px-3 text-slate-400 font-sans italic">-</td>
+                <td className="py-3 px-3 text-right">-</td>
                 <td className="py-3 px-3 text-right">-</td>
                 <td className="py-3 px-3 text-right">-</td>
                 <td className="py-3 px-3 text-right">{groupingResult.nonSkuRow.dispatchedUnits > 0 ? groupingResult.nonSkuRow.dispatchedUnits : '-'}</td>
@@ -632,9 +664,10 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
                     </span>
                   )}
                 </td>
-                <td className="py-3 px-3 text-amber-700/60 dark:text-amber-400/60 font-sans italic">Unresolved</td>
+                <td className="py-3 px-3 text-amber-700/60 dark:text-amber-400/60 font-sans italic">-</td>
                 <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.unitsSold}</td>
-                <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.unitsReturned}</td>
+                <td className="py-3 px-3 text-right text-rose-600 dark:text-rose-400">{groupingResult.unresolvedRow.customerReturnUnits}</td>
+                <td className="py-3 px-3 text-right text-slate-600 dark:text-slate-400">{groupingResult.unresolvedRow.rtoUnits}</td>
                 <td className="py-3 px-3 text-right">{groupingResult.unresolvedRow.dispatchedUnits}</td>
                 <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.revenue)}</td>
                 <td className="py-3 px-4 text-right">{formatINR(groupingResult.unresolvedRow.productCost)}</td>
@@ -650,7 +683,8 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
                 <td className="py-3.5 px-4 font-sans uppercase tracking-wider">Total ({groupingResult.totals.platform})</td>
                 <td className="py-3.5 px-3 font-sans font-normal text-slate-500">{groupingResult.totals.lineCount} lines</td>
                 <td className="py-3.5 px-3 text-right">{groupingResult.totals.unitsSold}</td>
-                <td className="py-3.5 px-3 text-right text-rose-600 dark:text-rose-400">{groupingResult.totals.unitsReturned}</td>
+                <td className="py-3.5 px-3 text-right text-rose-600 dark:text-rose-400">{groupingResult.totals.customerReturnUnits}</td>
+                <td className="py-3.5 px-3 text-right text-slate-600 dark:text-slate-400">{groupingResult.totals.rtoUnits}</td>
                 <td className="py-3.5 px-3 text-right">{groupingResult.totals.dispatchedUnits}</td>
                 <td className="py-3.5 px-4 text-right text-indigo-600 dark:text-indigo-400">{formatINR(groupingResult.totals.revenue)}</td>
                 <td className="py-3.5 px-4 text-right text-slate-700 dark:text-slate-300">{formatINR(groupingResult.totals.productCost)}</td>

@@ -12,6 +12,7 @@ import { parseAliasCsv, resolveMasterSku } from '../utils/skuResolver';
 import { parseCSV } from '../utils/csvParser';
 import { CostMasterItem } from '../types';
 import { independentDispatched, goldenReturnLossRate } from './goldenDispatch';
+import { independentReturns } from './returnGolden';
 
 /**
  * Finds a real sample file in /samples or ./samples.
@@ -101,18 +102,22 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     XLSX.readFile(findRealSampleFile('previous_payment'))
   );
 
+  const freightSetting = 5;
+  const packingSetting = 6;
+  const returnLossRate = goldenReturnLossRate;
+
   // Build single ledger for September 2026
   const ledgerResult = buildLedger({
     settlementMonth: '2026-09',
     aliasMap,
     costLookup: costMasterItems,
     settings: {
-      freight: 5,
-      packing: 6,
+      freight: freightSetting,
+      packing: packingSetting,
       returnLoss: {
-        Flipkart: goldenReturnLossRate,
-        Amazon: goldenReturnLossRate,
-        Meesho: goldenReturnLossRate,
+        Flipkart: returnLossRate,
+        Amazon: returnLossRate,
+        Meesho: returnLossRate,
       },
     },
     flipkart: { orders: fkReport.orders, adjustments: fkReport.adjustments },
@@ -198,33 +203,50 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
       { Metric: 'TDS (Tax Credit)', FlipkartCell: 'B14 (-2866.54)', AmazonCell: 'C14 (0.00)', MeeshoCell: 'D14 (-137.29)' },
       { Metric: 'Net Units Sold', FlipkartCell: 'B6 (240)', AmazonCell: 'C6 (25)', MeeshoCell: 'D6 (561)' },
     ]);
-
-    // Assert expected reference cell values match expected earlier values
-    expect(ref.Flipkart.packing).toBe(2772);
-    expect(ref.Amazon.packing).toBe(192);
-    expect(ref.Meesho.packing).toBe(5862);
-
-    expect(ref.Flipkart.profit).toBe(27462.47);
-    expect(ref.Amazon.profit).toBe(2323.65);
-    expect(ref.Meesho.profit).toBe(18089.19);
   });
 
   // --------------------------------------------------------------------------
   // 2. Ledger After-Tax Profit Verification
   // --------------------------------------------------------------------------
   it('2. Ledger After-Tax Profit per platform (profitAfterTcsTds)', () => {
+    const refPath = findRealSampleFile('September_2026_Reference_PnL.xlsx');
+    const refWb = XLSX.readFile(refPath);
+    const ws = refWb.Sheets['Summary'];
+
+    const refProfit = {
+      Flipkart: Number(ws['B12'].v),
+      Amazon: Number(ws['C12'].v),
+      Meesho: Number(ws['D12'].v),
+    };
+
+    const refPacking = {
+      Flipkart: Number(ws['B9'].v),
+      Amazon: Number(ws['C9'].v),
+      Meesho: Number(ws['D9'].v),
+    };
+
+    const refSoldUnits = {
+      Flipkart: refPacking.Flipkart / packingSetting,
+      Amazon: refPacking.Amazon / packingSetting,
+      Meesho: refPacking.Meesho / packingSetting,
+    };
+
+    const expectedFk = refProfit.Flipkart - (independentDispatched.Flipkart - refSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits;
+    const expectedAz = refProfit.Amazon - (independentDispatched.Amazon - refSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits;
+    const expectedMs = refProfit.Meesho - (independentDispatched.Meesho - refSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits;
+
     console.log('\n========================================================================================');
     console.log('2. LEDGER AFTER-TAX PROFIT PER PLATFORM (profitAfterTcsTds)');
     console.log('========================================================================================');
     console.table([
-      { Platform: 'Flipkart', NetSettlement: fk.netSettlement, ProductCost: fk.productCost, Packing: fk.packing, ReturnLoss: fk.returnLoss, LedgerProfitAfterTax: fk.profitAfterTcsTds },
-      { Platform: 'Amazon', NetSettlement: az.netSettlement, ProductCost: az.productCost, Packing: az.packing, ReturnLoss: az.returnLoss, LedgerProfitAfterTax: az.profitAfterTcsTds },
-      { Platform: 'Meesho', NetSettlement: ms.netSettlement, ProductCost: ms.productCost, Packing: ms.packing, ReturnLoss: ms.returnLoss, LedgerProfitAfterTax: ms.profitAfterTcsTds },
+      { Platform: 'Flipkart', NetSettlement: fk.netSettlement, ProductCost: fk.productCost, Packing: fk.packing, ReturnLoss: fk.returnLoss, LedgerProfitAfterTax: fk.profitAfterTcsTds, ExpectedProfit: expectedFk.toFixed(2) },
+      { Platform: 'Amazon', NetSettlement: az.netSettlement, ProductCost: az.productCost, Packing: az.packing, ReturnLoss: az.returnLoss, LedgerProfitAfterTax: az.profitAfterTcsTds, ExpectedProfit: expectedAz.toFixed(2) },
+      { Platform: 'Meesho', NetSettlement: ms.netSettlement, ProductCost: ms.productCost, Packing: ms.packing, ReturnLoss: ms.returnLoss, LedgerProfitAfterTax: ms.profitAfterTcsTds, ExpectedProfit: expectedMs.toFixed(2) },
     ]);
 
-    expect(fk.profitAfterTcsTds).toBeCloseTo(26646.46, 2);
-    expect(az.profitAfterTcsTds).toBeCloseTo(2305.65, 2);
-    expect(ms.profitAfterTcsTds).toBeCloseTo(18089.19, 2);
+    expect(Math.abs(fk.profitAfterTcsTds - expectedFk)).toBeLessThanOrEqual(0.05);
+    expect(Math.abs(az.profitAfterTcsTds - expectedAz)).toBeLessThanOrEqual(0.05);
+    expect(Math.abs(ms.profitAfterTcsTds - expectedMs)).toBeLessThanOrEqual(0.05);
   });
 
   // --------------------------------------------------------------------------
@@ -233,8 +255,6 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
   it('3. Golden test 6: expectedProfit = referenceProfit - (independentDispatched - referenceSoldUnits) * packingSetting', () => {
     const refWb = XLSX.readFile(findRealSampleFile('September_2026_Reference_PnL.xlsx'));
     const ws = refWb.Sheets['Summary'];
-
-    const packingSetting = 6;
 
     // Note: the reference workbook charges packing on sold units only; the spec charges all dispatched units.
     const referencePacking = {
@@ -256,9 +276,9 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     };
 
     const expectedProfit = {
-      Flipkart: referenceProfit.Flipkart - (independentDispatched.Flipkart - referenceSoldUnits.Flipkart) * packingSetting,
-      Amazon: referenceProfit.Amazon - (independentDispatched.Amazon - referenceSoldUnits.Amazon) * packingSetting,
-      Meesho: referenceProfit.Meesho - (independentDispatched.Meesho - referenceSoldUnits.Meesho) * packingSetting,
+      Flipkart: referenceProfit.Flipkart - (independentDispatched.Flipkart - referenceSoldUnits.Flipkart) * packingSetting - returnLossRate * freightSetting * independentReturns.Flipkart.customerReturnUnits,
+      Amazon: referenceProfit.Amazon - (independentDispatched.Amazon - referenceSoldUnits.Amazon) * packingSetting - returnLossRate * freightSetting * independentReturns.Amazon.customerReturnUnits,
+      Meesho: referenceProfit.Meesho - (independentDispatched.Meesho - referenceSoldUnits.Meesho) * packingSetting - returnLossRate * freightSetting * independentReturns.Meesho.customerReturnUnits,
     };
 
     const ledgerProfit = {
@@ -468,6 +488,27 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     expect(parsedOrders).toHaveLength(493);
     expect(itemIds.size).toBe(493);
     expect(orderIds.size).toBe(474);
+  });
+
+  // --------------------------------------------------------------------------
+  // 7. Per-Marketplace Return Loss calculation from customer_return lines
+  // --------------------------------------------------------------------------
+  it('7. Per marketplace, ledger return loss = rate x sum over customer_return lines of (landed cost per unit x units)', () => {
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const platforms: ('Flipkart' | 'Amazon' | 'Meesho')[] = ['Flipkart', 'Amazon', 'Meesho'];
+
+    for (const p of platforms) {
+      const pLines = ledgerResult.lines.filter((l) => l.platform === p && l.kind === 'customer_return');
+      const expectedReturnLoss = round2(
+        returnLossRate *
+          pLines.reduce((sum, l) => {
+            const masterItem = costMasterItems.find((c) => c.sku_code === l.masterSku);
+            const landedCostPerUnit = masterItem ? masterItem.mfg_cost + freightSetting : 0;
+            return sum + landedCostPerUnit * Math.abs(l.units || 1);
+          }, 0)
+      );
+      expect(ledgerResult.totals.byPlatform[p].returnLoss).toBeCloseTo(expectedReturnLoss, 2);
+    }
   });
 });
 

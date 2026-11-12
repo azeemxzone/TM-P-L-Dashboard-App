@@ -8,6 +8,7 @@
 
 import { LedgerLine, UnresolvedSku } from './types';
 import { Marketplace } from '../types';
+import { getCustomerReturnUnits, getRtoUnits } from './returnUnits';
 
 export function round2(val: number): number {
   if (isNaN(val) || !isFinite(val)) return 0;
@@ -145,13 +146,8 @@ export function groupLedgerReturns(
       targetAcc.unitsSold += line.units || 1;
     }
 
-    if (line.kind === 'customer_return') {
-      const retUnits = Math.abs(line.units) || 1;
-      targetAcc.customerReturnUnits += retUnits;
-    } else if (line.kind === 'rto') {
-      const rtoUnits = Math.abs(line.units) || 1;
-      targetAcc.rtoUnits += rtoUnits;
-    }
+    targetAcc.customerReturnUnits += getCustomerReturnUnits(line);
+    targetAcc.rtoUnits += getRtoUnits(line);
   }
 
   const unresolvedAcc: InternalReturnAcc = {
@@ -296,11 +292,8 @@ export function groupLedgerReturns(
       mPacking += l.packing || 0;
       mRetLoss += l.returnLoss || 0;
       if (l.kind === 'sale' || l.units > 0) mSold += l.units || 1;
-      if (l.kind === 'customer_return') {
-        mCustRet += Math.abs(l.units) || 1;
-      } else if (l.kind === 'rto') {
-        mRto += Math.abs(l.units) || 1;
-      }
+      mCustRet += getCustomerReturnUnits(l);
+      mRto += getRtoUnits(l);
     }
 
     for (const u of subUnresolved) {
@@ -332,3 +325,101 @@ export function groupLedgerReturns(
     byPlatform,
   };
 }
+
+export type ReturnSortColumn =
+  | 'masterSku'
+  | 'skuName'
+  | 'dispatchedUnits'
+  | 'unitsSold'
+  | 'customerReturnUnits'
+  | 'customerReturnRate'
+  | 'rtoUnits'
+  | 'rtoRate'
+  | 'returnLoss';
+
+export type SortDirection = 'asc' | 'desc';
+
+/**
+ * Pure function to sort Return Performance rows.
+ * Sorts SKU rows only; TOTAL, Non-SKU, and Unresolved rows stay pinned at the bottom.
+ * Text columns sort A-Z (asc) / Z-A (desc).
+ * Numeric columns sort ascending / descending.
+ */
+export function sortReturnSkuRows<T extends ReturnGroupedRow & { skuName?: string }>(
+  rows: T[],
+  column: ReturnSortColumn,
+  direction: SortDirection = 'desc',
+  skuNameLookup?: (masterSku: string) => string
+): T[] {
+  const isPinned = (r: T) =>
+    Boolean(
+      r.isNonSku ||
+        r.isUnresolved ||
+        r.masterSku === 'Total' ||
+        r.masterSku === 'Consolidated Total' ||
+        r.masterSku === 'Non-SKU charges' ||
+        r.masterSku === 'Unresolved SKUs'
+    );
+
+  const regularRows = rows.filter((r) => !isPinned(r));
+  const pinnedRows = rows.filter((r) => isPinned(r));
+
+  const sortedRegular = [...regularRows].sort((a, b) => {
+    if (column === 'masterSku') {
+      const cmp = a.masterSku.localeCompare(b.masterSku);
+      return direction === 'asc' ? cmp : -cmp;
+    }
+    if (column === 'skuName') {
+      const nameA = (a.skuName || (skuNameLookup ? skuNameLookup(a.masterSku) : '') || '').toLowerCase();
+      const nameB = (b.skuName || (skuNameLookup ? skuNameLookup(b.masterSku) : '') || '').toLowerCase();
+      const cmp = nameA.localeCompare(nameB);
+      if (cmp !== 0) {
+        return direction === 'asc' ? cmp : -cmp;
+      }
+      return a.masterSku.localeCompare(b.masterSku);
+    }
+
+    let valA = 0;
+    let valB = 0;
+    switch (column) {
+      case 'dispatchedUnits':
+        valA = a.dispatchedUnits;
+        valB = b.dispatchedUnits;
+        break;
+      case 'unitsSold':
+        valA = a.unitsSold;
+        valB = b.unitsSold;
+        break;
+      case 'customerReturnUnits':
+        valA = a.customerReturnUnits;
+        valB = b.customerReturnUnits;
+        break;
+      case 'customerReturnRate':
+        valA = a.customerReturnRate;
+        valB = b.customerReturnRate;
+        break;
+      case 'rtoUnits':
+        valA = a.rtoUnits;
+        valB = b.rtoUnits;
+        break;
+      case 'rtoRate':
+        valA = a.rtoRate;
+        valB = b.rtoRate;
+        break;
+      case 'returnLoss':
+      default:
+        valA = a.returnLoss;
+        valB = b.returnLoss;
+        break;
+    }
+
+    if (valA !== valB) {
+      return direction === 'asc' ? valA - valB : valB - valA;
+    }
+    // Stable tie-breaker by masterSku A-Z
+    return a.masterSku.localeCompare(b.masterSku);
+  });
+
+  return [...sortedRegular, ...pinnedRows];
+}
+
