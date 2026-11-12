@@ -1,4 +1,4 @@
-# TM-P&L STATE (updated 12 Nov 2026, handover to a new Claude account)
+# TM-P&L STATE (updated 12 Nov 2026, end of day; for 13 Nov session)
 
 ## Rules (frozen)
 - Indian FY April-March. Marketplaces: Flipkart, Amazon India, Meesho.
@@ -17,13 +17,14 @@
   inbound freight added at purchase entry) x NET units. Freight NOT
   charged again. No stock events: standard cost = cost_master mfg_cost +
   freight setting (resolveItemCost, order date lookup).
-- Packing per DISPATCHED unit (sold, customer return, RTO, replacement).
-  OWNER CONFIRMED 6 Nov 2026. Reference workbook charges sold units only;
-  the ledger intentionally differs. Orders cancelled BEFORE dispatch never
-  count as dispatched (owner, 11 Nov). Flipkart rule: Orders file status
-  CANCELLED + empty dispatched_date = never dispatched; its settled rows
-  (all-zero money, verified) are skipped. Needs order records passed in
-  (fk_order_items); items with no order record cannot be checked (defect 61).
+- Packing per DISPATCHED unit (sold, customer return, RTO, replacement),
+  counted once per unique dispatch. OWNER CONFIRMED 6 Nov 2026. Reference
+  workbook charges sold units only; the ledger intentionally differs. Orders
+  cancelled BEFORE dispatch never count as dispatched (owner, 11 Nov).
+  Flipkart rule: Orders file status CANCELLED + empty dispatched_date =
+  never dispatched; its settled rows (all-zero money, verified) are skipped.
+  Needs order records passed in (fk_order_items); items with no order record
+  cannot be checked (defect 61).
 - Return loss: OWNER CONFIRMED 11-12 Nov: editable % (per marketplace) x
   LANDED product cost x customer-returned units (provision that % of returned
   units is not sellable). Built in 8R-2c-2. RTO = packing only: OWNER
@@ -48,7 +49,7 @@
   missing effective_from goes to "Unresolved SKUs" (MISSING_ALIAS,
   MISSING_EFFECTIVE_DATE), excluded from profit with a visible warning.
 - Production code never reads sample files (eval/require/fs removed from
-  buildLedger in 8R-2a-3; proof pending as raw grep in 8R-2a-3c).
+  buildLedger in 8R-2a-3; raw grep CLEAN, received in 8R-2a-3c).
 - Seller SKU resolved via resolveMasterSku (master code, then sku_aliases)
   for all three platforms. Master SKU resolved at read time.
 - SKU Name on screens = cost_master sku_name (field in Firestore docs); if
@@ -61,6 +62,13 @@
 - Revenue (settlement) is net of TCS/TDS, so revenue - product cost -
   packing - return loss = "Profit After TCS/TDS". "Profit Before TCS/TDS"
   adds TCS and TDS back.
+- Bank statement: only marketplace credits stored. A statement with >0
+  parseable lines and 0 marketplace credits is COMPLETE (upload record with
+  0 rows, ignored-line counts only), not an error. Error only for 0
+  parseable lines or unreadable header. Ignored lines (narration, payee,
+  amount) are never stored or logged. SHA-256 guard stays.
+- Upload verification: expected count = UNIQUE document IDs of this file;
+  verify by reading those IDs, never row counts or whole-collection counts.
 
 ## Roles in this project
 - Claude (PM and financial-logic reviewer): writes short scoped prompts,
@@ -95,9 +103,12 @@
   run -> Summary page).
 - Agent line numbers, summary tables and signs have been wrong before
   (8R-2a: naive unit sums; 8R-2a-2: sale cost sign, packing; 8R-2a-3:
-  "dispatched 680"). Require raw output (cat -n, grep -n, wc, md5sum); tests
-  compute, never copy agent tables. Audits have contradicted each other
-  (defect 52): cross-check numbers.
+  "dispatched 680"; 8R-2a-3d: cost 32,042 / profit 27,473.33, arithmetic did
+  not compute). Require raw output (cat -n, grep -n, wc, md5sum); tests
+  compute, never copy agent tables. Recompute arithmetic in every summary.
+  Audits have contradicted each other (defect 52): cross-check numbers.
+- Tests use REAL samples; a missing sample FAILS the test (no conditional or
+  skipped sample tests).
 - Never touch auth, Firebase config or deploy rules. Owner publishes rules
   in the console; new blocks go INSIDE the documents block.
 - Every write via stripUndefined. Counts verified by reading expected IDs.
@@ -121,47 +132,53 @@
     did not pass order data; buildLedger had an eval/fs sample fallback),
     8R-2a-3 (fallback removed; required flipkart.orderRecords from
     fk_order_items; screens load and pass it; golden re-based; warnings
-    skippedRows / skippedItems / settledRowsWithoutOrderRecord): BEHAVIOUR
-    CONFIRMED on screens 12 Nov. CI #106 (f30c17b) green 18 files / 277 tests
-    (#104, #105 red = earlier commits of the same change). NOT yet approved:
-    SUMMARY lacked raw proofs.
-  * 8R-2a-3b (read-only re-send) reviewed, NOT accepted: header filled but
-    items 1-5, 8 not pasted. Accepted facts: 595 dispatched units = 594 items
-    (one qty-2 item); of settledRowsWithoutOrderRecord 394: 356 Aug orders, 38
-    Jul orders, 0 Sep.
-  * 8R-2a-3c ISSUED (owner to paste into the SAME AI Studio chat). Prompt:
-    "STAGE 8R-2a-3c (READ-ONLY). Edit NOTHING. No git. Reply = SUMMARY block
-    ONLY, all header fields. Paste RAW: 1. md5sum + wc -l of every file
-    changed in 8R-2a-3; YES/NO all within the allowed list. 2. cat -n of the
-    buildLedger block applying the cancelled rule and the orderRecords type;
-    raw grep -nE 'eval|require\(|readFile|samples|process\.cwd'
-    src/ledger/buildLedger.ts. 3. Per screen (PnLDashboard, SkuPerformance,
-    ReturnPerformance): cat -n of the fk_order_items load with error callback
-    + Retry, and of the buildLedger call; YES/NO does it show the three
-    warning numbers. 4. Raw grep -nE '[0-9]{3,}\.[0-9]{2}' of ledger.test.ts,
-    pnlDashboardModel.test.ts, skuGrouping.test.ts, returnGrouping.test.ts.
-    5. The 4 skipped Flipkart settled rows: orderItemId | master SKU | signed
-    units | landed per unit | productCost old logic booked | packing old logic
-    booked (sale row books +cost, RTO row books -cost). 6. Per-file vitest
-    table with totals; tsc." Approve 8R-2a-3 when all present and clean.
-  * Owner uploads (12 Nov): Flipkart Orders_July2026.xlsx preview OK (1,981
-    lines, 100% SKUs mapped) but PARTIAL import 1,980 of 1,981 written
-    (fk_order_items); owner to Retry once. Aug to follow (only Jul and Aug
-    Orders are needed for Sep). Settled_Transaction_May2026.xlsx rejected
-    ("could not detect a valid Flipkart report format") and May2026_structured
-    .xlsx rejected in the Bank Statement slot (not a bank statement); neither
-    needed for Sep; owner asked whether the Settled May file was meant for the
-    Settled slot (unanswered).
-  * Queue: 8R-2a-3 approval, Jul/Aug Orders upload + Sep screenshot
-    comparison, 8R-1f (Amazon MTR Cancel evidence, read-only), 8R-3 (Non-SKU
-    split by marketplace/type, tested against raw sums), then close Stage 8.
+    skippedRows / skippedItems / settledRowsWithoutOrderRecord): CI #106
+    (f30c17b) green 18 files / 277 tests (#104, #105 red = earlier commits of
+    the same change).
+  * 8R-2a-3b (read-only re-send) NOT accepted (items not pasted). Accepted
+    facts: 595 dispatched units = 594 items (one qty-2 item); of
+    settledRowsWithoutOrderRecord 394: 356 Aug orders, 38 Jul orders, 0 Sep.
+  * 8R-2a-3c: RECEIVED. Raw proofs present: grep CLEAN, screens load
+    fk_order_items with error callback + Retry, 4 skipped rows (3 items) with
+    signs, 18 files / 277 tests, tsc clean. It showed NO warning display.
+    8R-2a-3d added warning lines on all 3 screens (P&L screen screenshot
+    confirms "5 rows (items 4)") and removed typed 425.00. 8R-2a-3d SUMMARY
+    tables wrong (cost 32,042; profit 27,473.33; arithmetic fails) but code
+    and tests sound. 8R-2a-3 BEHAVIOUR: APPROVED 12 Nov. Conditions open:
+    green CI on the 3d commit + warning screenshots on SKU and Return
+    screens.
+  * 8R-2a-3e (broad diagnostic) DROPPED. Replaced by 8R-2a-3f (issued, not
+    run): neutral "Flipkart:" warning label (info style) on all 3 screens;
+    ledger.test.ts bridge table per platform (reference Summary cell ->
+    ledger profitAfterTax; terms packing delta, return-loss landed vs MFG,
+    never-dispatched credit, residual), all terms computed from raw samples
+    or reference cells, assert |residual| <= 1.00.
+  * Side stages pending (do before Jul/Aug re-upload):
+    - 2d-fix: fk_order_items upload verification (read-only diagnosis
+      prompt issued, not run; defect 64).
+    - 2e-fix-b: bank zero-marketplace-credit (2e-fix SUMMARY NOT approved;
+      2e-fix-b issued; defect 65).
+  * Owner uploads (12 Nov): July Orders earlier showed 1,981 lines, 1,980 of
+    1,981 written; later attempt showed 1,984 lines, "2541 of 1984". Aug
+    Orders 559 lines, "558 of 559". Previews OK (100% SKUs mapped). Partial
+    data now sits in fk_order_items. DO NOT RETRY until 2d-fix is done.
+    Settled_Transaction_May2026.xlsx rejected ("could not detect a valid
+    Flipkart report format") and May2026_structured.xlsx rejected in the Bank
+    Statement slot; neither needed for Sep; owner has not said whether the
+    Settled May file was meant for the Settled slot. APR_2026.xlsx bank file:
+    3 lines (2 CR / 1 DR), 0 marketplace credits, shown as error.
+  * Queue (in order): 2d-fix diagnosis -> 2e-fix-b -> 8R-2a-3f -> Jul/Aug
+    Orders re-upload + Sep screenshots (compare with CURRENT ledger Sep) ->
+    8R-1f (Amazon MTR Cancel evidence, read-only) -> 8R-3 (Non-SKU split by
+    marketplace/type, tested against raw sums) -> close Stage 8 with full
+    STATE.md.
 - Not approved: 4c, 6, 8.
-- Planned next (in order): finish queue above -> close 8 with full STATE.md
-  -> GST decision (changes all golden numbers; needs CA) -> 6 (pipeline
-  carry-forward; check the 0.7 factor; remove fallback cost 100 from
-  pnlEngine; legacy keys in PipelineTrackerScreen) -> defect 33 cleanup
-  (`?? 5` literals) -> 4c -> 9 (GST/TDS/TCS as CA reconciliation report) ->
-  10 (hardening, backup, deploy, own Firebase project with billing).
+- Planned next (in order): finish queue above -> close 8 -> GST decision
+  (changes all golden numbers; needs CA) -> 6 (pipeline carry-forward; check
+  the 0.7 factor; remove fallback cost 100 from pnlEngine; legacy keys in
+  PipelineTrackerScreen) -> defect 33 cleanup (`?? 5` literals) -> 4c -> 9
+  (GST/TDS/TCS as CA reconciliation report) -> 10 (hardening, backup, deploy,
+  own Firebase project with billing).
 - Stage 9 files (taxEngine*, TaxReconciliationScreen) deleted from AI Studio
   in Prompt A-2 and from GitHub by owner 11 Nov. Recoverable from git
   history. Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar);
@@ -169,7 +186,7 @@
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
-  5,781.57 (8).
+  5,781.57 (8). SEP_2026.xlsx: 48 lines, 43 marketplace credits.
 - Settlements: Flipkart 61,423.71 (reconciles: cols 9-17 = 63,229.35 = Bank
   Settlement Value, minus fines 150.00 and ads 1,655.64); Meesho 105,394.44
   (incl. ads -3,582.46); Amazon Released activity 4,912.85 (transfers
@@ -187,17 +204,32 @@
   -28.02 / -687.20 (-1,001.89); TDS -2,866.54 / 0 / -137.29 (-3,003.83);
   after TCS/TDS 26,224.46 / 2,303.90 / 18,049.44 (46,577.80); cash to bank
   172,599.80 (61,423.79 / 5,781.57 / 105,394.44). Superseded history: 46,984.80
-  (before the cancelled rule), 47,041.30 (mfg-cost return loss). May change
-  after Jul/Aug Orders are uploaded (prior-month cancelled items).
+  (before the cancelled rule), 47,041.30 (mfg-cost return loss).
+- Screen reading 12 Nov AFTER partial Jul/Aug Orders upload (NOT golden):
+  Flipkart cost 31,328, packing 3,564 (594 units), return loss 426.25, after
+  TCS/TDS 26,105.46; Amazon 2,303.90; Meesho 18,049.44; total 46,458.80.
+  Difference from CURRENT ledger Sep = -119.00 on Flipkart = one extra
+  cancelled-no-dispatch RTO row (-125 cost credit lost, +6 packing), found
+  because prior-month order records now exist. Banner 5 rows / 4 items vs
+  4 / 3 in the samples. Expected to move again after the full Jul/Aug upload.
+- Bridge ledger -> reference (reviewer arithmetic from this file's numbers;
+  the 3f test must prove it from raw): Flipkart -1,238.01 = packing -798
+  (595 vs 462 sold units = 133 x 6) - return loss landed vs MFG 15 (5% x 5
+  x 60) - never-dispatched credit 425, residual 0.01. Amazon -19.75 = packing
+  -18 (35 vs 32 units) - 1.75 (5% x 5 x 7). Meesho -39.75 = 5% x 5 x 159.
+  Total -1,297.51 (47,875.31 - 46,577.80). All gaps are intentional rule
+  differences, none is an unexplained error.
 - Return Performance Sep (screen): FK dispatched 595 / customer returns 60
-  (10.1%) / RTO 159 (26.7%) / 688 lines; AZ 35 / 7 / 0 / 76 lines; MS 977 /
-  159 / 257 / 1,082 lines; total dispatched 1,607, customer returns 226
-  (14.1%), RTO 416 (25.9%), 1,846 lines. Sold 1,059 (SKU Performance) before
-  the cancelled rule; recheck after. Non-SKU charges -7,047.78 (total foots;
-  breakdown unreliable, defect 52). Unresolved 0.
+  (10.1%) / RTO 159 (26.7%) / 688 lines (683 settled + 5 adjustments); AZ 35 /
+  7 / 0 / 76 lines; MS 977 / 159 / 257 / 1,082 lines; total dispatched
+  1,607, customer returns 226 (14.1%), RTO 416 (25.9%), 1,846 lines. Sold
+  1,059 (SKU Performance) before the cancelled rule; recheck after.
+  Non-SKU charges -7,047.78 (total foots; breakdown unreliable, defect 52).
+  Unresolved 0.
 - Cancelled items (8R-2a): 3 Flipkart items, 4 settled rows (OI ...473100,
-  ...472103, ...404100): all money fields 0; old booking: product cost net
-  credit -425 (rto -235, sale +165, rto -165, rto -190 at landed cost),
+  ...472103, ...404100): all money fields 0; raw rows: -1 x TM-MA-001 235;
+  +1 and -1 x TM-ST-004 165; -1 x TM-CM-001 190. Old booking: product cost
+  net credit -425 (rto -235, sale +165, rto -165, rto -190 at landed cost),
   packing 18. Profit change -407.00 on Flipkart.
 - Dispatch detail (before cancelled rule): FK 598 units; AZ 32 Released
   Order units + 3 prior-month return-only = 35; MS 565 sale + 412 return-only
@@ -251,7 +283,8 @@
     defect 2), TM-CM-001, TM-MBT-002. Business review later.
 22. goldenReturnLossRate = 5/100 is a typed test fixture (goldenDispatch.ts
     line 136); replace with a value read from a settings fixture later.
-24. Test count truth: CI #106 green 18 files / 277 tests.
+24. Test count truth: CI #106 green 18 files / 277 tests (3d commit CI not
+    yet seen).
 30. goldenDispatch.ts reads sample files via fs at import time; imported by
     tests only (OK in tests; NOT OK in production code).
 33. Literal `?? 5` freight defaults at purchase entry: PurchasesScreen:84,
@@ -262,6 +295,8 @@
 34. Minor: SettingsScreen setDoc on settings/config has no merge (drops
     unknown keys); ParsedLedgerSettings has duplicate fields returnLoss and
     returnLossRates; ledger/types.ts:101 comment "default 5% (0.05)" is stale.
+    Also: ledger.test.ts return-loss term uses freightSetting to express the
+    landed-vs-MFG delta (valid as a bridge term; 3f makes it explicit).
 36. Amazon RTO = 0 in Sep is NOT proven (the "no unified row" explanation is
     asserted); see 46 and 8R-1f.
 40. CONFIRMED (8R-1d E): customer sale amount includes GST; no output GST is
@@ -295,15 +330,35 @@
 58. Agent tables in 8R-2a / 8R-2a-2 were wrong (naive sums, signs); ignored.
 61. settledRowsWithoutOrderRecord = 394 Sep Flipkart settled rows (356 Aug
     orders, 38 Jul orders): the cancelled rule cannot evaluate them until Jul
-    and Aug Orders are uploaded. Owner uploading Jul (partial import, see 62)
-    then Aug. Screens must show the warning (to be proven in 8R-2a-3c item 3).
-    Re-check Sep screens after uploads.
-62. Flipkart Orders_July2026 upload: partial import 1,980 of 1,981
-    (fk_order_items). Cause unknown; owner Retry once, else send the error.
+    and Aug Orders are uploaded. Warning now shown (P&L screen proven; SKU
+    and Return screenshots pending). Re-check Sep screens after full uploads.
+62. SUPERSEDED by 64 (Jul Orders partial import 1,980 of 1,981 was the same
+    verification bug; Retry cannot fix it).
 63. Upload rejections 12 Nov: Settled_Transaction_May2026.xlsx ("could not
     detect a valid Flipkart report format"; owner to say which slot/month was
     meant) and May2026_structured.xlsx (Bank Statement slot, not a bank
     statement). Not needed for Sep.
+64. fk_order_items upload verification: Aug Orders 559 rows -> "Partial
+    import: 558 of 559"; Jul Orders 1,984 rows -> "2541 of 1984" (actual >
+    expected). Hypothesis (unconfirmed): expected = rows, not unique
+    orderItemIds (duplicate IDs collapse under deterministic IDs), and the
+    actual count is not scoped to this file's IDs (2541 is about 558 +
+    1,983, i.e. Jul + Aug docs together). Jul file showed 1,981 lines earlier,
+    1,984 later: confirm which file. Retry cannot succeed. Fix: expected =
+    unique IDs; verify by reading those IDs. 2d-fix (read-only diagnosis)
+    issued, not run.
+65. Bank statement: 0 marketplace credits raised an error (APR_2026.xlsx).
+    Policy now in Rules. 2e-fix SUMMARY NOT approved: empty cat -n, only 6
+    tests shown, conditional APR_2026 test (a missing sample must fail),
+    505-line test file, full suite not reported. 2e-fix-b issued. Owner to say
+    whether the 2 APR credits are marketplace payouts (parser miss) or other
+    income.
+66. Warning banner is generic and alert-styled although Flipkart only; fix in
+    8R-2a-3f.
+67. Reviewer error log (12 Nov): earlier flags "425 sign wrong", "688 vs 863
+    line count" (688 = ledger lines, 863 = file length) and "595 vs 680 units"
+    (680 counts row events; a sold-then-returned unit has two rows) were
+    mistaken and withdrawn.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -325,20 +380,24 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - Code paths: src/components/{SkuPerformanceScreen, PnLDashboardScreen,
   SettingsScreen, ReturnPerformanceScreen}.tsx, src/ledger/{buildLedger,
   ledgerSettings, skuGrouping, returnGrouping, returnUnits, returnGolden,
-  goldenDispatch, types}.ts + tests, src/utils/{skuEngine
-  (getCategoryFromSku only), pnlEngine, pipelineEngine, costCalculator,
-  skuResolver}.ts.
+  goldenDispatch, types}.ts + tests, src/bank/{bankStorage}.ts + test,
+  src/utils/{skuEngine (getCategoryFromSku only), pnlEngine, pipelineEngine,
+  costCalculator, skuResolver}.ts.
 
 ## Open decisions
 - GST: deduct output GST from revenue, ex-GST cost? Owner and CA (defect 40).
 - Amazon Debt adjustment and SAFE-T classification (defects 47, 52).
 - Category filter: kept (default).
 - DECIDED: return loss = 5% provision, landed cost, customer returns only;
-  RTO cost = packing only.
+  RTO cost = packing only. Settlement month = headline basis.
 
 ## Last result (12 Nov 2026)
-- Behaviour of the cancelled rule confirmed on screens (profit 46,577.80,
-  CI #106 green 18/277). 8R-2a-3b not accepted; 8R-2a-3c issued (owner has not
-  confirmed sending it). Owner: Retry July Orders (1,980/1,981), upload Aug,
-  send Sep screenshots; say whether the Settled May file was meant for the
-  Settled slot. Next reviewer: approve 8R-2a-3 after the 3c raw pastes.
+- 8R-2a-3c and 3d reviewed: behaviour approved (conditions: green CI on the
+  3d commit, warning screenshots on SKU and Return). Full reference gap
+  explained by three intentional rule differences (see bridge above).
+- 2e-fix (bank zero-credit) NOT approved; 2e-fix-b issued.
+- Owner: do NOT retry Jul/Aug Orders upload until 2d-fix is done. Answer
+  whether the 2 APR_2026 credit lines are marketplace payouts. Send the CI
+  run Summary for the 3d commit.
+- Next in order: 2d-fix diagnosis -> 2e-fix-b -> 8R-2a-3f -> Jul/Aug Orders
+  re-upload + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
