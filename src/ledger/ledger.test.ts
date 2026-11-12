@@ -510,5 +510,44 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
       expect(ledgerResult.totals.byPlatform[p].returnLoss).toBeCloseTo(expectedReturnLoss, 2);
     }
   });
+
+  // --------------------------------------------------------------------------
+  // 8. Flipkart CANCELLED non-dispatched items verification
+  // --------------------------------------------------------------------------
+  it('8. Every CANCELLED item with empty dispatched_date in raw Orders sample has 0 Sep Flipkart ledger lines', () => {
+    const rawOrdersWb = XLSX.readFile(findRealSampleFile('7 Orders'));
+    const rawOrders = parseOrders(rawOrdersWb.Sheets['Orders']);
+
+    const cancelledNoDispatchItems = rawOrders.filter(
+      (o) => o.status === 'CANCELLED' && (!o.dispatchedDate || o.dispatchedDate.trim() === '')
+    );
+
+    const cancelledNoDispatchSet = new Set(cancelledNoDispatchItems.map((o) => o.orderItemId));
+
+    // Find all item IDs from cancelledNoDispatchSet that had settled rows in September 2026
+    const settledItemIdsFound = new Set<string>();
+    for (const r of fkReport.orders) {
+      const pDate = r.paymentDate ? r.paymentDate.trim() : '';
+      if (pDate.startsWith('2026-09') && cancelledNoDispatchSet.has(r.orderItemId)) {
+        settledItemIdsFound.add(r.orderItemId);
+      }
+    }
+
+    // Verify 0 Sep Flipkart ledger lines for every CANCELLED non-dispatched item
+    for (const line of ledgerResult.lines) {
+      if (line.platform === 'Flipkart') {
+        expect(cancelledNoDispatchSet.has(line.orderId)).toBe(false);
+      }
+    }
+
+    // Verify the warning count of skipped items matches settledItemIdsFound count
+    const warningItemsCount =
+      (ledgerResult as any).warningSkippedCancelledItemsCount ||
+      (ledgerResult as any).skippedCancelledItemsCount ||
+      0;
+
+    expect(warningItemsCount).toBe(settledItemIdsFound.size);
+    expect(settledItemIdsFound.size).toBeGreaterThan(0);
+  });
 });
 

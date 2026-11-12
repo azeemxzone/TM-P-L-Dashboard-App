@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import XLSX from 'xlsx';
 import { parseSettled } from '../flipkart/settledParser';
+import { parseOrders } from '../flipkart/ordersParser';
 import { parseAmazonUnified } from '../amazon';
 import { parseMeeshoPayments } from '../meesho';
 
@@ -56,6 +57,16 @@ export function computeIndependentDispatched(sampleMonth: string = '2026-09'): {
   Meesho: number;
 } {
   // 1. Flipkart (from Settled Transaction sample)
+  const fkOrdersPath = findRealSampleFile('7 Orders');
+  const fkOrdersWb = XLSX.readFile(fkOrdersPath);
+  const fkOrders = parseOrders(fkOrdersWb.Sheets['Orders']);
+  const cancelledNoDispatchSet = new Set<string>();
+  for (const o of fkOrders) {
+    if (o.status === 'CANCELLED' && (!o.dispatchedDate || o.dispatchedDate.trim() === '')) {
+      cancelledNoDispatchSet.add(o.orderItemId);
+    }
+  }
+
   const fkPath = findRealSampleFile('2 Settled Transaction');
   const fkWb = XLSX.readFile(fkPath);
   const fkReport = parseSettled(fkWb);
@@ -65,6 +76,9 @@ export function computeIndependentDispatched(sampleMonth: string = '2026-09'): {
   for (const r of fkReport.orders) {
     const pDate = r.paymentDate ? r.paymentDate.trim() : '';
     if (sampleMonth && pDate && !pDate.startsWith(sampleMonth)) {
+      continue;
+    }
+    if (cancelledNoDispatchSet.has(r.orderItemId)) {
       continue;
     }
     if (!fkSeen.has(r.orderItemId)) {
