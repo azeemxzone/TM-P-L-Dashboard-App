@@ -153,6 +153,14 @@
 - Stage 9 files deleted from AI Studio and GitHub (recoverable from history).
   Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS
   (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024.
+- CI is RED since run #109 (3d commit). ROOT CAUSE (13 Nov): CI Node version
+  too old: vitest reporter crashes with "Map.groupBy is not a function"
+  (needs Node 21+), hiding the names of the 2 failing tests. Not caused by
+  STATE.md. Owner (GitHub web): set node-version 22 in the workflow and add
+  paths-ignore '**.md', then paste the failing test names. Known failure:
+  APR_2026 sample missing in repo. CI-1 SUMMARY received with empty Key
+  numbers (NOT accepted); agent run 18 files / 282 passed, 1 failing (APR).
+  Last green #106.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -273,6 +281,17 @@
     Diagnose in CI-1.
 71. APR_2026.xlsx holds personal bank lines: never commit the original; add an
     anonymised structure-only copy to /samples.
+72. Unmatched SKUs panel not built (spec; defect 4). Stage 4d-1 drafted: upload
+    records store unmatchedSkus, admin panel maps to master SKU via sku_aliases,
+    resolved flag, no deletes. Run after quota reset and 5R-4a.
+73. Usage 13 Nov (last 24h): reads 47K / 50K, writes 23K / 20K (over limit),
+    real-time reads 8.7K. Banner: database under "AI shared quota limits".
+    Console shows project ai-builder-project (database ai-studio-6160...),
+    STATE says continual-medium-b61jg: confirm which one the app uses.
+74. Delivered orders: hiding on screen saves no reads. Savings come from
+    monthly summary docs, status-filtered queries, isOpen flag, getDocs once,
+    shared provider (5R-4). Ledger needs only CANCELLED items + order-record
+    existence; tracking needs delivered-unpaid items. Keep writing all rows.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -307,14 +326,15 @@ ms_batches, ms_uploads. (sku_variants unused.)
   alert (same free allowance, pay only above; verify pricing). Revisit
   Postgres / Supabase at Stage 10 only (free tier pauses when idle, no real
   backups, high migration cost).
+- Move app to owner's own Firebase project with pay-as-you-go + budget alert
+  before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
 
 ## Last result (13 Nov 2026)
-- Quota exhausted; no deletion; wait for reset (12:00 noon Dubai); no upload
-  retries.
-- CI red since #109 (not STATE.md). 8R-2a-3 approval condition unmet.
-- 2e-fix-b NOT approved (cat -n missing; APR sample missing).
-- Owner to do: paste #109 error lines; add paths-ignore '**.md' to workflow;
-  prepare anonymised APR_2026.xlsx; read Usage tab; re-send full 2e-fix-b
-  SUMMARY after the sample is added.
+- CI cause found (Node version, Map.groupBy). CI-1 SUMMARY incomplete.
+- Usage: writes over free limit, reads near limit; reset 12:00 noon Dubai.
+- Next: owner fixes workflow, pastes failing test names, adds anonymised
+  APR_2026.xlsx, answers which Firebase project is used -> re-send CI-1 Key
+  numbers -> 2e-fix-b -> 2d-fix -> 5R-4a (revised) -> 5R-4 -> 4d-1 ->
+  8R-2a-3f-b -> uploads + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
 - Next: CI-1 (issued) -> fix CI -> 2e-fix-b -> 2d-fix -> 5R-4a -> 5R-4 ->
   8R-2a-3f-b -> uploads + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
