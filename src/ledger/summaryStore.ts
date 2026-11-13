@@ -11,6 +11,7 @@ import { buildLedger } from './buildLedger';
 import { groupLedgerBySku } from './skuGrouping';
 import { groupLedgerReturns } from './returnGrouping';
 import { stripUndefined } from '../utils/stripUndefined';
+import { cleanSku } from '../flipkart/normalizers';
 import {
   BuildSummaryDocsInput,
   LedgerLine,
@@ -172,6 +173,41 @@ function buildNonSkuSplit(
   };
 }
 
+function buildSkuNamePresenceMap(input: BuildSummaryDocsInput): Map<string, string> {
+  const nameMap = new Map<string, string>();
+
+  if (input.skuNameMap instanceof Map) {
+    for (const [k, v] of input.skuNameMap.entries()) {
+      const code = cleanSku(k);
+      const name = typeof v === 'string' ? v.trim() : '';
+      if (code && name) nameMap.set(code, name);
+    }
+    return nameMap;
+  }
+
+  if (input.skuNameMap && typeof input.skuNameMap === 'object') {
+    for (const [k, v] of Object.entries(input.skuNameMap)) {
+      const code = cleanSku(k);
+      const name = typeof v === 'string' ? v.trim() : '';
+      if (code && name) nameMap.set(code, name);
+    }
+    return nameMap;
+  }
+
+  if (Array.isArray(input.costLookup)) {
+    for (const item of input.costLookup) {
+      if (!item) continue;
+      const code = cleanSku(item.sku_code);
+      const name = typeof item.sku_name === 'string' ? item.sku_name.trim() : '';
+      if (code && name && cleanSku(name) !== code) {
+        nameMap.set(code, name);
+      }
+    }
+  }
+
+  return nameMap;
+}
+
 /**
  * Pure summary builder: calls existing buildLedger, groupLedgerBySku, and groupLedgerReturns
  * to produce one LedgerSummaryDoc per platform and settlement month.
@@ -194,6 +230,8 @@ export function buildSummaryDocs(ledgerInput: BuildSummaryDocsInput): LedgerSumm
     typeof ledgerInput.settings?.packing === 'number' && Number.isFinite(ledgerInput.settings.packing)
       ? ledgerInput.settings.packing
       : 6;
+
+  const skuNamePresenceMap = buildSkuNamePresenceMap(ledgerInput);
 
   const docs: LedgerSummaryDoc[] = [];
 
@@ -235,6 +273,15 @@ export function buildSummaryDocs(ledgerInput: BuildSummaryDocsInput): LedgerSumm
         profit: row.profitBeforeTax,
       }));
 
+      const missingNameSet = new Set<string>();
+      for (const row of perSku) {
+        const cleaned = cleanSku(row.masterSku);
+        if (cleaned && !skuNamePresenceMap.has(cleaned)) {
+          missingNameSet.add(row.masterSku);
+        }
+      }
+      const skuNameMissing = Array.from(missingNameSet).sort();
+
       const nonSkuCharges = buildNonSkuSplit(platformLines, skuResult.nonSkuRow);
 
       const summaryDoc: LedgerSummaryDoc = stripUndefined({
@@ -243,6 +290,7 @@ export function buildSummaryDocs(ledgerInput: BuildSummaryDocsInput): LedgerSumm
         settlementMonth: month,
         schemaVersion: LEDGER_SUMMARY_SCHEMA_VERSION,
         builtAt: new Date().toISOString(),
+        stale: false,
         sourceUploadIds: collectSourceUploadIds(ledgerInput, platform, month),
         totals: {
           revenue: pt.netSettlement,
@@ -268,7 +316,9 @@ export function buildSummaryDocs(ledgerInput: BuildSummaryDocsInput): LedgerSumm
           settledRowsWithoutOrderRecord:
             platform === 'Flipkart' ? ledgerResult.settledRowsWithoutOrderRecord : 0,
           unresolvedSkus: platformUnresolved,
+          skuNameMissing,
         },
+        skuNameMissing,
       });
 
       docs.push(summaryDoc);

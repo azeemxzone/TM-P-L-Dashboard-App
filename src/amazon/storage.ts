@@ -24,6 +24,7 @@ import { summariseUnified } from './unifiedParser';
 import { stripUndefined } from '../utils/stripUndefined';
 import { resolveMasterSku } from '../utils/skuResolver';
 import { cleanSku } from '../flipkart/normalizers';
+import { refreshSummariesAfterUpload } from '../ledger/summaryRefresh';
 
 export const BATCH_SIZE = 400;
 
@@ -701,6 +702,9 @@ export async function commitAmazonImport(
       `Data batches were successfully written (${totalOps} rows), but creating the az_uploads record failed: ${err.message}. Click Retry to save the upload record.`
     );
   }
+
+  const parsedRows = slot === 'amazon_unified' ? data.unified : data.mtr;
+  await refreshSummariesAfterUpload(db, slot, parsedRows);
 
   return {
     uploadId,

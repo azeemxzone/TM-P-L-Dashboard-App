@@ -302,6 +302,15 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow update, delete: if false;
     }
+
+    // Monthly Ledger Summaries (Stage 5R-4b-2b)
+    // Read: Allowed users
+    // Write: Admin only (delete denied)
+    match /pnl_summaries/{id} {
+      allow read: if isAllowedUser();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
   }
 }
 

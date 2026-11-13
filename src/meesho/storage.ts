@@ -27,6 +27,7 @@ import { groupMeeshoBatches } from './batches';
 import { stripUndefined } from '../utils/stripUndefined';
 import { resolveMasterSku } from '../utils/skuResolver';
 import { cleanSku } from '../flipkart/normalizers';
+import { refreshSummariesAfterUpload } from '../ledger/summaryRefresh';
 
 export const BATCH_SIZE = 400;
 
@@ -1152,6 +1153,9 @@ export async function commitMeeshoImport(
       `Data batches were successfully written (${totalOps} rows), but creating the ms_uploads record failed: ${err.message}. Click Retry to save the upload record.`
     );
   }
+
+  const parsedRows = slot === 'meesho_payments' ? data.payments : undefined;
+  await refreshSummariesAfterUpload(db, slot, parsedRows);
 
   return {
     uploadId,

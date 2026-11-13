@@ -19,6 +19,7 @@ import {
 import { groupByBatch } from './settledParser';
 import { resolveMasterSku } from '../utils/skuResolver';
 import { stripUndefined } from '../utils/stripUndefined';
+import { refreshSummariesAfterUpload } from '../ledger/summaryRefresh';
 
 export type FlipkartSlotType = 'orders' | 'settled' | 'returns' | 'bank_statement';
 
@@ -755,6 +756,9 @@ export async function commitFlipkartImport(
       `Data verified, but failed to create upload record for ${uploadId}: ${err.message}`
     );
   }
+
+  const parsedRows = slot === 'orders' ? data.orders : slot === 'settled' ? data.settled : data.returns;
+  await refreshSummariesAfterUpload(db, slot, parsedRows);
 
   return { uploadId, totalRecords: ops.length, collectionCounts };
 }

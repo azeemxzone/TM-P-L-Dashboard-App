@@ -196,6 +196,7 @@ export interface LedgerSummaryWarnings {
   skippedItems: number;
   settledRowsWithoutOrderRecord: number;
   unresolvedSkus: UnresolvedSku[];
+  skuNameMissing: string[];
 }
 
 export interface LedgerSummaryDoc {
@@ -204,17 +205,23 @@ export interface LedgerSummaryDoc {
   settlementMonth: string; // YYYY-MM
   schemaVersion: number;
   builtAt: string; // ISO 8601
+  stale?: boolean;
+  staleReason?: string;
+  staleAt?: string;
+  lastError?: string;
   sourceUploadIds: string[];
   totals: LedgerSummaryTotals;
   perSku: LedgerSummarySkuRow[];
   nonSkuCharges: LedgerSummaryNonSkuCharges;
   counts: LedgerSummaryCounts;
   warnings: LedgerSummaryWarnings;
+  skuNameMissing?: string[];
 }
 
 export interface BuildSummaryDocsInput extends Omit<BuildLedgerInput, 'settlementMonth'> {
   settlementMonth?: string;
   platforms?: Marketplace[];
   sourceUploadIds?: Partial<Record<Marketplace, string[]>>;
+  skuNameMap?: Map<string, string> | Record<string, string>;
 }
 
