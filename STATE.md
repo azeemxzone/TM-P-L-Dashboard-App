@@ -131,6 +131,12 @@
   .github/workflows/test.yml, plus paths-ignore '**.md'), missing APR sample,
   bank test column positions. Latest agent run after 5R-4b-2b: 22 files / 297
   tests (CI after that push UNSEEN).
+- CI GREEN runs #119, #120 (5R-4b-2b push), #121 (2d-fix-b push, commit 8faf784), 
+  13 Nov. #121 test count unseen.
+- 2d-fix-b: ACCEPTED with conditions 13 Nov (22 files / 301 tests in agent run; table sums).
+  Conditions: first real Jul Orders upload must show "N duplicate order items merged" + pass 
+  verification (screenshot); "reset after complete/cancelled" not seen in summary. Preview 
+  banner in UploadCentreScreen accepted (prompt task 1 asked for it).
 - Stage 8 (return performance on the ledger): IN PROGRESS, NOT CLOSED.
   * 8R-1 to 8R-1e reviewed. 8R-1c code accepted.
   * 8R-2 family APPROVED 12 Nov (return loss on landed cost).
@@ -155,15 +161,9 @@
     run (prompt in "Prompts to send next").
   * 4d-1 UnmatchedSkusPanel exists already (unreviewed, 4 duplicate listeners).
 - Not approved: 4c, 6, 8.
-- Queue (in order): owner pushes 5R-4b-2b, checks CI green, publishes
-  pnl_summaries rules -> 2d-fix-b -> Jul/Aug/Oct Orders uploads (only after
-  2d-fix-b) -> wire markSummariesStale to cost/alias/settings/purchases/
-  opening-stock writes + admin Rebuild button + manual backfill (one month at a
-  time, spread over 2 days) -> 5R-4c (screens read summaries, remove
-  whole-collection listeners) -> UnmatchedSkusPanel audit -> 8R-2a-3f-b -> Sep
-  screenshots vs CURRENT ledger Sep -> 8R-1f (Amazon MTR Cancel evidence,
-  read-only) -> 8R-3 (Non-SKU split by marketplace/type, tested vs raw sums)
-  -> close Stage 8 with full STATE.md.
+- Queue REPLACE first item: "owner checks rules (see defect 91) and publishes 
+  pnl_summaries block -> Jul Orders upload (one month per day, after 12:00 noon
+  Dubai quota reset; screenshot) -> Aug -> Oct -> ..."
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
   0.7 factor and fallback cost 100; legacy keys) -> defect 33 cleanup -> 4c ->
@@ -314,6 +314,14 @@
     (0 duplicates); Jul/Aug duplicates inferred, not proven. fk_order_items
     currently holds PARTIAL Jul/Aug data from failed attempts.
 90. Amazon/Meesho upload verification not audited for the same duplicate-ID bug.
+91. Repo firestore.rules as pasted 13 Nov has NO pnl_summaries block and contains
+    "TEMPORARY MIGRATION BYPASS" match /{document=**} allow read, write: if true 
+    (opens whole DB, overrides role rules). Live console rules unseen; owner to paste
+    (database ai-studio-6160b2e9-..., Rules tab). Do not publish until placement checked. 
+    Bypass removal only after owner confirms no Apps Script still needs it. Then agent 
+    prompt: edit firestore.rules only, print it.
+92. 2d-fix-b verification now reads each unique doc (about 2.5k reads per Orders 
+    upload + about 1k summary rebuild). One upload month per day.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
