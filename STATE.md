@@ -328,6 +328,16 @@
 81. Usage screenshot in defect 73 is from project ai-builder-project (database
     ai-studio-6160...), but owner says the app uses continual-medium-b61jg. Usage
     figures may belong to another project; owner to send Usage of continual-medium-b61jg.
+82. 5R-4b-2a received PARTIAL (13 Nov): only item 1 (month fields) delivered.
+    fk_settlement_rows and ms_payments have paymentMonth; fk_adjustments (paymentDate)
+    and ms_ads (deductionDate) need date ranges; az_transactions "orderMonth" is really
+    posted month; fk_order_items and az_mtr_rows have no settlement date (fetch by
+    orderItemId / orderId in chunks of 30). Rebuild of Sep about 2,500 reads (reviewer
+    estimate). Items 2 to 6 missing. 5R-4b-2a-b issued. summaryStore.test.ts typed-number
+    grep: empty (5R-4b-1 condition closed).
+83. Usage screenshot sent again is still ai-builder-project (database ai-studio-6160...);
+    owner says app uses continual-medium-b61jg. 5R-4b-2a-b item 7 prints the app config
+    projectId/databaseId to settle it.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -366,7 +376,6 @@ ms_batches, ms_uploads. (sku_variants unused.)
   before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
 
 ## Last result (13 Nov 2026)
-- 5R-4b-1 accepted (builder only, not yet used by any screen or upload).
-- Owner: app uses Firebase project continual-medium-b61jg. Needs: corrected test.yml,
-  failing test names, Usage of continual-medium-b61jg, no uploads until 2d-fix.
-- Next: 5R-4b-2a audit prompt (issued), CI-2, 2d-fix.
+- 5R-4b-2a partial; 5R-4b-2a-b issued. Quota reported reset, still no uploads until 2d-fix.
+- test.yml: keep file name, replace contents with corrected YAML; failing test names pending.
+- Next: CI-2, 2d-fix, then 5R-4b-2b after the audit is complete.
