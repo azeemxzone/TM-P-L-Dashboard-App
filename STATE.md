@@ -1,4 +1,4 @@
-# TM-P&L STATE (updated 13 Nov 2026)
+# TM-P&L STATE (updated 13 Nov 2026, evening; handover to a new Claude account)
 
 ## Rules (frozen)
 - Indian FY April-March. Marketplaces: Flipkart, Amazon India, Meesho.
@@ -57,163 +57,182 @@
   TDS back.
 - Bank statement: only marketplace credits stored. >0 parseable lines and 0
   marketplace credits = COMPLETE record (0 rows, ignored-line counts only),
-  not an error. Error only for 0 parseable lines or unreadable header.
-  Ignored lines (narration, payee, amount) never stored or logged. SHA-256
-  guard stays.
+  not an error (confirmed on screen: APR_2026 "0 of 0 rows"). Error only for
+  0 parseable lines or unreadable header. Ignored lines never stored or
+  logged. SHA-256 guard stays.
 - Upload verification: expected count = UNIQUE document IDs of the file;
   verify by reading those IDs, never row counts or whole-collection counts.
+  (Flipkart fix = Stage 2d-fix-b, issued; Amazon/Meesho not yet audited.)
 - Tests never read live Firestore and never need files missing from the repo.
-  Samples in the repo must hold no personal data (bank files anonymised).
+  Samples in the repo hold no personal data (bank files anonymised).
 - Warning display: amber only for real data gaps (settledRowsWithoutOrderRecord
   > 0); cancelled-before-dispatch count is a neutral grey footnote labelled
-  "Flipkart:".
-- Firestore usage: no whole-collection onSnapshot on ledger screens; month-
-  filtered getDocs once, shared provider (Stage 5R-4). Never delete data to
-  free quota.
+  "Flipkart:" (Stage 8R-2a-3f-b).
+- Firestore usage: no whole-collection onSnapshot on ledger screens; screens
+  read pre-computed pnl_summaries (Stage 5R-4c). Never delete data to free quota.
+- Summary docs: pnl_summaries/{Platform}_{YYYY-MM} (capitalised platform, e.g.
+  Flipkart_2026-09), built by the EXISTING buildLedger + groupings, rebuilt after
+  each upload "complete" record for the settlement months it touched; stale flag
+  (flag only, no auto rebuild) when cost_master, purchases, opening_stock,
+  sku_aliases or settings change; admin Rebuild + manual backfill.
 
 ## Roles in this project
-- Claude (PM and financial-logic reviewer): writes short scoped prompts,
-  reviews SUMMARY blocks, test output and screenshots, decides approve /
-  fix, keeps STATE.md. Does not write the app. Terse, one question max, ends
-  every reply with STATE.md changes in copiable blocks; closes each approved
-  stage with a full STATE.md.
-- Agent: AI Studio (Gemini 3.6 Flash; React + TypeScript + Firebase). One
-  stage per chat. Owner pastes SUMMARY, CI and screen screenshots.
-- Owner: Tabbymart. Does everything needing Firebase console, GitHub web or
-  the running app (incl. workflow file edits, deleting files on GitHub).
-  Deletions in AI Studio do NOT reach GitHub. AI Studio commits appear on
-  GitHub and CI runs on them.
+- Claude (PM and financial-logic reviewer): writes short scoped prompts for the
+  AI Studio agent, reviews SUMMARY blocks, test output and screenshots,
+  decides approve / fix, keeps STATE.md. Does NOT write the app. Replies
+  tersely, at most one question per reply, prompts in code blocks, every reply
+  ends with STATE.md changes in copiable blocks (section + REPLACE/ADD); closes
+  each approved stage with a full STATE.md. Where STATE.md and PROJECT_SPEC.md
+  conflict, STATE.md wins.
+- Agent: AI Studio (Gemini 3.6 Flash; React + TypeScript + Firebase). One stage
+  per chat. Owner pastes SUMMARY, CI and screen screenshots to Claude.
+- Owner: Tabbymart. Does everything needing Firebase console, GitHub web or the
+  running app (workflow edits, deleting files on GitHub, publishing rules).
+  Deletions in AI Studio do NOT reach GitHub. AI Studio commits appear on GitHub
+  and CI runs on them.
 
 ## Agent (AI Studio) rules
-- Standing rules in AI Studio Custom instructions. Prompt lists only files it
-  may edit (others READ-ONLY; "if a fix needs another file, STOP and report
-  its name"); ends "stop after this task" and the SUMMARY template. Prompts
-  ask for specific pasted answers, not "identified / verified".
-- Every requested table, grep output and assertion goes INSIDE the SUMMARY
-  block under Key numbers. Reply = SUMMARY block ONLY, all header fields
-  filled. Owner pastes the WHOLE block (truncated pastes seen: 2e-fix and
-  2e-fix-b lost the cat -n). "Pasted" without content not accepted.
-  "Deviations: none" checked against the allowed list.
-- Owner has pasted stale agent reports before: check Stage name.
-- Agent container has NO .git: git proof comes from owner via GitHub
+- Standing rules live in AI Studio Custom instructions. Prompt lists only files
+  it may edit (others READ-ONLY; "if a fix needs another file, STOP and report
+  its name"); ends "stop after this task" and the SUMMARY template. Prompts ask
+  for specific pasted answers, not "identified / verified".
+- Every requested table, grep output and assertion goes INSIDE the SUMMARY block
+  under Key numbers. Reply = SUMMARY block ONLY, all header fields filled. Owner
+  pastes the WHOLE block. The agent often TRUNCATES long Key numbers (cat -n
+  lost in 2e-fix, 3d, 5R-4b-2a, CI-3, CI-2): ask for SHORT replies (max 40-60
+  lines, max 15 lines per cat -n). "Pasted" without content not accepted.
+  "Deviations: none" checked against the allowed list (agent once renamed a
+  collection undeclared).
+- The owner has pasted stale/old reports before: check the Stage name matches
+  the current prompt.
+- Agent container has NO .git: git proof comes from the owner via GitHub web
   (Actions -> run -> Summary / failed step).
-- Agent line numbers, tables and signs have been wrong (8R-2a, 8R-2a-2,
-  8R-2a-3 "dispatched 680", 8R-2a-3d cost 32,042 / profit 27,473.33).
-  Require raw output; tests compute; recompute arithmetic in every summary.
-  Audits contradicted each other (defect 52).
-- Tests use REAL samples; a missing sample FAILS the test.
-- Never touch auth, Firebase config or deploy rules. Owner publishes rules;
-  new blocks go INSIDE the documents block.
+- Agent numbers and signs have been wrong (8R-2a, 8R-2a-2, 8R-2a-3 "dispatched
+  680", 8R-2a-3d cost 32,042 / profit 27,473.33). Require raw output; tests
+  compute; recompute arithmetic in every summary. Audits have contradicted each
+  other (defect 52).
+- Tests use REAL samples; a missing sample FAILS the test. No typed financial
+  numbers. Reference values come from workbook cells or raw columns, never
+  ledger output.
+- Never touch auth, Firebase config or deploy rules. Owner publishes rules; new
+  blocks go INSIDE the "match /databases/{database}/documents" block.
 - Every write via stripUndefined. Counts verified by reading expected IDs.
-- Proof = green GitHub Actions + real screenshots + golden test. The agent's
-  "N tests passing" is not proof (3d: agent green, CI red). Reference values
-  from workbook cells / raw columns, never ledger output. No typed financial
-  numbers in tests.
+- Proof = green GitHub Actions + real screenshots + golden test. The agent's "N
+  tests passing" is not proof (3d: agent green, CI red).
 - Repo private. No customer/supplier personal data, GSTIN, city, postal code.
+- Reviewer error log: Claude has mis-flagged things before (425 sign, 688 vs
+  863 lines, 595 vs 680 units; all withdrawn). Cross-check before rejecting.
 
 ## Stage status
 - Verified: 1, 1.1, 1.2, 1.3, 2, 2b, 2c, 3a, 3b, 3c, 4a, 4b, 5R, 7R.
-- Prompt A, 5R-1, 5R-3, 5R-3g: APPROVED. 7R family ACCEPTED 11 Nov.
-- CI is RED since run #109 (3d commit b1bccfc, 12 Nov 9:12 PM); #110 (STATE.md),
-  #111 (bank analyzer util), #112 (STATE.md, 13 Nov) red as well. Last green:
-  #106 (18 files / 277 tests). Agent's own run 13 Nov: 19 files, 281 tests,
-  2 failing (APR_2026 sample missing; pnlDashboardModel.test reported failing
-  on live Firestore quota). Cause in CI unconfirmed: owner to paste #109
-  error lines. Stage CI-1 (read-only diagnosis) issued.
+- Prompt A, 5R-1, 5R-3, 5R-3g APPROVED. 7R family ACCEPTED 11 Nov.
+- CI GREEN since run #119 (13 Nov, commit 30163d5, 21 files / 293 tests). Earlier
+  red runs #109-#118: Node version (Map.groupBy; fixed by node-version 22 in
+  .github/workflows/test.yml, plus paths-ignore '**.md'), missing APR sample,
+  bank test column positions. Latest agent run after 5R-4b-2b: 22 files / 297
+  tests (CI after that push UNSEEN).
 - Stage 8 (return performance on the ledger): IN PROGRESS, NOT CLOSED.
   * 8R-1 to 8R-1e reviewed. 8R-1c code accepted.
-  * 8R-2 family APPROVED 12 Nov (CI #103 green 18/276).
+  * 8R-2 family APPROVED 12 Nov (return loss on landed cost).
   * 8R-2a-3 (cancelled rule, orderRecords from fk_order_items, warnings):
-    BEHAVIOUR APPROVED 12 Nov. Open conditions: green CI on 3d commit (NOT
-    met), warning screenshots on SKU and Return screens.
-  * 8R-2a-3c raw proofs received (grep clean, 4 skipped rows / 3 items).
-    8R-2a-3d added warnings, removed typed 425.00; its SUMMARY tables wrong,
-    code and tests sound. 8R-2a-3e dropped.
-  * 8R-2a-3f replaced by 8R-2a-3f-b (issued 13 Nov, run after CI is green):
-    grey "Flipkart:" footnote for cancelled rows, amber only for missing order
-    records, bridge test per platform with residual <= 1.00.
-  * 2e-fix-b (bank zero-credit): NOT approved. cat -n missing in paste; APR
-    test fails because APR_2026.xlsx is not in /samples. Owner to add an
-    anonymised APR_2026.xlsx (structure only, 3 rows 2 CR / 1 DR, no
-    narration or names) to /samples, then re-send the full SUMMARY.
-  * 2d-fix (fk_order_items upload verification, read-only diagnosis): issued
-    earlier, not run.
-  * 5R-4a (read-only audit of Firestore read cost) drafted; then 5R-4.
-  * Queue (in order): 2d-fix diagnosis (SUMMARY still pending) -> 5R-4b-2b (issued) ->
-    wire markSummariesStale to the cost/alias/settings/purchases/opening-stock writes +
-    admin Rebuild button + manual backfill -> pnl_summaries rules block published by
-    owner -> 5R-4c (screens read summaries, remove whole-collection listeners) ->
-    UnmatchedSkusPanel audit -> implement 2d-fix, then Jul/Aug/Oct Orders uploads ->
-    8R-2a-3f-b -> Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
+    BEHAVIOUR APPROVED 12 Nov; CI condition now met. Pending: warning
+    screenshots on SKU/Return screens (8R-2a-3f-b).
+  * 8R-2a-3d added warnings and removed typed 425.00 (its SUMMARY tables were
+    wrong; code/tests sound). 8R-2a-3e dropped.
+  * Reviewer bridge ledger -> reference is explained (see Verified targets).
+- Side stages:
+  * 2e-fix / 2e-fix-b (bank zero-credit): behaviour confirmed on screen and CI.
+    CLOSED. (Low priority Stage 10 check: APR test asserts raw-sheet values.)
+  * CI-2 (pnlDashboardModel.test off Firestore): accepted; grep proof unseen.
+  * CI-3 (bank test header-name columns): accepted, CI green.
+  * 5R-4a (read-cost audit): accepted. 5R-4b-1 (summary builder, pnl_summaries):
+    accepted. 5R-4b-2a, 2a-b, 2a-c (hook audit): accepted/complete.
+  * 5R-4b-2b (hook refreshSummariesAfterUpload after complete record in
+    commitFlipkartImport / commitAmazonImport / commitMeeshoImport; markSummariesStale;
+    pnl_summaries rules block in repo firestore.rules): ACCEPTED with conditions
+    (try/catch at call sites unseen, CI after push unseen, owner must publish rules).
+  * 2d-fix diagnosis: accepted (defect 89). 2d-fix-b (implementation) ISSUED, not
+    run (prompt in "Prompts to send next").
+  * 4d-1 UnmatchedSkusPanel exists already (unreviewed, 4 duplicate listeners).
 - Not approved: 4c, 6, 8.
+- Queue (in order): owner pushes 5R-4b-2b, checks CI green, publishes
+  pnl_summaries rules -> 2d-fix-b -> Jul/Aug/Oct Orders uploads (only after
+  2d-fix-b) -> wire markSummariesStale to cost/alias/settings/purchases/
+  opening-stock writes + admin Rebuild button + manual backfill (one month at a
+  time, spread over 2 days) -> 5R-4c (screens read summaries, remove
+  whole-collection listeners) -> UnmatchedSkusPanel audit -> 8R-2a-3f-b -> Sep
+  screenshots vs CURRENT ledger Sep -> 8R-1f (Amazon MTR Cancel evidence,
+  read-only) -> 8R-3 (Non-SKU split by marketplace/type, tested vs raw sums)
+  -> close Stage 8 with full STATE.md.
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
-  0.7 factor and fallback cost 100; legacy keys) -> defect 33 cleanup -> 4c
-  -> 9 (GST/TDS/TCS as CA reconciliation report) -> 10 (hardening, backup,
-  deploy, own Firebase project with billing, split UploadCentreScreen,
-  publish firestore.rules incl. ms_*).
+  0.7 factor and fallback cost 100; legacy keys) -> defect 33 cleanup -> 4c ->
+  9 (GST/TDS/TCS as CA reconciliation report) -> 10 (hardening, backup,
+  deploy, split UploadCentreScreen, publish firestore.rules incl. ms_* and
+  pnl_summaries, enable Firestore scheduled backups, manual live-vs-CSV
+  cost_master/alias check).
 - Stage 9 files deleted from AI Studio and GitHub (recoverable from history).
   Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS
   (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024.
-- CI GREEN since run #119 (13 Nov, commit 30163d5, 21 files / 293 tests). Earlier red
-  runs #109 to #118: Node version (Map.groupBy, fixed with node-version 22 in
-  test.yml), missing APR sample, bank test column positions. 8R-2a-3 condition
-  "green CI on 3d commit" MET. Warning screenshots on SKU/Return pending (3f-b).
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
   5,781.57 (8). SEP_2026.xlsx: 48 lines, 43 marketplace credits.
 - Settlements: Flipkart 61,423.71 (cols 9-17 = 63,229.35 = Bank Settlement
   Value, minus fines 150.00 and ads 1,655.64); Meesho 105,394.44 (incl. ads
-  -3,582.46); Amazon Released activity 4,912.85 (transfers -5,781.57;
-  released movement -868.72 NOT revenue; Deferred 1,765.78).
-- Reference workbook (Summary sheet; MFG cost for return loss, sold-units
-  packing, credits cost for the 3 never-dispatched Flipkart returns): packing
-  FK 2,772 / AZ 192 / MS 5,862; after-tax profit FK 27,462.47 / AZ 2,323.65 /
-  MS 18,089.19 (47,875.31); TCS FK -286.67 / AZ -36.64 / MS -687.20; TDS FK
-  -2,866.54 / AZ 0 / MS -137.29.
-- CURRENT ledger Sep (cancelled rule live, Orders file Sep only): revenue
-  61,423.71 / 4,912.85 / 105,394.44 (171,731.00); product cost 31,203 / 2,355
-  / 80,317 (113,875); packing 3,570 / 210 / 5,862 (9,642); return loss 426.25
-  / 43.95 / 1,166.00 (1,636.20); before TCS/TDS 29,377.67 / 2,331.92 /
-  18,873.93 (50,583.52); TCS -286.67 / -28.02 / -687.20 (-1,001.89); TDS
-  -2,866.54 / 0 / -137.29 (-3,003.83); after TCS/TDS 26,224.46 / 2,303.90 /
+  -3,582.46); Amazon Released activity 4,912.85 (transfers -5,781.57; released
+  movement -868.72 NOT revenue; Deferred 1,765.78).
+- Reference workbook (September_2026_Reference_PnL.xlsx, Summary sheet; MFG
+  cost for return loss, sold-units packing, credits cost for the 3
+  never-dispatched Flipkart returns): packing FK 2,772 / AZ 192 / MS 5,862;
+  after-tax profit FK 27,462.47 / AZ 2,323.65 / MS 18,089.19 (47,875.31); TCS
+  FK -286.67 / AZ -36.64 / MS -687.20; TDS FK -2,866.54 / AZ 0 / MS -137.29.
+  Tolerance +/-1.00 for like-for-like comparisons.
+- CURRENT ledger Sep (cancelled rule live; confirmed by pnl_summaries Sep docs
+  in 5R-4b-1): revenue 61,423.71 / 4,912.85 / 105,394.44 (171,731.00); product
+  cost 31,203 / 2,355 / 80,317 (113,875); packing 3,570 / 210 / 5,862 (9,642);
+  return loss 426.25 / 43.95 / 1,166.00 (1,636.20); before TCS/TDS 29,377.67 /
+  2,331.92 / 18,873.93 (50,583.52); TCS -286.67 / -28.02 / -687.20 (-1,001.89);
+  TDS -2,866.54 / 0 / -137.29 (-3,003.83); after TCS/TDS 26,224.46 / 2,303.90 /
   18,049.44 (46,577.80); cash to bank 172,599.80.
-- Screen 12 Nov after PARTIAL Jul/Aug Orders upload (not golden): Flipkart
-  cost 31,328, packing 3,564 (594 units), after TCS/TDS 26,105.46, total
-  46,458.80 (-119.00 vs CURRENT: one extra cancelled-no-dispatch RTO row
-  found from prior-month order records). Banner 5 rows / 4 items vs 4 / 3 in
-  samples. Expected to move after full upload.
-- Bridge ledger -> reference (reviewer arithmetic; 3f-b test must prove from
-  raw): Flipkart -1,238.01 = packing -798 (133 x 6) - return loss landed vs
-  MFG 15 - never-dispatched credit 425, residual 0.01. Amazon -19.75 =
-  packing -18 - 1.75. Meesho -39.75 = 5% x 5 x 159. Total -1,297.51. All
-  intentional rule differences.
-- Return Performance Sep (screen): FK dispatched 595 / customer returns 60
-  (10.1%) / RTO 159 (26.7%) / 688 lines (683 settled + 5 adjustments); AZ 35 /
-  7 / 0 / 76 lines; MS 977 / 159 / 257 / 1,082; total dispatched 1,607,
-  customer returns 226 (14.1%), RTO 416 (25.9%), 1,846 lines. Non-SKU
-  charges -7,047.78 (total foots; breakdown unreliable, defect 52).
-  Unresolved 0.
-- Cancelled items: 3 Flipkart items, 4 settled rows: -1 x TM-MA-001 235; +1
-  and -1 x TM-ST-004 165; -1 x TM-CM-001 190; all money 0. Old booking:
-  product cost net credit -425, packing 18; profit change -407.00.
-- Dispatch detail (before cancelled rule): FK 598; AZ 32 + 3 = 35; MS 565 +
-  412 = 977 (5 claims rows excluded).
+- Screen 12 Nov after PARTIAL Jul/Aug Orders upload (not golden): Flipkart cost
+  31,328, packing 3,564 (594 units), after TCS/TDS 26,105.46, total 46,458.80
+  (-119.00 vs CURRENT: one extra cancelled-no-dispatch RTO row found from
+  prior-month order records). Banner 5 rows / 4 items vs 4 / 3 in samples.
+  Expected to move after full Jul/Aug upload.
+- Bridge ledger -> reference (reviewer arithmetic; 3f-b test must prove from raw):
+  Flipkart -1,238.01 = packing -798 (133 x 6) - return loss landed vs MFG 15 -
+  never-dispatched credit 425, residual 0.01. Amazon -19.75 = packing -18 -
+  1.75. Meesho -39.75 = 5% x 5 x 159. Total -1,297.51. All intentional rule
+  differences.
+- Return Performance Sep (screen): FK dispatched 595 / customer returns 60 (10.1%)
+  / RTO 159 (26.7%) / 688 lines (683 settled + 5 adjustments); AZ 35 / 7 / 0 /
+  76 lines; MS 977 / 159 / 257 / 1,082; total dispatched 1,607, customer returns
+  226 (14.1%), RTO 416 (25.9%), 1,846 lines. Non-SKU charges -7,047.78 (total
+  foots; breakdown unreliable, defect 52). Unresolved 0.
+- Cancelled items: 3 Flipkart items, 4 settled rows: -1 x TM-MA-001 235; +1 and
+  -1 x TM-ST-004 165; -1 x TM-CM-001 190; all money 0. Old booking: product cost
+  net credit -425, packing 18; profit change -407.00.
+- Dispatch detail (before cancelled rule): FK 598; AZ 32 + 3 = 35; MS 565 + 412
+  = 977 (5 claims rows excluded). 595 dispatched = 594 items (one qty-2 item).
 - Amazon TCS: Released -28.02 in P&L, Deferred -8.62 pipeline.
 - Counts: Flipkart orders 493 raw rows (DELIVERED 258, READY_TO_SHIP 58,
   RETURN_REQUESTED 49, RETURNED 83, CANCELLED 44 all empty dispatched_date,
-  APPROVAL_HOLD 1); 683 settled rows (461 sale / 222 return); 18 batches; 204
-  returns. Meesho 1,426 orders (189 cancelled), 544 returns delivered, 62 in
-  transit, 986 payment rows, 96 ads, 17 batches. Amazon unified 94 (84
-  Released / 10 Deferred), MTR 60 (Shipment 37, Cancel 15, Refund 7,
-  FreeReplacement 1). cost_master 34, sku_aliases 67.
+  APPROVAL_HOLD 1), 0 duplicate orderItemIds in Sep; 683 settled rows (461 sale /
+  222 return); 18 batches; 204 returns. Meesho 1,426 orders (189 cancelled), 544
+  returns delivered, 62 in transit, 986 payment rows, 96 ads, 17 batches. Amazon
+  unified 94 (84 Released / 10 Deferred), MTR 60 (Shipment 37, Cancel 15, Refund
+  7, FreeReplacement 1). cost_master 34, sku_aliases 67.
+- Sep rebuild reads per platform (5R-4b-2b test): FK 1,052 / AZ 247 / MS 1,184,
+  total 2,279 incl. 102 shared. Versus about 29k per screen open before 5R-4c.
+- Summary doc sizes 1.8 to 3.4 KB (limit 1 MiB).
 
 ## Known defects / open items
 1. Parity tests compare the ledger with its own grouping; screen is proof.
 2. Alias TM-PC-004New target (TM-PC-004) set by owner; not verified.
 3. Cost Master "Load Sample sku_master_v2.csv" can load the wrong file.
-4. Upload Centre has no Unmatched SKUs box (spec).
+4. Upload Centre has no Unmatched SKUs box per spec; UnmatchedSkusPanel.tsx now
+   exists (unreviewed; see 75).
 6. Fallback cost 100 and bundled v2 data in pnlEngine (:22,:38); pipeline 0.7
    factor unproven (Stage 6).
 8. Engine tests (pipeline/pnl) synthetic.
@@ -230,126 +249,71 @@
 20. SKU rows can show negative net units (settlement basis). Consistent.
 21. Loss-making SKUs Sep: TM-ST-002, TM-PC-004, TM-CM-001, TM-MBT-002.
 22. goldenReturnLossRate = 5/100 typed fixture (goldenDispatch.ts:136).
-24. Test count: CI #106 green 18/277; CI red since #109.
 30. goldenDispatch.ts reads samples via fs (tests only).
 33. Literal `?? 5` freight defaults: PurchasesScreen:84, AverageCostScreen:47,
-    OpeningStockScreen:73, CostMasterScreen:76, SettingsScreen:41-45; legacy
-    keys in PipelineTrackerScreen:114-115.
+    OpeningStockScreen:73, CostMasterScreen:76, SettingsScreen:41-45; legacy keys
+    in PipelineTrackerScreen:114-115.
 34. Minor: SettingsScreen setDoc no merge; ParsedLedgerSettings duplicate
     fields; types.ts:101 stale comment; ledger.test return-loss term uses
     freightSetting for the landed-vs-MFG delta (valid bridge term).
 36. Amazon RTO = 0 in Sep not proven (8R-1f).
-40. Customer sale amount includes GST; revenue/profit include output GST.
-    Amazon tax exact (MTR 1,317.59); Flipkart/Meesho no tax split. Needs CA.
+40. Customer sale amount includes GST; revenue/profit include output GST. Amazon
+    tax exact (MTR 1,317.59); Flipkart/Meesho no tax split. Needs CA.
 42. "Non-SKU charges" one line; split in 8R-3.
-46. Amazon cancelled: 11 of 15 MTR Cancel rows have Released Order rows;
-    not proven a bug (8R-1f).
-47. Amazon SAFE-T/FBA classification unresolved (SKU-less vs TM-MR-001).
-    Debt adjustment likely balance movement (8R-3).
+46. Amazon cancelled: 11 of 15 MTR Cancel rows have Released Order rows; not
+    proven a bug (8R-1f).
+47. Amazon SAFE-T/FBA classification unresolved (SKU-less vs TM-MR-001). Debt
+    adjustment likely balance movement (8R-3).
 48. Meesho return lines ledger units 0, helper counts 1 (hidden fallback).
 52. 8R-1d D vs 8R-1e D disagree on Amazon non-SKU rows; 8R-3 tests vs raw.
 53. skuGrouping.test.ts:138 naming mismatch; structural literals accepted.
 56. 8R-2c-3 SUMMARY lacked header fields.
 58. Agent tables in 8R-2a / 8R-2a-2 wrong; ignored.
-61. settledRowsWithoutOrderRecord 394 (356 Aug, 38 Jul) until uploads
-    complete. Re-check Sep screens.
-63. Rejected uploads: Settled_Transaction_May2026.xlsx ("could not detect a
-    valid Flipkart report format"; owner to say which slot), and
-    May2026_structured.xlsx in Bank slot. Not needed for Sep.
-64. fk_order_items upload verification: Aug 559 rows "558 of 559"; Jul
-    "2541 of 1984" (earlier 1,980 of 1,981). Hypothesis: expected = rows not
-    unique IDs; actual count not scoped to file's IDs. Retry cannot succeed.
-    Fix: expected = unique IDs, verify by reading IDs. 2d-fix not run.
-65. Bank zero-credit policy in Rules; 2e-fix-b NOT approved (see Stage status).
-66. Banner generic/alert-styled: fixed by 8R-2a-3f-b (grey footnote; amber only
-    for missing order records). It will never reach 0 while cancelled orders
-    exist.
-67. Reviewer error log: flags "425 sign wrong", "688 vs 863" and "595 vs 680"
-    were mistaken and withdrawn.
-68. Firestore free quota exhausted 13 Nov (resource-exhausted on
-    fk_settlement_rows). Likely daily reads (50k) / writes (20k); storage
-    (1 GiB) unconfirmed (owner: Firebase console -> Build -> Firestore ->
-    Usage tab). Cause (hypothesis): whole-collection onSnapshot, one copy per
-    screen, no month filter. Do NOT delete data. Quota resets 12:00 noon Dubai.
-    Fix = Stage 5R-4.
-69. CI red since #109; not caused by STATE.md. Add paths-ignore '**.md' to
-    .github/workflows (owner, GitHub web). Cause in CI to confirm (#109 log).
-70. pnlDashboardModel.test.ts reported failing on live Firestore quota in the
-    agent's run: if true, a test reaches live Firestore (violates rule).
-    Diagnose in CI-1.
-71. APR_2026.xlsx holds personal bank lines: never commit the original; add an
-    anonymised structure-only copy to /samples.
-72. Unmatched SKUs panel not built (spec; defect 4). Stage 4d-1 drafted: upload
-    records store unmatchedSkus, admin panel maps to master SKU via sku_aliases,
-    resolved flag, no deletes. Run after quota reset and 5R-4a.
-73. Usage 13 Nov (last 24h): reads 47K / 50K, writes 23K / 20K (over limit),
-    real-time reads 8.7K. Database ai-studio-6160b2e9-... is under "AI shared
-    quota limits" (Enterprise, europe-west2, Firestore Native, scheduled backups
-    DISABLED, realtime updates enabled). RESOLVED 13 Nov: Firebase project name
-    ai-builder-project = Project ID continual-medium-b61jg (project number
-    116053236246); same project the app uses. Backups needed (Stage 10).
-74. Delivered orders: hiding on screen saves no reads. Savings come from
-    monthly summary docs, status-filtered queries, isOpen flag, getDocs once,
-    shared provider (5R-4). Ledger needs only CANCELLED items + order-record
-    existence; tracking needs delivered-unpaid items. Keep writing all rows.
-75. 5R-4a audit ACCEPTED (13 Nov). P&L open = about 29,154 reads (estimate:
-    Sep counts x 12), P&L + SKU + Return = about 87,462, above the 50k daily
-    limit. All ledger screens use whole-collection onSnapshot, independent
-    copies. Also found: UnmatchedSkusPanel.tsx already exists (4 listeners
-    duplicating parent; never reviewed by PM; 4d-1 unapproved); storage
-    writes ms_returns_in_transit but MeeshoTrackingScreen reads
-    ms_returns_intransit; AuthContext onSnapshot not cleaned on unmount;
-    FlipkartTrackingScreen:281 reads all fk_returns.
-76. pnlDashboardModel.test.ts live Firestore calls removed in CI-2 (13 Nov):
-    test 5 now reads sku_master_v3.csv and sku_aliases_v2.csv via
-    findRealSampleFile. Proof pending: grep output (SUMMARY Key numbers truncated).
-    Lost check: live Firestore vs CSV sync; add as a manual Stage 10 check.
-77. .github/workflows/test.yml (13 Nov) had duplicate "on:" key and a stray
-    comma; replaced with the corrected file (node 22, paths-ignore **.md).
-78. DESIGN AGREED 13 Nov: pre-computed ledger_summaries/{platform}_{YYYY-MM}
-    (built by existing buildLedger and groupings, rebuilt on each upload that
-    touches the month, incl. Orders uploads); raw rows still written fully;
-    Tracking keeps delivered-unpaid items (isOpen flag); screens read summaries
-    (5R-4c). Stages: 5R-4b-1 builder + test (issued), 5R-4b-2 hook into upload
-    commits, 5R-4c screens. Watch 1 MiB doc limit.
-79. 5R-4b-1 ACCEPTED as builder (13 Nov): src/ledger/summaryStore.ts (buildSummaryDocs,
-    writeSummaries, writeBatch merge, BATCH 400), summaryStore.test.ts (5 tests), types.
-    Collection name is pnl_summaries (agent's choice, accepted), doc IDs
-    "{Platform}_{YYYY-MM}" capitalised (Flipkart_2026-09). Sep docs equal CURRENT ledger
-    Sep (26,224.46 / 2,303.90 / 18,049.44), size 1.8 to 3.4 KB. Open: typed-number grep
-    for summaryStore.test.ts; pnl_summaries needs a firestore.rules block (read: listed
-    users, write: admin) in repo, owner publishes (5R-4b-2b); deviation of collection
-    name was not declared by the agent.
-80. Latest agent run (13 Nov): 21 files / 293 tests, 1 failing (APR_2026 sample missing).
-    CI itself still unverified after the YAML fix.
-81. (closed, see 73).
-82. CLOSED 13 Nov: 5R-4b-2a-c complete and accepted. Sep rebuild about 2,288 reads
-    (2,627 max) vs about 29k per screen open today. Project and database IDs match
-    console (continual-medium-b61jg / ai-studio-6160b2e9-...), source file
-    /firebase-applet-config.json.
-83. (closed, see 73).
-84. CLOSED 13 Nov: CI green at run #119 (commit 30163d5), 21 files / 293 tests.
-    Cause of last failure: analyzeRawBankSheet in bankStorage.test.ts used fixed
-    column positions (anonymised APR file has 8 columns); fixed by header-name
-    lookup. Low-priority Stage 10 check: APR test asserts raw-sheet-computed values.
-85. Design for 5R-4b-2b (issued 13 Nov): hook refreshSummariesAfterUpload after the
-    complete record in commitFlipkartImport / commitAmazonImport / commitMeeshoImport
-    (skip Flipkart Returns, Meesho Orders, Meesho Returns). Touched months: in memory
-    for Flipkart Settled, Amazon Unified, Meesho Payments (+ads); Flipkart Orders via
-    fk_settlement_rows by orderItemId (chunks of 30); Amazon MTR via az_transactions
-    by orderId (chunks of 30). Failure = upload stays complete, summary stale.
-    Stale triggers (flag only, no auto rebuild) at: CostMasterScreen 195/247/287/323,
+61. settledRowsWithoutOrderRecord 394 (356 Aug, 38 Jul) until Jul/Aug Orders
+    uploads complete. Re-check Sep screens after.
+63. Rejected uploads: Settled_Transaction_May2026.xlsx ("could not detect a valid
+    Flipkart report format"; owner to say which slot), and May2026_structured.xlsx
+    in Bank slot. Not needed for Sep.
+64. fk_order_items upload verification: see 89 (diagnosed).
+66. Banner generic/alert-styled: fix in 8R-2a-3f-b (grey footnote; amber only for
+    missing order records). Never reaches 0 while cancelled orders exist.
+67. Reviewer error log: flags "425 sign wrong", "688 vs 863", "595 vs 680" were
+    mistaken and withdrawn.
+68. Firestore free quota was exhausted 13 Nov (reads 47K/50K, writes 23K/20K).
+    Quota reset daily 12:00 noon Dubai. Do NOT delete data. Fix = pnl_summaries
+    design (5R-4b/5R-4c). Each upload now adds about 1,000 reads (summary
+    rebuild): do not upload 12 months in one day.
+69. CI cause was Node version, not STATE.md (see Stage status). CLOSED.
+70/76. pnlDashboardModel.test live Firestore removed in CI-2 (grep proof unseen).
+    Lost check live-vs-CSV: Stage 10 manual check.
+71. APR_2026.xlsx anonymised copy now in GitHub samples/ (CLOSED).
+73. Firebase: project name ai-builder-project = Project ID continual-medium-b61jg
+    (number 116053236246); database ai-studio-6160b2e9-0c6b-4a7e-80a1-9f528402bf56
+    (Enterprise, europe-west2, Firestore Native, under "AI shared quota limits",
+    scheduled backups DISABLED, realtime updates enabled). App config file:
+    /firebase-applet-config.json. Backups needed (Stage 10).
+75. 5R-4a audit: all ledger screens use whole-collection onSnapshot, independent
+    copies (P&L open about 29,154 reads; P&L + SKU + Return about 87,462).
+    Also: UnmatchedSkusPanel (4 duplicate listeners, unreviewed); storage writes
+    ms_returns_in_transit but MeeshoTrackingScreen reads ms_returns_intransit;
+    AuthContext onSnapshot not cleaned on unmount; FlipkartTrackingScreen:281
+    reads all fk_returns.
+79. pnl_summaries: collection name chosen by agent (not "ledger_summaries"),
+    accepted; doc IDs capitalised ({Platform}_{YYYY-MM}).
+85. Stale triggers (flag only) to wire later: CostMasterScreen 195/247/287/323,
     UploadCentreScreen 1438/1376/1136/630, PurchasesScreen 266/311/429,
-    OpeningStockScreen 295/399, UnmatchedSkusPanel 229/246, SettingsScreen 55/187/205
-    (wired in a later stage). Backfill manual, one month at a time (about 28k reads for
-    12 months: spread over 2 days).
-86. CLOSED 13 Nov: CI-2 accepted; grep proof for pnlDashboardModel.test.ts still
-    unseen (CI green supports it).
-87. Screen 13 Nov: Bank slot shows APR_2026.xlsx uploaded "0 of 0 rows" (zero-credit
-    complete record works in the app; 2e-fix behaviour confirmed). April Flipkart
-    Orders 9 of 9 rows and Returns 0 of 0, no partial import (small files). Open:
-    APR_2026.xlsx anonymised copy must be in GitHub samples/ (agent container
-    has it only if added in AI Studio); CI red until then (defect 84).
+    OpeningStockScreen 295/399, UnmatchedSkusPanel 229/246, SettingsScreen
+    55/187/205.
+87. Screen 13 Nov: Bank slot shows APR_2026.xlsx uploaded "0 of 0 rows"; April
+    Flipkart Orders 9 of 9, Returns 0 of 0 (no partial import on small files).
+88. 5R-4b-2b accepted with conditions (see Stage status).
+89. 2d-fix diagnosis: (a) expected = parsed rows not unique IDs (duplicate
+    orderItemIds collapse, explains Aug 558/559); (b) actual = getCountFromServer
+    filtered by lastUploadId; (c) reused currentUploadId (UploadCentreScreen.tsx:
+    1660) after a failed attempt explains Jul 2541/1984. Samples hold only Sep
+    (0 duplicates); Jul/Aug duplicates inferred, not proven. fk_order_items
+    currently holds PARTIAL Jul/Aug data from failed attempts.
+90. Amazon/Meesho upload verification not audited for the same duplicate-ID bug.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -357,22 +321,23 @@ purchase_uploads, sku_aliases, bank_credits, fk_order_items, fk_returns,
 fk_settlement_rows, fk_adjustments, fk_batches, fk_report_summaries,
 fk_uploads, az_transactions, az_mtr_rows, az_uploads, ms_orders,
 ms_returns_completed, ms_returns_in_transit, ms_payments, ms_ads,
-ms_batches, ms_uploads. (sku_variants unused.)
+ms_batches, ms_uploads, pnl_summaries (NEW). (sku_variants unused.)
 
 ## Environment
-- GitHub private repo azeemxzone/TM-P-L-Dashboard-App (main); workflow runs
-  npm install then npm test -- --run. Claude cannot open the repo.
-- Firebase project continual-medium-b61jg (AI Studio Starter Tier, free
-  quotas: 50k reads, 20k writes, 20k deletes per day, 1 GiB); sign out/in
-  each session. Own project with billing planned for Stage 10.
+- GitHub private repo azeemxzone/TM-P-L-Dashboard-App (main); workflow
+  .github/workflows/test.yml (Node 22, npm install, npm test -- --run). Claude
+  cannot open the repo.
+- Firebase: see defect 73. Free quotas: 50k reads, 20k writes, 20k deletes per
+  day, 1 GiB. Sign out/in each session.
 - Roles: admin = owner; 2 viewers read-only. allowedUsers/default holds
   emails, admins, roles (lowercase).
 - Code paths: src/components/{SkuPerformanceScreen, PnLDashboardScreen,
-  SettingsScreen, ReturnPerformanceScreen}.tsx, src/ledger/{buildLedger,
-  ledgerSettings, skuGrouping, returnGrouping, returnUnits, returnGolden,
-  goldenDispatch, types}.ts + tests, src/bank/bankStorage.ts + test,
-  src/utils/{skuEngine, pnlEngine, pipelineEngine, costCalculator,
-  skuResolver}.ts.
+  SettingsScreen, ReturnPerformanceScreen, UnmatchedSkusPanel,
+  UploadCentreScreen}.tsx, src/ledger/{buildLedger, ledgerSettings, skuGrouping,
+  returnGrouping, returnUnits, returnGolden, goldenDispatch, types, summaryStore,
+  summaryRefresh}.ts + tests, src/bank/bankStorage.ts + test,
+  src/{flipkart,amazon,meesho}/storage.ts, src/utils/{skuEngine, pnlEngine,
+  pipelineEngine, costCalculator, skuResolver}.ts.
 
 ## Open decisions
 - GST: deduct output GST from revenue, ex-GST cost? Owner and CA (defect 40).
@@ -380,14 +345,45 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - Category filter: kept (default).
 - DECIDED: return loss = 5% provision on landed cost, customer returns only;
   RTO = packing only. Settlement month = headline basis.
-- DECIDED 13 Nov: stay on Firebase for now. Option: Blaze plan with budget
-  alert (same free allowance, pay only above; verify pricing). Revisit
-  Postgres / Supabase at Stage 10 only (free tier pauses when idle, no real
-  backups, high migration cost).
-- Move app to owner's own Firebase project with pay-as-you-go + budget alert
-  before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
+- DECIDED 13 Nov: stay on Firebase for now. Option: Blaze/pay-as-you-go with
+  budget alert (same free allowance; verify pricing) to lift "AI shared quota"
+  limits; owner task before Stage 10. Revisit Postgres/Supabase at Stage 10 only.
+- DECIDED 13 Nov: pnl_summaries design (rebuild on touched months incl. Orders
+  uploads; flag-only stale; failure = upload stays complete, summary stale;
+  manual backfill one month at a time; delivered-unpaid orders remain visible in
+  Tracking; all raw rows still written fully).
 
-## Last result (13 Nov 2026)
-- 5R-4b-2a-c accepted. 5R-4b-2b issued (owner to run in a new chat).
-- 2d-fix SUMMARY NOT received (owner pasted only the 5R-4b-2a-c SUMMARY). Owner to
-  locate the "Stage: 2d-fix" reply or re-send the prompt in a new chat.
+## Prompts to send next (full text, ready to paste into a NEW AI Studio chat)
+
+### Stage 2d-fix-b
+Stage 2d-fix-b. Allowed files ONLY: src/flipkart/storage.ts, src/flipkart/storage.test.ts, src/components/UploadCentreScreen.tsx (ONLY the currentUploadId reset, around line 1660 and where slot/month/file change). Everything else READ-ONLY; if a fix needs another file, STOP and report its name. Do not touch auth, Firebase config or rules. No git. Do not apply to Amazon or Meesho.
+1. buildFlipkartImportPayloads: deduplicate ops by (collectionName, id); last row wins; expectedCounts = unique IDs. Return also duplicatesDropped per collection (count only, with the orderItemIds list max 10, no customer data). Show this number in the upload preview as "N duplicate order items merged".
+2. Post-write verification in commitFlipkartImport and verifySlotUploadCounts: for each collection, read the expected IDs in chunks of 30 (getDocs where documentId() in chunk), count found docs; stored must equal unique expected. Remove the lastUploadId count as the pass criterion. Write the "complete" record only when counts match; a retry rewrites only missing IDs.
+3. UploadCentreScreen: reset currentUploadId when slot, month or file changes, and after a complete or cancelled upload. A retry of the SAME file in the same slot may reuse it.
+4. Tests with the REAL Sep samples and a mocked Firestore: (a) 493 rows, 0 duplicates -> expected 493; (b) a test input made by reading the real Orders sample and re-adding one real row (derived, not typed) -> 494 rows, expected 493, duplicatesDropped 1; (c) verification passes when all unique IDs exist; (d) fails and retry writes only the missing ID. Missing sample must fail.
+5. Key numbers, SHORT (max 40 lines): changed lines of the dedupe, the verification and the reset (max 15 lines each), per-file vitest table with totals, tsc.
+Stop after this task.
+(then append the standard SUMMARY template)
+
+### SUMMARY template (append to every agent prompt)
+End your reply with exactly this block, every requested table INSIDE it under Key numbers:
+SUMMARY
+Stage:
+Files changed: <git diff --stat>
+Done: <numbered, matching task numbers>
+Not done / blocked:
+Tests: <N files, M tests passed>; failing:
+tsc:
+Key numbers: <pasted tables, lines and grep output>
+Deviations from prompt:
+
+## Last result (13 Nov 2026, evening)
+- 5R-4b-2b accepted (22 files / 297 tests in agent run; CI after push unseen).
+  2d-fix diagnosis accepted; 2d-fix-b issued, not run.
+- Owner TODO now: push/check CI green; publish the pnl_summaries rules block in
+  the Firebase console (inside the documents block; paste firestore.rules to the
+  new Claude for a placement check first); run 2d-fix-b in a new AI Studio chat.
+  NO Orders uploads (Jul/Aug/Oct) until 2d-fix-b is accepted.
+- Pending questions to owner: paste firestore.rules for placement check; paste the
+  try/catch assertion from summaryRefresh.test.ts test (c); say which slot the
+  Settled_Transaction_May2026.xlsx was meant for.
