@@ -43,6 +43,7 @@ import {
   commitFlipkartImport,
   loadBundledAliasesIntoFirestore,
   verifySlotUploadCounts,
+  buildFlipkartImportPayloads,
   BATCH_SIZE,
 } from '../flipkart/storage';
 import { DEFAULT_SKU_ALIASES_V2_CSV } from '../data/defaultData';
@@ -526,6 +527,21 @@ export const UploadCentreScreen: React.FC = () => {
     return checkUnmappedSkus(stagedSellerSkus, masterCodes, aliases);
   }, [stagedSellerSkus, masterCodes, aliases]);
 
+  const stagedOrdersDuplicateCount = useMemo(() => {
+    if (!stagedOrders || stagedOrders.length === 0) return 0;
+    const { duplicatesDropped } = buildFlipkartImportPayloads(
+      'orders',
+      { orders: stagedOrders },
+      {
+        selectedMonth,
+        originalFileName: stagedFileName || 'orders.xlsx',
+        sha256: stagedSha256 || '',
+        userEmail: user?.email || '',
+      }
+    );
+    return duplicatesDropped.fk_order_items?.count ?? 0;
+  }, [stagedOrders, selectedMonth, stagedFileName, stagedSha256, user?.email]);
+
   // Summaries for Staged Amazon Reports
   const amazonUnifiedSummary = useMemo(() => {
     if (!stagedAmazonUnified) return null;
@@ -638,6 +654,9 @@ export const UploadCentreScreen: React.FC = () => {
 
   // Process File
   const processUploadedFile = async (file: File, targetSlot: AppUploadSlot) => {
+    if (targetSlot !== activeSlot) {
+      setCurrentUploadId(null);
+    }
     setActiveSlot(targetSlot);
     setStagedFileName(file.name);
     setValidationError(null);
@@ -650,6 +669,9 @@ export const UploadCentreScreen: React.FC = () => {
     try {
       const buffer = await file.arrayBuffer();
       const sha256 = await computeBufferSha256(buffer);
+      if (targetSlot !== activeSlot || sha256 !== stagedSha256) {
+        setCurrentUploadId(null);
+      }
       setStagedSha256(sha256);
 
       // Check SHA-256 duplicate for the corresponding marketplace
@@ -1836,6 +1858,7 @@ export const UploadCentreScreen: React.FC = () => {
                 onClick={() => {
                   setSelectedMonth(m.key);
                   setActiveSlot(null);
+                  setCurrentUploadId(null);
                 }}
                 className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all cursor-pointer ${
                   isSelected
@@ -3044,6 +3067,7 @@ export const UploadCentreScreen: React.FC = () => {
                 onClick={() => {
                   setSelectedMonth(periodWarning.targetMonth);
                   setPeriodWarning(null);
+                  setCurrentUploadId(null);
                 }}
                 className="px-3 py-1 text-xs font-bold rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors cursor-pointer"
               >
@@ -3081,6 +3105,11 @@ export const UploadCentreScreen: React.FC = () => {
                         {stagedOrders.filter((o) => o.status === 'CANCELLED').length}
                       </p>
                     </div>
+                    {stagedOrdersDuplicateCount > 0 && (
+                      <div className="col-span-2 sm:col-span-4 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs font-medium text-amber-800 dark:text-amber-300">
+                        {stagedOrdersDuplicateCount} duplicate order items merged
+                      </div>
+                    )}
                   </>
                 )}
 

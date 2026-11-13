@@ -6,7 +6,7 @@ import {
   setDoc,
   query,
   where,
-  getCountFromServer,
+  documentId,
   Firestore,
 } from 'firebase/firestore';
 import { orderMonth, cleanItemId, cleanNeftId, cleanSku } from './normalizers';
@@ -38,6 +38,11 @@ export interface UnmatchedSkuEntry {
   resolved: boolean;
 }
 
+export interface CollectionDuplicatesDropped {
+  count: number;
+  orderItemIds: string[];
+}
+
 export interface FkUploadRecord {
   id?: string;
   uploadId?: string;
@@ -56,6 +61,8 @@ export interface FkUploadRecord {
     unmappedCount?: number;
     storedCounts?: Record<string, number>;
   };
+  expectedDocIds?: Record<string, string[]>;
+  duplicatesDropped?: Record<string, CollectionDuplicatesDropped>;
   unmatchedSkus?: UnmatchedSkuEntry[];
   date: string; // ISO date YYYY-MM-DD
   uploadedAt: string; // ISO timestamp
@@ -411,6 +418,7 @@ export function buildFlipkartImportPayloads(
   uploadId: string;
   ops: Array<{ collectionName: string; id: string; data: Record<string, any> }>;
   expectedCounts: Record<string, number>;
+  duplicatesDropped: Record<string, CollectionDuplicatesDropped>;
   uploadRecord: FkUploadRecord;
 } {
   const uploadId = meta.uploadId || `upload_${slot}_${meta.selectedMonth}_${Date.now()}`;
@@ -423,12 +431,23 @@ export function buildFlipkartImportPayloads(
     data: Record<string, any>;
   };
 
-  const ops: DocOp[] = [];
-  const expectedCounts: Record<string, number> = {};
+  const dedupedOps = new Map<string, DocOp>();
+  const duplicatesDropped: Record<string, CollectionDuplicatesDropped> = {};
 
   const addOp = (collectionName: string, id: string, data: Record<string, any>) => {
-    ops.push({ collectionName, id, data: stripUndefined(data) });
-    expectedCounts[collectionName] = (expectedCounts[collectionName] || 0) + 1;
+    if (!duplicatesDropped[collectionName]) {
+      duplicatesDropped[collectionName] = { count: 0, orderItemIds: [] };
+    }
+    const key = `${collectionName}::${id}`;
+    if (dedupedOps.has(key)) {
+      const entry = duplicatesDropped[collectionName];
+      entry.count += 1;
+      const itemId = cleanItemId(data.orderItemId || id);
+      if (itemId && !entry.orderItemIds.includes(itemId) && entry.orderItemIds.length < 10) {
+        entry.orderItemIds.push(itemId);
+      }
+    }
+    dedupedOps.set(key, { collectionName, id, data: stripUndefined(data) });
   };
 
   if (slot === 'orders' && data.orders) {
@@ -517,6 +536,15 @@ export function buildFlipkartImportPayloads(
     }
   }
 
+  const ops = Array.from(dedupedOps.values());
+  const expectedCounts: Record<string, number> = {};
+  const expectedDocIds: Record<string, string[]> = {};
+  for (const op of ops) {
+    expectedCounts[op.collectionName] = (expectedCounts[op.collectionName] || 0) + 1;
+    if (!expectedDocIds[op.collectionName]) expectedDocIds[op.collectionName] = [];
+    expectedDocIds[op.collectionName].push(op.id);
+  }
+
   // Breakdowns for the audit record - always numeric, never undefined
   let statusCounts: Record<string, number> = {};
   let returnTypeCounts: Record<string, number> = { courier: 0, customer: 0 };
@@ -572,20 +600,43 @@ export function buildFlipkartImportPayloads(
         Object.entries(expectedCounts).map(([k, v]) => [k, v])
       ),
     },
+    expectedDocIds,
+    duplicatesDropped,
     unmatchedSkus,
     date: todayDate,
     uploadedAt: nowIso,
   });
 
-  return { uploadId, ops, expectedCounts, uploadRecord };
+  return { uploadId, ops, expectedCounts, duplicatesDropped, uploadRecord };
+}
+
+export const ID_QUERY_CHUNK_SIZE = 30;
+
+async function fetchExistingDocsByIds(
+  db: Firestore,
+  collectionName: string,
+  ids: string[]
+): Promise<Map<string, Record<string, any>>> {
+  const found = new Map<string, Record<string, any>>();
+  if (!ids || ids.length === 0) return found;
+
+  for (let i = 0; i < ids.length; i += ID_QUERY_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + ID_QUERY_CHUNK_SIZE);
+    const q = query(collection(db, collectionName), where(documentId(), 'in', chunk));
+    const snap = await getDocs(q);
+    snap.forEach((docSnap) => {
+      found.set(docSnap.id, docSnap.data());
+    });
+  }
+  return found;
 }
 
 /**
  * Commits parsed Flipkart data to Firestore with deterministic document IDs,
  * upsert with merge, sequentially in batches of constant BATCH_SIZE = 400.
- * After all batches write, verifies row counts via getCountFromServer per collection.
+ * After all batches write, verifies expected IDs exist via chunked documentId() reads.
  * Creates fk_uploads record with status "complete" ONLY if all counts match.
- * If only the upload record fails, lets Retry re-write only the record (and any failed batches).
+ * On retry (same uploadId), rewrites only missing IDs.
  */
 export async function commitFlipkartImport(
   db: Firestore,
@@ -646,35 +697,38 @@ export async function commitFlipkartImport(
     }
   );
 
-  // 1. Check if batches were already written and verified (Retry optimization)
-  let skipBatches = false;
+  const expectedIdsByCol = uploadRecord.expectedDocIds || {};
+
+  // 1. On retry, read expected IDs in chunks of 30 and rewrite only missing IDs
+  let opsToWrite = ops;
   if (meta.existingUploadId && Object.keys(expectedCounts).length > 0) {
-    let allMatched = true;
-    for (const [colName, expected] of Object.entries(expectedCounts)) {
+    const writtenIdsByCol = new Map<string, Set<string>>();
+    for (const [colName, ids] of Object.entries(expectedIdsByCol)) {
       try {
-        const q = query(collection(db, colName), where('lastUploadId', '==', uploadId));
-        const snapshot = await getCountFromServer(q);
-        if (snapshot.data().count !== expected) {
-          allMatched = false;
-          break;
+        const existingMap = await fetchExistingDocsByIds(db, colName, ids);
+        const writtenSet = new Set<string>();
+        for (const [docId, docData] of existingMap.entries()) {
+          if (docData?.lastUploadId === uploadId) {
+            writtenSet.add(docId);
+          }
         }
+        writtenIdsByCol.set(colName, writtenSet);
       } catch {
-        allMatched = false;
-        break;
+        writtenIdsByCol.set(colName, new Set());
       }
     }
-    if (allMatched) {
-      skipBatches = true;
-    }
+    opsToWrite = ops.filter(
+      (op) => !writtenIdsByCol.get(op.collectionName)?.has(op.id)
+    );
   }
 
-  // 2. Write data batches if not already completely written
+  // 2. Write missing/pending data batches
   const chunks: Array<typeof ops> = [];
-  for (let i = 0; i < ops.length; i += BATCH_SIZE) {
-    chunks.push(ops.slice(i, i + BATCH_SIZE));
+  for (let i = 0; i < opsToWrite.length; i += BATCH_SIZE) {
+    chunks.push(opsToWrite.slice(i, i + BATCH_SIZE));
   }
 
-  if (!skipBatches) {
+  if (chunks.length > 0) {
     let savedCount = 0;
     for (let bIdx = 0; bIdx < chunks.length; bIdx++) {
       const chunk = chunks[bIdx];
@@ -705,26 +759,26 @@ export async function commitFlipkartImport(
         currentBatch: bIdx + 1,
         totalBatches: chunks.length,
         savedCount,
-        totalCount: ops.length,
-        statusMessage: `Written batch ${bIdx + 1} of ${chunks.length} (${savedCount}/${ops.length} rows)...`,
+        totalCount: opsToWrite.length,
+        statusMessage: `Written batch ${bIdx + 1} of ${chunks.length} (${savedCount}/${opsToWrite.length} rows)...`,
       });
     }
   }
 
-  // 3. Post-write count query (getCountFromServer) per collection filtered by lastUploadId == uploadId
+  // 3. Post-write verification by reading expected IDs in chunks of 30
   onProgress?.({
     currentBatch: chunks.length,
     totalBatches: chunks.length,
-    savedCount: ops.length,
-    totalCount: ops.length,
+    savedCount: opsToWrite.length,
+    totalCount: opsToWrite.length,
     statusMessage: 'Verifying written row counts in Firestore...',
   });
 
   const collectionCounts: Record<string, { stored: number; expected: number }> = {};
   for (const [colName, expected] of Object.entries(expectedCounts)) {
-    const q = query(collection(db, colName), where('lastUploadId', '==', uploadId));
-    const snapshot = await getCountFromServer(q);
-    const stored = snapshot.data().count;
+    const ids = expectedIdsByCol[colName] || [];
+    const foundMap = await fetchExistingDocsByIds(db, colName, ids);
+    const stored = foundMap.size;
     collectionCounts[colName] = { stored, expected };
 
     if (stored !== expected) {
@@ -764,8 +818,8 @@ export async function commitFlipkartImport(
 }
 
 /**
- * Runs a count query (getCountFromServer) for an uploaded slot's primary collection
- * filtered by lastUploadId == this upload's ID.
+ * Verifies an uploaded slot's stored document counts by reading expectedDocIds
+ * in chunks of 30 (documentId() in chunk).
  */
 export async function verifySlotUploadCounts(
   db: Firestore,
@@ -788,25 +842,39 @@ export async function verifySlotUploadCounts(
 
   const details: Record<string, { stored: number; expected: number }> = {};
   for (const col of collectionsToCheck) {
-    try {
-      const q = query(collection(db, col), where('lastUploadId', '==', uploadId));
-      const snap = await getCountFromServer(q);
-      const stored = snap.data().count;
-      const expected = upload.counts.storedCounts?.[col] ?? (collectionsToCheck.length === 1 ? upload.counts.total : stored);
-      details[col] = { stored, expected };
-    } catch {
-      details[col] = { stored: 0, expected: upload.counts.total };
+    const expectedIds = upload.expectedDocIds?.[col];
+    if (Array.isArray(expectedIds)) {
+      try {
+        const foundMap = await fetchExistingDocsByIds(db, col, expectedIds);
+        details[col] = { stored: foundMap.size, expected: expectedIds.length };
+      } catch {
+        details[col] = { stored: 0, expected: expectedIds.length };
+      }
+    } else {
+      const fallbackExpected =
+        upload.counts.storedCounts?.[col] ?? (collectionsToCheck.length === 1 ? upload.counts.total : 0);
+      details[col] = { stored: 0, expected: fallbackExpected };
     }
   }
 
   const primaryCol = slot === 'orders' ? 'fk_order_items' : slot === 'returns' ? 'fk_returns' : 'fk_settlement_rows';
   const primaryStored = details[primaryCol]?.stored ?? 0;
-  const primaryExpected = upload.counts.storedCounts?.[primaryCol] ?? (slot === 'settled' ? 683 : upload.counts.total);
+  const primaryExpected =
+    details[primaryCol]?.expected ??
+    upload.counts.storedCounts?.[primaryCol] ??
+    upload.counts.total;
+
+  const allMatch =
+    collectionsToCheck.length > 0 &&
+    collectionsToCheck.every((col) => {
+      const d = details[col];
+      return d ? d.stored === d.expected : true;
+    });
 
   return {
     stored: primaryStored,
     expected: primaryExpected,
-    isMatch: primaryStored === primaryExpected,
+    isMatch: allMatch && primaryStored === primaryExpected,
     details,
   };
 }
