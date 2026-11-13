@@ -359,6 +359,15 @@
     line count" (688 = ledger lines, 863 = file length) and "595 vs 680 units"
     (680 counts row events; a sold-then-returned unit has two rows) were
     mistaken and withdrawn.
+68. Firestore free-tier quota exhausted 13 Nov (resource-exhausted on
+    fk_settlement_rows) after all-month uploads. Likely daily reads (50k) and
+    writes (20k); storage (1 GiB) unconfirmed (owner to read Usage tab). Cause
+    (hypothesis): screens use onSnapshot on whole collections, each screen
+    loads its own copy, no month filter. Decision: do NOT delete data (spec:
+    never delete; deletes limited to 20k/day; golden data needed). Fix =
+    Stage 5R-4 (month-filtered queries, getDocs once, shared provider). 5R-4a
+    read-only audit drafted. Quota resets daily midnight Pacific (about 1:30pm
+    IST).
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -390,14 +399,16 @@ ms_batches, ms_uploads. (sku_variants unused.)
 - Category filter: kept (default).
 - DECIDED: return loss = 5% provision, landed cost, customer returns only;
   RTO cost = packing only. Settlement month = headline basis.
+- Database: STAY on Firebase for now. Option: Blaze plan with budget alert
+  (same free allowance, pay only above it; verify pricing). Revisit Postgres
+  / Supabase at Stage 10 only (free tier pauses when idle, no real backups,
+  migration cost high).
 
-## Last result (12 Nov 2026)
-- 8R-2a-3c and 3d reviewed: behaviour approved (conditions: green CI on the
-  3d commit, warning screenshots on SKU and Return). Full reference gap
-  explained by three intentional rule differences (see bridge above).
-- 2e-fix (bank zero-credit) NOT approved; 2e-fix-b issued.
-- Owner: do NOT retry Jul/Aug Orders upload until 2d-fix is done. Answer
-  whether the 2 APR_2026 credit lines are marketplace payouts. Send the CI
-  run Summary for the 3d commit.
-- Next in order: 2d-fix diagnosis -> 2e-fix-b -> 8R-2a-3f -> Jul/Aug Orders
-  re-upload + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
+## Last result (13 Nov 2026)
+- Owner uploaded all months except a few; Firestore now returns
+  resource-exhausted (free quota). Advice: no deletion, wait for daily reset,
+  no upload retries, fix read pattern in Stage 5R-4 (audit 5R-4a first).
+- Still pending from 12 Nov: 2d-fix, 2e-fix-b, 8R-2a-3f, 3d CI + warning
+  screenshots on SKU/Return, APR_2026 credit-line answer.
+- Next: owner reads Usage tab -> after reset run 2d-fix, 2e-fix-b, 5R-4a ->
+  then 8R-2a-3f, Sep screenshots, 8R-1f, 8R-3, close Stage 8.
