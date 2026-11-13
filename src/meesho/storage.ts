@@ -25,6 +25,8 @@ import {
 } from './types';
 import { groupMeeshoBatches } from './batches';
 import { stripUndefined } from '../utils/stripUndefined';
+import { resolveMasterSku } from '../utils/skuResolver';
+import { cleanSku } from '../flipkart/normalizers';
 
 export const BATCH_SIZE = 400;
 
@@ -416,6 +418,115 @@ function sanitizeForbiddenFields(data: Record<string, any>): Record<string, any>
   return clean;
 }
 
+export interface MsUnmatchedSkuEntry {
+  platform: 'Meesho';
+  sellerSku: string;
+  rows: number;
+  resolved: boolean;
+}
+
+function computeMeeshoUnmatchedSkus(
+  slot: MeeshoSlotType,
+  data: {
+    orders?: MeeshoOrderRow[];
+    returnsCompleted?: MeeshoReturnRow[];
+    returnsInTransit?: MeeshoInTransitReturnRow[];
+    payments?: MeeshoPaymentsResult;
+  },
+  masterCodes: Set<string> | string[],
+  aliasMap: Map<string, string> | Record<string, string>
+): MsUnmatchedSkuEntry[] {
+  let rawSkus: string[] = [];
+  if (slot === 'meesho_orders' && data.orders) {
+    rawSkus = data.orders.map((r) => r.sku);
+  } else if (slot === 'meesho_returns_completed' && data.returnsCompleted) {
+    rawSkus = data.returnsCompleted.map((r) => r.sku);
+  } else if (slot === 'meesho_returns_in_transit' && data.returnsInTransit) {
+    rawSkus = data.returnsInTransit.map((r) => r.sku);
+  } else if (slot === 'meesho_payments' && data.payments) {
+    rawSkus = data.payments.payments.map((r) => r.supplierSku);
+  }
+
+  const counts = new Map<string, number>();
+  for (const raw of rawSkus) {
+    const cleaned = cleanSku(raw);
+    if (!cleaned) continue;
+    if (!resolveMasterSku(cleaned, masterCodes, aliasMap)) {
+      counts.set(cleaned, (counts.get(cleaned) || 0) + 1);
+    }
+  }
+
+  return Array.from(counts.entries())
+    .map(([sellerSku, rows]) => ({
+      platform: 'Meesho' as const,
+      sellerSku,
+      rows,
+      resolved: false,
+    }))
+    .sort((a, b) => b.rows - a.rows || a.sellerSku.localeCompare(b.sellerSku));
+}
+
+async function loadActiveMeeshoSkuResolutionData(db: Firestore): Promise<{
+  masterCodes: Set<string>;
+  aliasMap: Map<string, string>;
+} | null> {
+  try {
+    const latestByCode = new Map<string, { active: boolean; effective_from: string; createdAt: string }>();
+    const aliasMap = new Map<string, string>();
+    const inMem = (db as any)?._inMemoryCollections;
+
+    if (inMem) {
+      const cmCol: Map<string, any> = inMem.get('cost_master') || new Map();
+      cmCol.forEach((d, id) => {
+        const code = cleanSku(d.sku_code || d.sku || id);
+        if (!code) return;
+        const eff = String(d.effective_from || '2026-04-01');
+        const created = String(d.createdAt || '');
+        const prev = latestByCode.get(code);
+        if (!prev || eff > prev.effective_from || (eff === prev.effective_from && created > prev.createdAt)) {
+          latestByCode.set(code, { active: d.active !== false, effective_from: eff, createdAt: created });
+        }
+      });
+      const saCol: Map<string, any> = inMem.get('sku_aliases') || new Map();
+      saCol.forEach((d, id) => {
+        const a = cleanSku(d.alias || d.alias_sku || id);
+        const m = cleanSku(d.master_sku || d.sku_code);
+        if (a && m) aliasMap.set(a, m);
+      });
+    } else {
+      const [cmSnap, saSnap] = await Promise.all([
+        getDocs(collection(db, 'cost_master')),
+        getDocs(collection(db, 'sku_aliases')),
+      ]);
+      cmSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        const code = cleanSku(d.sku_code || d.sku || docSnap.id);
+        if (!code) return;
+        const eff = String(d.effective_from || '2026-04-01');
+        const created = String(d.createdAt || '');
+        const prev = latestByCode.get(code);
+        if (!prev || eff > prev.effective_from || (eff === prev.effective_from && created > prev.createdAt)) {
+          latestByCode.set(code, { active: d.active !== false, effective_from: eff, createdAt: created });
+        }
+      });
+      saSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        const a = cleanSku(d.alias || d.alias_sku || docSnap.id);
+        const m = cleanSku(d.master_sku || d.sku_code);
+        if (a && m) aliasMap.set(a, m);
+      });
+    }
+
+    const masterCodes = new Set<string>();
+    for (const [code, info] of latestByCode.entries()) {
+      if (info.active) masterCodes.add(code);
+    }
+    return { masterCodes, aliasMap };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Builds all deterministic document payloads and the audit upload record for Meesho imports.
  * Ensures stripUndefined is applied at every level, no forbidden fields are present,
@@ -435,6 +546,9 @@ export function buildMeeshoImportPayloads(
     sha256: string;
     userEmail: string;
     uploadId?: string;
+    masterCodes?: Set<string> | string[];
+    aliasMap?: Map<string, string> | Record<string, string>;
+    unmatchedSkus?: MsUnmatchedSkuEntry[];
   }
 ): {
   uploadId: string;
@@ -659,6 +773,17 @@ export function buildMeeshoImportPayloads(
     };
   }
 
+  const unmatchedSkus = meta.unmatchedSkus
+    ? meta.unmatchedSkus.map((u) => ({
+        platform: 'Meesho' as const,
+        sellerSku: cleanSku(u.sellerSku),
+        rows: Number(u.rows || 0),
+        resolved: Boolean(u.resolved),
+      }))
+    : meta.masterCodes !== undefined || meta.aliasMap !== undefined
+    ? computeMeeshoUnmatchedSkus(slot, data, meta.masterCodes || [], meta.aliasMap || new Map())
+    : undefined;
+
   const uploadRecord: MsUploadRecord = stripUndefined({
     id: uploadId,
     uploadId,
@@ -670,6 +795,7 @@ export function buildMeeshoImportPayloads(
     status: 'complete',
     expectedDocIds: ops.map((o) => o.id),
     counts: countsObj,
+    unmatchedSkus,
     date: todayDate,
     uploadedAt: nowIso,
   });
@@ -894,6 +1020,9 @@ export async function commitMeeshoImport(
     sha256: string;
     userEmail: string;
     existingUploadId?: string;
+    masterCodes?: Set<string> | string[];
+    aliasMap?: Map<string, string> | Record<string, string>;
+    unmatchedSkus?: MsUnmatchedSkuEntry[];
   },
   onProgress?: (info: {
     currentBatch: number;
@@ -908,6 +1037,20 @@ export async function commitMeeshoImport(
   collectionCounts: Record<string, { stored: number; expected: number }>;
   diffReport?: MeeshoVerificationDiffReport;
 }> {
+  let resolvedMasterCodes = meta.masterCodes;
+  let resolvedAliasMap = meta.aliasMap;
+  if (
+    meta.unmatchedSkus === undefined &&
+    resolvedMasterCodes === undefined &&
+    resolvedAliasMap === undefined
+  ) {
+    const loaded = await loadActiveMeeshoSkuResolutionData(db);
+    if (loaded) {
+      resolvedMasterCodes = loaded.masterCodes;
+      resolvedAliasMap = loaded.aliasMap;
+    }
+  }
+
   const { uploadId, ops, expectedCounts, uploadRecord } = buildMeeshoImportPayloads(
     slot,
     data,
@@ -917,6 +1060,9 @@ export async function commitMeeshoImport(
       sha256: meta.sha256,
       userEmail: meta.userEmail,
       uploadId: meta.existingUploadId,
+      masterCodes: resolvedMasterCodes,
+      aliasMap: resolvedAliasMap,
+      unmatchedSkus: meta.unmatchedSkus,
     }
   );
 

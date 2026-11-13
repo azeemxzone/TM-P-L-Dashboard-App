@@ -22,6 +22,8 @@ import {
 import { orderMonthByOrderId } from './mtrParser';
 import { summariseUnified } from './unifiedParser';
 import { stripUndefined } from '../utils/stripUndefined';
+import { resolveMasterSku } from '../utils/skuResolver';
+import { cleanSku } from '../flipkart/normalizers';
 
 export const BATCH_SIZE = 400;
 
@@ -281,6 +283,109 @@ export class UploadRecordWriteError extends Error {
   }
 }
 
+export interface AzUnmatchedSkuEntry {
+  platform: 'Amazon';
+  sellerSku: string;
+  rows: number;
+  resolved: boolean;
+}
+
+function computeAmazonUnmatchedSkus(
+  slot: AmazonSlotType,
+  data: {
+    unified?: AmazonUnifiedRow[];
+    mtr?: AmazonMtrRow[];
+  },
+  masterCodes: Set<string> | string[],
+  aliasMap: Map<string, string> | Record<string, string>
+): AzUnmatchedSkuEntry[] {
+  let rawSkus: string[] = [];
+  if (slot === 'amazon_unified' && data.unified) {
+    rawSkus = data.unified.map((r) => r.sku);
+  } else if (slot === 'amazon_mtr' && data.mtr) {
+    rawSkus = data.mtr.map((r) => r.sku);
+  }
+
+  const counts = new Map<string, number>();
+  for (const raw of rawSkus) {
+    const cleaned = cleanSku(raw);
+    if (!cleaned) continue;
+    if (!resolveMasterSku(cleaned, masterCodes, aliasMap)) {
+      counts.set(cleaned, (counts.get(cleaned) || 0) + 1);
+    }
+  }
+
+  return Array.from(counts.entries())
+    .map(([sellerSku, rows]) => ({
+      platform: 'Amazon' as const,
+      sellerSku,
+      rows,
+      resolved: false,
+    }))
+    .sort((a, b) => b.rows - a.rows || a.sellerSku.localeCompare(b.sellerSku));
+}
+
+async function loadActiveAmazonSkuResolutionData(db: Firestore): Promise<{
+  masterCodes: Set<string>;
+  aliasMap: Map<string, string>;
+} | null> {
+  try {
+    const latestByCode = new Map<string, { active: boolean; effective_from: string; createdAt: string }>();
+    const aliasMap = new Map<string, string>();
+    const inMem = (db as any)?._inMemoryCollections;
+
+    if (inMem) {
+      const cmCol: Map<string, any> = inMem.get('cost_master') || new Map();
+      cmCol.forEach((d, id) => {
+        const code = cleanSku(d.sku_code || d.sku || id);
+        if (!code) return;
+        const eff = String(d.effective_from || '2026-04-01');
+        const created = String(d.createdAt || '');
+        const prev = latestByCode.get(code);
+        if (!prev || eff > prev.effective_from || (eff === prev.effective_from && created > prev.createdAt)) {
+          latestByCode.set(code, { active: d.active !== false, effective_from: eff, createdAt: created });
+        }
+      });
+      const saCol: Map<string, any> = inMem.get('sku_aliases') || new Map();
+      saCol.forEach((d, id) => {
+        const a = cleanSku(d.alias || d.alias_sku || id);
+        const m = cleanSku(d.master_sku || d.sku_code);
+        if (a && m) aliasMap.set(a, m);
+      });
+    } else {
+      const [cmSnap, saSnap] = await Promise.all([
+        getDocs(collection(db, 'cost_master')),
+        getDocs(collection(db, 'sku_aliases')),
+      ]);
+      cmSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        const code = cleanSku(d.sku_code || d.sku || docSnap.id);
+        if (!code) return;
+        const eff = String(d.effective_from || '2026-04-01');
+        const created = String(d.createdAt || '');
+        const prev = latestByCode.get(code);
+        if (!prev || eff > prev.effective_from || (eff === prev.effective_from && created > prev.createdAt)) {
+          latestByCode.set(code, { active: d.active !== false, effective_from: eff, createdAt: created });
+        }
+      });
+      saSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        const a = cleanSku(d.alias || d.alias_sku || docSnap.id);
+        const m = cleanSku(d.master_sku || d.sku_code);
+        if (a && m) aliasMap.set(a, m);
+      });
+    }
+
+    const masterCodes = new Set<string>();
+    for (const [code, info] of latestByCode.entries()) {
+      if (info.active) masterCodes.add(code);
+    }
+    return { masterCodes, aliasMap };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Builds all deterministic document payloads and the audit upload record for Amazon imports.
  * Ensures stripUndefined is applied at every level, no city or postal fields are present,
@@ -298,12 +403,15 @@ export function buildAmazonImportPayloads(
     sha256: string;
     userEmail: string;
     uploadId?: string;
+    masterCodes?: Set<string> | string[];
+    aliasMap?: Map<string, string> | Record<string, string>;
+    unmatchedSkus?: AzUnmatchedSkuEntry[];
   }
 ): {
   uploadId: string;
   ops: Array<{ collectionName: string; id: string; data: Record<string, any> }>;
   expectedCounts: Record<string, number>;
-  uploadRecord: AzUploadRecord;
+  uploadRecord: AzUploadRecord & { unmatchedSkus?: AzUnmatchedSkuEntry[] };
 } {
   const uploadId = meta.uploadId || `upload_${slot}_${meta.selectedMonth}_${Date.now()}`;
   const nowIso = new Date().toISOString();
@@ -420,7 +528,18 @@ export function buildAmazonImportPayloads(
     }
   }
 
-  const uploadRecord: AzUploadRecord = stripUndefined({
+  const unmatchedSkus = meta.unmatchedSkus
+    ? meta.unmatchedSkus.map((u) => ({
+        platform: 'Amazon' as const,
+        sellerSku: cleanSku(u.sellerSku),
+        rows: Number(u.rows || 0),
+        resolved: Boolean(u.resolved),
+      }))
+    : meta.masterCodes !== undefined || meta.aliasMap !== undefined
+    ? computeAmazonUnmatchedSkus(slot, data, meta.masterCodes || [], meta.aliasMap || new Map())
+    : undefined;
+
+  const uploadRecord: AzUploadRecord & { unmatchedSkus?: AzUnmatchedSkuEntry[] } = stripUndefined({
     id: uploadId,
     uploadId,
     slot,
@@ -436,10 +555,12 @@ export function buildAmazonImportPayloads(
       countsByType,
       countsByStatus,
       transfersCount,
+      unmappedCount: unmatchedSkus ? unmatchedSkus.length : undefined,
       storedCounts: Object.fromEntries(
         Object.entries(expectedCounts).map(([k, v]) => [k, v])
       ),
     },
+    unmatchedSkus,
     date: todayDate,
     uploadedAt: nowIso,
   });
@@ -466,6 +587,9 @@ export async function commitAmazonImport(
     sha256: string;
     userEmail: string;
     existingUploadId?: string;
+    masterCodes?: Set<string> | string[];
+    aliasMap?: Map<string, string> | Record<string, string>;
+    unmatchedSkus?: AzUnmatchedSkuEntry[];
   },
   onProgress?: (info: {
     currentBatch: number;
@@ -480,6 +604,20 @@ export async function commitAmazonImport(
   collectionCounts: Record<string, { stored: number; expected: number }>;
   diffReport?: VerificationDiffReport;
 }> {
+  let resolvedMasterCodes = meta.masterCodes;
+  let resolvedAliasMap = meta.aliasMap;
+  if (
+    meta.unmatchedSkus === undefined &&
+    resolvedMasterCodes === undefined &&
+    resolvedAliasMap === undefined
+  ) {
+    const loaded = await loadActiveAmazonSkuResolutionData(db);
+    if (loaded) {
+      resolvedMasterCodes = loaded.masterCodes;
+      resolvedAliasMap = loaded.aliasMap;
+    }
+  }
+
   const { uploadId, ops, expectedCounts, uploadRecord } = buildAmazonImportPayloads(
     slot,
     data,
@@ -489,6 +627,9 @@ export async function commitAmazonImport(
       sha256: meta.sha256,
       userEmail: meta.userEmail,
       uploadId: meta.existingUploadId,
+      masterCodes: resolvedMasterCodes,
+      aliasMap: resolvedAliasMap,
+      unmatchedSkus: meta.unmatchedSkus,
     }
   );
 

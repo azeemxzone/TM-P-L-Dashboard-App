@@ -479,15 +479,13 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
         </div>
       </div>
 
-      {/* Cancelled / Missing Order Records Warning Banner */}
-      {ledgerResult && ((ledgerResult.skippedRows ?? 0) > 0 || (ledgerResult.settledRowsWithoutOrderRecord ?? 0) > 0) && (
+      {/* Missing Order Records Warning Banner */}
+      {ledgerResult && (ledgerResult.settledRowsWithoutOrderRecord ?? 0) > 0 && (
         <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 flex items-center justify-between text-xs text-amber-800 dark:text-amber-200">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
             <span>
-              {(ledgerResult.skippedRows ?? 0) > 0 && `Skipped cancelled-no-dispatch rows: ${ledgerResult.skippedRows} (items: ${ledgerResult.skippedItems})`}
-              {(ledgerResult.skippedRows ?? 0) > 0 && (ledgerResult.settledRowsWithoutOrderRecord ?? 0) > 0 && ' | '}
-              {(ledgerResult.settledRowsWithoutOrderRecord ?? 0) > 0 && `Settled rows without order record: ${ledgerResult.settledRowsWithoutOrderRecord}`}
+              Flipkart: {ledgerResult.settledRowsWithoutOrderRecord} settled rows have no order record; upload the missing Orders month
             </span>
           </div>
         </div>
@@ -723,6 +721,12 @@ export const SkuPerformanceScreen: React.FC<SkuPerformanceScreenProps> = ({
           * Revenue is net settlement after TCS/TDS. The P&L Dashboard &apos;Profit Before TCS/TDS&apos; adds TCS and TDS back.
         </div>
       </div>
+
+      {(ledgerResult.skippedRows ?? 0) > 0 && (
+        <p className="text-[11px] text-slate-500 dark:text-slate-400 px-1">
+          Flipkart: {ledgerResult.skippedRows} cancelled-before-dispatch rows ({ledgerResult.skippedItems} items) excluded from packing and cost
+        </p>
+      )}
         </>
       )}
     </div>

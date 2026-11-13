@@ -61,6 +61,7 @@ import {
 import { BankStatementReport } from '../bank/types';
 import { commitBankCreditsImport } from '../bank/bankStorage';
 import { clearTrackingSessionCache } from './FlipkartTrackingScreen';
+import { UnmatchedSkusPanel } from './UnmatchedSkusPanel';
 import {
   detectAmazonReport,
   parseAmazonUnified,
@@ -1784,6 +1785,8 @@ export const UploadCentreScreen: React.FC = () => {
           </button>
         </div>
       )}
+
+      <UnmatchedSkusPanel />
 
       {/* Financial Year Month Grid */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs space-y-3">

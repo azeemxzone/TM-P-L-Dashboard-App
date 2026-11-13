@@ -146,3 +146,75 @@ export interface BuildLedgerResult {
   skippedItems: number;
   settledRowsWithoutOrderRecord: number;
 }
+
+export interface LedgerSummaryTotals {
+  revenue: number;
+  productCost: number;
+  packing: number;
+  returnLoss: number;
+  tcs: number;
+  tds: number;
+  profitBeforeTax: number;
+  profitAfterTax: number;
+}
+
+export interface LedgerSummarySkuRow {
+  masterSku: string;
+  netUnits: number;
+  sold: number;
+  customerReturn: number;
+  rto: number;
+  dispatched: number;
+  cost: number;
+  packing: number;
+  returnLoss: number;
+  profit: number;
+}
+
+export interface LedgerSummaryNonSkuCharges {
+  total: number;
+  ads: number;
+  claims: number;
+  fines: number;
+  adjustments: number;
+  cost: number;
+  packing: number;
+  returnLoss: number;
+  profit: number;
+  lineCount: number;
+}
+
+export interface LedgerSummaryCounts {
+  customerReturnUnits: number;
+  rtoUnits: number;
+  dispatchedUnits: number;
+  lines: number;
+}
+
+export interface LedgerSummaryWarnings {
+  skippedRows: number;
+  skippedItems: number;
+  settledRowsWithoutOrderRecord: number;
+  unresolvedSkus: UnresolvedSku[];
+}
+
+export interface LedgerSummaryDoc {
+  id: string; // "{platform}_{YYYY-MM}"
+  platform: Marketplace;
+  settlementMonth: string; // YYYY-MM
+  schemaVersion: number;
+  builtAt: string; // ISO 8601
+  sourceUploadIds: string[];
+  totals: LedgerSummaryTotals;
+  perSku: LedgerSummarySkuRow[];
+  nonSkuCharges: LedgerSummaryNonSkuCharges;
+  counts: LedgerSummaryCounts;
+  warnings: LedgerSummaryWarnings;
+}
+
+export interface BuildSummaryDocsInput extends Omit<BuildLedgerInput, 'settlementMonth'> {
+  settlementMonth?: string;
+  platforms?: Marketplace[];
+  sourceUploadIds?: Partial<Record<Marketplace, string[]>>;
+}
+

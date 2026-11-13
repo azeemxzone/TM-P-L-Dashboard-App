@@ -12,8 +12,6 @@ import { parseAliasCsv } from '../utils/skuResolver';
 import { parseCSV } from '../utils/csvParser';
 import { CostMasterItem } from '../types';
 import { parseFirestoreAliases, parseFirestoreCostMaster } from '../components/PnLDashboardScreen';
-import { db } from '../firebase';
-import { collection, getDocs } from 'firebase/firestore';
 import { cleanSku } from '../flipkart/normalizers';
 import { independentDispatched, goldenReturnLossRate } from './goldenDispatch';
 import { independentReturns } from './returnGolden';
@@ -364,33 +362,51 @@ describe('Stage 5R-3: P&L Dashboard Data Model Test (September 2026)', () => {
     expect(unresolvedItem?.reason).toBe('MISSING_EFFECTIVE_DATE');
   });
 
-  it('compares cost_master and sku_aliases documents as loaded by screen with sku_master_v3.csv and sku_aliases_v2.csv and fails on any mismatch', async () => {
-    // 1. Read live Firestore docs (or export) as loaded by the screen
-    const cmSnap = await getDocs(collection(db, 'cost_master'));
-    const saSnap = await getDocs(collection(db, 'sku_aliases'));
-
-    const { items: screenCostItems } = parseFirestoreCostMaster(cmSnap.docs as any);
-    const screenAliasMap = parseFirestoreAliases(saSnap.docs as any);
-
-    // 2. Load golden sku_master_v3.csv
+  it('compares cost_master and sku_aliases documents as loaded by screen with sku_master_v3.csv and sku_aliases_v2.csv and fails on any mismatch', () => {
+    // 1. Read real sample CSVs via sample helper and pass through screen loaders
     const masterPath = findRealSampleFile('sku_master_v3');
     const masterRows = parseCSV(fs.readFileSync(masterPath, 'utf8'));
+    const cmDocs: Array<{ id: string; data: () => Record<string, any> }> = [];
     const goldenCosts = new Map<string, number>();
     for (let i = 1; i < masterRows.length; i++) {
       const code = cleanSku(masterRows[i][0] || '');
-      const cost = Number(masterRows[i][3]) || 0;
-      if (code) goldenCosts.set(code, cost);
+      const name = (masterRows[i][1] || '').trim();
+      const weight = masterRows[i][2];
+      const mfgRaw = masterRows[i][3];
+      const cost = Number(mfgRaw) || 0;
+      if (code) {
+        goldenCosts.set(code, cost);
+        cmDocs.push({
+          id: code,
+          data: () => ({
+            sku_code: code,
+            sku_name: name,
+            weight_grams: weight,
+            mfg_cost: mfgRaw,
+            effective_from: '2020-01-01',
+          }),
+        });
+      }
     }
 
-    // 3. Load golden sku_aliases_v2.csv
     const aliasPath = findRealSampleFile('sku_aliases_v2');
     const aliasRows = parseCSV(fs.readFileSync(aliasPath, 'utf8'));
+    const saDocs: Array<{ id: string; data: () => Record<string, any> }> = [];
     const goldenAliases = new Map<string, string>();
     for (let i = 1; i < aliasRows.length; i++) {
       const alias = cleanSku(aliasRows[i][0] || '');
       const master = cleanSku(aliasRows[i][1] || '');
-      if (alias && master) goldenAliases.set(alias, master);
+      if (alias && master) {
+        goldenAliases.set(alias, master);
+        saDocs.push({
+          id: alias,
+          data: () => ({ alias, master_sku: master }),
+        });
+      }
     }
+
+    const { items: screenCostItems } = parseFirestoreCostMaster(cmDocs);
+    const screenAliasMap = parseFirestoreAliases(saDocs);
 
     // 4. Compare mfg_cost for every SKU
     const costVariances: Array<{ sku: string; screenMfgCost: number; goldenMfgCost: number; delta: number }> = [];

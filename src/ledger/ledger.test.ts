@@ -582,5 +582,71 @@ describe('Stage 5R-1 Fix 5b-2: Golden Test, Packing & Reconciliation Suite', () 
     expect(warningItemsCount).toBe(settledItemIdsFound.size);
     expect(settledItemIdsFound.size).toBeGreaterThan(0);
   });
+
+  // --------------------------------------------------------------------------
+  // 9. Bridge table: Reference Summary cell -> Ledger Profit After Tax
+  // --------------------------------------------------------------------------
+  it('9. Prints bridge table (Reference Summary cell -> Ledger profitAfterTax) and asserts |residual| <= 1.00 per platform', () => {
+    const refWb = XLSX.readFile(findRealSampleFile('September_2026_Reference_PnL.xlsx'));
+    const ws = refWb.Sheets['Summary'];
+
+    const platformDefs: Array<{
+      platform: 'Flipkart' | 'Amazon' | 'Meesho';
+      profitCell: string;
+      packingCell: string;
+    }> = [
+      { platform: 'Flipkart', profitCell: 'B12', packingCell: 'B9' },
+      { platform: 'Amazon', profitCell: 'C12', packingCell: 'C9' },
+      { platform: 'Meesho', profitCell: 'D12', packingCell: 'D9' },
+    ];
+
+    const bridgeRows = platformDefs.map(({ platform, profitCell, packingCell }) => {
+      const refSummaryProfit = Number(ws[profitCell].v);
+      const refPacking = Number(ws[packingCell].v);
+      const ledgerProfitAfterTax = ledgerResult.totals.byPlatform[platform].profitAfterTcsTds;
+      const difference = ledgerProfitAfterTax - refSummaryProfit;
+
+      // Profit impact (ledger - reference) of each intentional rule difference:
+      const packingDelta = refPacking - independentDispatched[platform] * packingSetting;
+      const returnLossDelta = -(
+        returnLossRate *
+        freightSetting *
+        independentReturns[platform].customerReturnUnits
+      );
+      const neverDispatchedCredit =
+        platform === 'Flipkart' ? independentSkippedRowsCostAdjustment : 0;
+
+      const residual = difference - (packingDelta + returnLossDelta + neverDispatchedCredit);
+
+      return {
+        Platform: platform,
+        ReferenceCell: `${profitCell} (${refSummaryProfit.toFixed(2)})`,
+        LedgerProfitAfterTax: ledgerProfitAfterTax.toFixed(2),
+        Difference: difference.toFixed(2),
+        PackingDelta: packingDelta.toFixed(2),
+        ReturnLossDelta_LandedVsMfg: returnLossDelta.toFixed(2),
+        NeverDispatchedCredit: neverDispatchedCredit.toFixed(2),
+        Residual: residual.toFixed(2),
+        _residualNum: residual,
+        _refNum: refSummaryProfit,
+        _ledgerNum: ledgerProfitAfterTax,
+        _diffNum: difference,
+        _packNum: packingDelta,
+        _retNum: returnLossDelta,
+        _neverNum: neverDispatchedCredit,
+      };
+    });
+
+    const printableRows = bridgeRows.map(({ _residualNum, _refNum, _ledgerNum, _diffNum, _packNum, _retNum, _neverNum, ...rest }) => rest);
+
+    console.log('\n========================================================================================');
+    console.log('9. BRIDGE TABLE: REFERENCE SUMMARY CELL -> LEDGER PROFIT AFTER TAX (SEP 2026)');
+    console.log('========================================================================================');
+    console.table(printableRows);
+
+    for (const row of bridgeRows) {
+      expect(Math.abs(row._residualNum)).toBeLessThanOrEqual(1.0);
+    }
+  });
 });
 

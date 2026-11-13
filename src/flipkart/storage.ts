@@ -9,7 +9,7 @@ import {
   getCountFromServer,
   Firestore,
 } from 'firebase/firestore';
-import { orderMonth, cleanItemId, cleanNeftId } from './normalizers';
+import { orderMonth, cleanItemId, cleanNeftId, cleanSku } from './normalizers';
 import {
   FlipkartOrderRow,
   FlipkartReturnRow,
@@ -30,6 +30,13 @@ export interface SkuAliasDoc {
   createdBy?: string;
 }
 
+export interface UnmatchedSkuEntry {
+  platform: 'Flipkart' | 'Amazon' | 'Meesho';
+  sellerSku: string;
+  rows: number;
+  resolved: boolean;
+}
+
 export interface FkUploadRecord {
   id?: string;
   uploadId?: string;
@@ -48,6 +55,7 @@ export interface FkUploadRecord {
     unmappedCount?: number;
     storedCounts?: Record<string, number>;
   };
+  unmatchedSkus?: UnmatchedSkuEntry[];
   date: string; // ISO date YYYY-MM-DD
   uploadedAt: string; // ISO timestamp
   rowCount?: number;
@@ -278,6 +286,105 @@ export class UploadRecordWriteError extends Error {
   }
 }
 
+function computeFlipkartUnmatchedSkus(
+  slot: FlipkartSlotType,
+  data: {
+    orders?: FlipkartOrderRow[];
+    returns?: FlipkartReturnRow[];
+    settled?: FlipkartSettledReport;
+  },
+  masterCodes: Set<string> | string[],
+  aliasMap: Map<string, string> | Record<string, string>
+): UnmatchedSkuEntry[] {
+  let rawSkus: string[] = [];
+  if (slot === 'orders' && data.orders) {
+    rawSkus = data.orders.map((o) => o.sku);
+  } else if (slot === 'returns' && data.returns) {
+    rawSkus = data.returns.map((r) => r.sku);
+  } else if (slot === 'settled' && data.settled) {
+    rawSkus = data.settled.orders.map((o) => o.sellerSku);
+  }
+
+  const counts = new Map<string, number>();
+  for (const raw of rawSkus) {
+    const cleaned = cleanSku(raw);
+    if (!cleaned) continue;
+    if (!resolveMasterSku(cleaned, masterCodes, aliasMap)) {
+      counts.set(cleaned, (counts.get(cleaned) || 0) + 1);
+    }
+  }
+
+  return Array.from(counts.entries())
+    .map(([sellerSku, rows]) => ({
+      platform: 'Flipkart' as const,
+      sellerSku,
+      rows,
+      resolved: false,
+    }))
+    .sort((a, b) => b.rows - a.rows || a.sellerSku.localeCompare(b.sellerSku));
+}
+
+async function loadActiveSkuResolutionData(db: Firestore): Promise<{
+  masterCodes: Set<string>;
+  aliasMap: Map<string, string>;
+} | null> {
+  try {
+    const latestByCode = new Map<string, { active: boolean; effective_from: string; createdAt: string }>();
+    const aliasMap = new Map<string, string>();
+    const inMem = (db as any)?._inMemoryCollections;
+
+    if (inMem) {
+      const cmCol: Map<string, any> = inMem.get('cost_master') || new Map();
+      cmCol.forEach((d, id) => {
+        const code = cleanSku(d.sku_code || d.sku || id);
+        if (!code) return;
+        const eff = String(d.effective_from || '2026-04-01');
+        const created = String(d.createdAt || '');
+        const prev = latestByCode.get(code);
+        if (!prev || eff > prev.effective_from || (eff === prev.effective_from && created > prev.createdAt)) {
+          latestByCode.set(code, { active: d.active !== false, effective_from: eff, createdAt: created });
+        }
+      });
+      const saCol: Map<string, any> = inMem.get('sku_aliases') || new Map();
+      saCol.forEach((d, id) => {
+        const a = cleanSku(d.alias || d.alias_sku || id);
+        const m = cleanSku(d.master_sku || d.sku_code);
+        if (a && m) aliasMap.set(a, m);
+      });
+    } else {
+      const [cmSnap, saSnap] = await Promise.all([
+        getDocs(collection(db, 'cost_master')),
+        getDocs(collection(db, 'sku_aliases')),
+      ]);
+      cmSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        const code = cleanSku(d.sku_code || d.sku || docSnap.id);
+        if (!code) return;
+        const eff = String(d.effective_from || '2026-04-01');
+        const created = String(d.createdAt || '');
+        const prev = latestByCode.get(code);
+        if (!prev || eff > prev.effective_from || (eff === prev.effective_from && created > prev.createdAt)) {
+          latestByCode.set(code, { active: d.active !== false, effective_from: eff, createdAt: created });
+        }
+      });
+      saSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        const a = cleanSku(d.alias || d.alias_sku || docSnap.id);
+        const m = cleanSku(d.master_sku || d.sku_code);
+        if (a && m) aliasMap.set(a, m);
+      });
+    }
+
+    const masterCodes = new Set<string>();
+    for (const [code, info] of latestByCode.entries()) {
+      if (info.active) masterCodes.add(code);
+    }
+    return { masterCodes, aliasMap };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Builds all deterministic document payloads and the audit upload record for Flipkart imports.
  * Ensures stripUndefined is applied at every level and all count fields are numeric.
@@ -295,6 +402,9 @@ export function buildFlipkartImportPayloads(
     sha256: string;
     userEmail: string;
     uploadId?: string;
+    masterCodes?: Set<string> | string[];
+    aliasMap?: Map<string, string> | Record<string, string>;
+    unmatchedSkus?: UnmatchedSkuEntry[];
   }
 ): {
   uploadId: string;
@@ -430,6 +540,17 @@ export function buildFlipkartImportPayloads(
     batchesCount = groupByBatch(data.settled).length;
   }
 
+  const unmatchedSkus = meta.unmatchedSkus
+    ? meta.unmatchedSkus.map((u) => ({
+        platform: 'Flipkart' as const,
+        sellerSku: cleanSku(u.sellerSku),
+        rows: Number(u.rows || 0),
+        resolved: Boolean(u.resolved),
+      }))
+    : meta.masterCodes !== undefined || meta.aliasMap !== undefined
+    ? computeFlipkartUnmatchedSkus(slot, data, meta.masterCodes || [], meta.aliasMap || new Map())
+    : undefined;
+
   const uploadRecord: FkUploadRecord = stripUndefined({
     id: uploadId,
     uploadId,
@@ -445,10 +566,12 @@ export function buildFlipkartImportPayloads(
       statusCounts,
       returnTypeCounts,
       batchesCount,
+      unmappedCount: unmatchedSkus ? unmatchedSkus.length : undefined,
       storedCounts: Object.fromEntries(
         Object.entries(expectedCounts).map(([k, v]) => [k, v])
       ),
     },
+    unmatchedSkus,
     date: todayDate,
     uploadedAt: nowIso,
   });
@@ -477,6 +600,9 @@ export async function commitFlipkartImport(
     sha256: string;
     userEmail: string;
     existingUploadId?: string;
+    masterCodes?: Set<string> | string[];
+    aliasMap?: Map<string, string> | Record<string, string>;
+    unmatchedSkus?: UnmatchedSkuEntry[];
   },
   onProgress?: (info: {
     currentBatch: number;
@@ -490,6 +616,20 @@ export async function commitFlipkartImport(
   totalRecords: number;
   collectionCounts: Record<string, { stored: number; expected: number }>;
 }> {
+  let resolvedMasterCodes = meta.masterCodes;
+  let resolvedAliasMap = meta.aliasMap;
+  if (
+    meta.unmatchedSkus === undefined &&
+    resolvedMasterCodes === undefined &&
+    resolvedAliasMap === undefined
+  ) {
+    const loaded = await loadActiveSkuResolutionData(db);
+    if (loaded) {
+      resolvedMasterCodes = loaded.masterCodes;
+      resolvedAliasMap = loaded.aliasMap;
+    }
+  }
+
   const { uploadId, ops, expectedCounts, uploadRecord } = buildFlipkartImportPayloads(
     slot,
     data,
@@ -499,6 +639,9 @@ export async function commitFlipkartImport(
       sha256: meta.sha256,
       userEmail: meta.userEmail,
       uploadId: meta.existingUploadId,
+      masterCodes: resolvedMasterCodes,
+      aliasMap: resolvedAliasMap,
+      unmatchedSkus: meta.unmatchedSkus,
     }
   );
 
