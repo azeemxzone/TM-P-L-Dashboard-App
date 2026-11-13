@@ -139,13 +139,11 @@
   * 2d-fix (fk_order_items upload verification, read-only diagnosis): issued
     earlier, not run.
   * 5R-4a (read-only audit of Firestore read cost) drafted; then 5R-4.
-  * Queue (in order): owner adds anonymised APR sample -> CI-2 -> 2d-fix
-    (read-only diagnosis, issued) -> 5R-4b-2a-c (issued) -> review
-    UnmatchedSkusPanel -> 2e-fix-b re-review -> 5R-4b-2b (hook summary rebuild
-    into 3 commit functions + mark-stale on cost/alias/settings writes + admin
-    Rebuild button + backfill + pnl_summaries rules block) -> 5R-4c (screens
-    read summaries) -> 8R-2a-3f-b -> uploads + Sep screenshots -> 8R-1f ->
-    8R-3 -> close Stage 8. No uploads until 2d-fix is done.
+  * Queue (in order): 2d-fix (read-only diagnosis, re-sent 13 Nov) -> 5R-4b-2a-c
+    (read-only audit, re-sent) -> review UnmatchedSkusPanel -> 5R-4b-2b (hook
+    summary rebuild + mark-stale + admin Rebuild + backfill + pnl_summaries rules)
+    -> 5R-4c (screens read summaries) -> implement 2d-fix, then Jul/Aug/Oct Orders
+    uploads -> 8R-2a-3f-b -> Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
 - Not approved: 4c, 6, 8.
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
@@ -156,14 +154,10 @@
 - Stage 9 files deleted from AI Studio and GitHub (recoverable from history).
   Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS
   (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024.
-- CI is RED since run #109 (3d commit). ROOT CAUSE (13 Nov): CI Node version
-  too old: vitest reporter crashes with "Map.groupBy is not a function"
-  (needs Node 21+), hiding the names of the 2 failing tests. Not caused by
-  STATE.md. Owner (GitHub web): set node-version 22 in the workflow and add
-  paths-ignore '**.md', then paste the failing test names. Known failure:
-  APR_2026 sample missing in repo. CI-1 SUMMARY received with empty Key
-  numbers (NOT accepted); agent run 18 files / 282 passed, 1 failing (APR).
-  Last green #106.
+- CI GREEN since run #119 (13 Nov, commit 30163d5, 21 files / 293 tests). Earlier red
+  runs #109 to #118: Node version (Map.groupBy, fixed with node-version 22 in
+  test.yml), missing APR sample, bank test column positions. 8R-2a-3 condition
+  "green CI on 3d commit" MET. Warning screenshots on SKU/Return pending (3f-b).
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -336,18 +330,18 @@
     estimate). Items 2 to 6 missing. 5R-4b-2a-b issued. summaryStore.test.ts typed-number
     grep: empty (5R-4b-1 condition closed).
 83. (closed, see 73).
-84. CI 13 Nov (commit f7915c6, Node 22 fix worked): 18 files passed, 1 failed;
-    282 / 283 tests. Only failure: bankStorage.test.ts APR_2026.xlsx missing in
-    repo. Node 20 deprecation annotation = GitHub actions runtime, ignore. Owner
-    adds anonymised APR_2026.xlsx to /samples (GitHub and AI Studio).
+84. CLOSED 13 Nov: CI green at run #119 (commit 30163d5), 21 files / 293 tests.
+    Cause of last failure: analyzeRawBankSheet in bankStorage.test.ts used fixed
+    column positions (anonymised APR file has 8 columns); fixed by header-name
+    lookup. Low-priority Stage 10 check: APR test asserts raw-sheet-computed values.
 85. 5R-4b-2a-b PARTIAL again (only commit-function table). Hook points: Flipkart
     commitFlipkartImport (fk_uploads 739-751, serves Orders/Settled/Returns),
     Amazon commitAmazonImport (az_uploads 693-697), Meesho commitMeeshoImport
     (ms_uploads 1144-1148). Summary also goes STALE when cost_master, purchases,
     opening_stock, sku_aliases or settings change (not only uploads); needs
     mark-stale + admin Rebuild. 5R-4b-2a-c issued (short, no cat -n).
-86. Stage CI-2 issued: remove live Firestore from pnlDashboardModel.test.ts
-    (defect 76), read CSVs from /samples.
+86. CLOSED 13 Nov: CI-2 accepted; grep proof for pnlDashboardModel.test.ts still
+    unseen (CI green supports it).
 87. Screen 13 Nov: Bank slot shows APR_2026.xlsx uploaded "0 of 0 rows" (zero-credit
     complete record works in the app; 2e-fix behaviour confirmed). April Flipkart
     Orders 9 of 9 rows and Returns 0 of 0, no partial import (small files). Open:
@@ -391,7 +385,5 @@ ms_batches, ms_uploads. (sku_variants unused.)
   before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
 
 ## Last result (13 Nov 2026)
-- CI-2 accepted (code); grep proof pending. April bank upload works (0 rows).
-- Owner: confirm APR_2026.xlsx in GitHub samples/, check CI is green.
-- Next: 2d-fix diagnosis, 5R-4b-2a-c, UnmatchedSkusPanel review, then 5R-4b-2b.
-  No large Orders uploads until 2d-fix.
+- CI green (#119). CI-3 accepted. Next: 2d-fix diagnosis and 5R-4b-2a-c (both
+  re-sent). No large Orders uploads until the 2d-fix is implemented.
