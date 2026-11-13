@@ -388,5 +388,6 @@ ms_batches, ms_uploads. (sku_variants unused.)
   before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
 
 ## Last result (13 Nov 2026)
-- 5R-4b-2a-c accepted. 5R-4b-2b issued. 2d-fix SUMMARY not yet received.
-- Owner: run 5R-4b-2b in a new chat; send the 2d-fix SUMMARY.
+- 5R-4b-2a-c accepted. 5R-4b-2b issued (owner to run in a new chat).
+- 2d-fix SUMMARY NOT received (owner pasted only the 5R-4b-2a-c SUMMARY). Owner to
+  locate the "Stage: 2d-fix" reply or re-send the prompt in a new chat.
