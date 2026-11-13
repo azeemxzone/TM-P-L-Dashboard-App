@@ -76,7 +76,14 @@ function analyzeRawBankSheet(wb: XLSX.WorkBook) {
     throw new Error('Header row with "Bank Reference" not found in raw sheet.');
   }
 
-  const dataRows = rawRows.slice(headerIdx + 1).filter((r) => Array.isArray(r) && r[0]);
+  const headerRow = rawRows[headerIdx].map((c) => String(c ?? '').trim().toLowerCase());
+  const colRef = headerRow.findIndex((h) => h === 'bank reference' || h.includes('bank ref'));
+  const colType = headerRow.findIndex((h) => h === 'type' || h === 'cr/dr');
+  const colNarration = headerRow.findIndex((h) => h.includes('narration') || h.includes('description'));
+  const colDebit = headerRow.findIndex((h) => h === 'debit' || h.includes('debit'));
+  const colCredit = headerRow.findIndex((h) => h === 'credit' || h.includes('credit'));
+
+  const dataRows = rawRows.slice(headerIdx + 1).filter((r) => Array.isArray(r) && colRef >= 0 && r[colRef]);
 
   let rawDebits = 0;
   let rawCredits = 0;
@@ -84,16 +91,20 @@ function analyzeRawBankSheet(wb: XLSX.WorkBook) {
   let rawOtherCredits = 0;
 
   for (const r of dataRows) {
-    const type = String(r[2] || '').trim().toUpperCase();
-    const narration = String(r[3] || '').toLowerCase();
-    const debitVal = r[4];
-    const creditVal = r[5];
-    const isDebit =
-      type === 'DR' ||
-      (debitVal !== undefined && debitVal !== '' && parseFloat(String(debitVal).replace(/,/g, '')) > 0);
-    const isCredit =
-      type === 'CR' ||
-      (creditVal !== undefined && creditVal !== '' && parseFloat(String(creditVal).replace(/,/g, '')) > 0);
+    const type = colType >= 0 ? String(r[colType] ?? '').trim().toUpperCase() : '';
+    const narration = colNarration >= 0 ? String(r[colNarration] ?? '').toLowerCase() : '';
+    const debitVal = colDebit >= 0 ? r[colDebit] : undefined;
+    const creditVal = colCredit >= 0 ? r[colCredit] : undefined;
+    const debitNum =
+      debitVal !== undefined && debitVal !== ''
+        ? parseFloat(String(debitVal).replace(/[^0-9.\-]/g, ''))
+        : 0;
+    const creditNum =
+      creditVal !== undefined && creditVal !== ''
+        ? parseFloat(String(creditVal).replace(/[^0-9.\-]/g, ''))
+        : 0;
+    const isDebit = type === 'DR' || type === 'DEBIT' || debitNum > 0;
+    const isCredit = type === 'CR' || type === 'CREDIT' || creditNum > 0;
 
     if (isDebit) rawDebits++;
     if (isCredit) {
