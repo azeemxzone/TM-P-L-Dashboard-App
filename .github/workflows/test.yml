@@ -1,6 +1,9 @@
 name: tests
-on: [push, workflow_dispatch], 
-on: paths-ignore: ['**.md']
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
 jobs:
   vitest:
     runs-on: ubuntu-latest
