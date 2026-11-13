@@ -139,10 +139,10 @@
   * 2d-fix (fk_order_items upload verification, read-only diagnosis): issued
     earlier, not run.
   * 5R-4a (read-only audit of Firestore read cost) drafted; then 5R-4.
-  * Queue (in order): CI-1 -> fix CI -> 2e-fix-b re-review -> 2d-fix -> 5R-4a
-    -> 5R-4 -> 8R-2a-3f-b -> finish Jul/Aug/Oct uploads, Sep screenshots vs
-    CURRENT ledger Sep -> 8R-1f (Amazon MTR Cancel evidence, read-only) ->
-    8R-3 (Non-SKU split, tested vs raw sums) -> close Stage 8.
+  * Queue (in order): fix workflow YAML + paste failing test names -> CI-2
+    (pnlDashboardModel test off Firestore, anonymised APR sample) -> review
+    UnmatchedSkusPanel -> 2e-fix-b -> 2d-fix -> 5R-4b-1 -> 5R-4b-2 -> 5R-4c ->
+    8R-2a-3f-b -> uploads + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
 - Not approved: 4c, 6, 8.
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
@@ -292,6 +292,24 @@
     monthly summary docs, status-filtered queries, isOpen flag, getDocs once,
     shared provider (5R-4). Ledger needs only CANCELLED items + order-record
     existence; tracking needs delivered-unpaid items. Keep writing all rows.
+75. 5R-4a audit ACCEPTED (13 Nov). P&L open = about 29,154 reads (estimate:
+    Sep counts x 12), P&L + SKU + Return = about 87,462, above the 50k daily
+    limit. All ledger screens use whole-collection onSnapshot, independent
+    copies. Also found: UnmatchedSkusPanel.tsx already exists (4 listeners
+    duplicating parent; never reviewed by PM; 4d-1 unapproved); storage
+    writes ms_returns_in_transit but MeeshoTrackingScreen reads
+    ms_returns_intransit; AuthContext onSnapshot not cleaned on unmount;
+    FlipkartTrackingScreen:281 reads all fk_returns.
+76. pnlDashboardModel.test.ts:369-370 reads cost_master and sku_aliases from
+    LIVE Firestore (defect 70 CONFIRMED). Fix in CI-2: read from /samples CSVs.
+77. .github/workflows/test.yml (13 Nov) had duplicate "on:" key and a stray
+    comma; replaced with the corrected file (node 22, paths-ignore **.md).
+78. DESIGN AGREED 13 Nov: pre-computed ledger_summaries/{platform}_{YYYY-MM}
+    (built by existing buildLedger and groupings, rebuilt on each upload that
+    touches the month, incl. Orders uploads); raw rows still written fully;
+    Tracking keeps delivered-unpaid items (isOpen flag); screens read summaries
+    (5R-4c). Stages: 5R-4b-1 builder + test (issued), 5R-4b-2 hook into upload
+    commits, 5R-4c screens. Watch 1 MiB doc limit.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -330,11 +348,8 @@ ms_batches, ms_uploads. (sku_variants unused.)
   before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
 
 ## Last result (13 Nov 2026)
-- CI cause found (Node version, Map.groupBy). CI-1 SUMMARY incomplete.
-- Usage: writes over free limit, reads near limit; reset 12:00 noon Dubai.
-- Next: owner fixes workflow, pastes failing test names, adds anonymised
-  APR_2026.xlsx, answers which Firebase project is used -> re-send CI-1 Key
-  numbers -> 2e-fix-b -> 2d-fix -> 5R-4a (revised) -> 5R-4 -> 4d-1 ->
-  8R-2a-3f-b -> uploads + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
-- Next: CI-1 (issued) -> fix CI -> 2e-fix-b -> 2d-fix -> 5R-4a -> 5R-4 ->
-  8R-2a-3f-b -> uploads + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
+- 5R-4a accepted; summary-doc design agreed; workflow YAML corrected.
+- Owner: replace test.yml, paste failing test names, say which Firebase project
+  the app uses. No uploads until 2d-fix and the quota reset (12:00 noon Dubai).
+- Next: CI-2 prompt after the failing names arrive; 5R-4b-1 may run in
+  parallel (no screen or Firestore access).
