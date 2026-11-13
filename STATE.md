@@ -141,8 +141,13 @@
   * 5R-4a (read-only audit of Firestore read cost) drafted; then 5R-4.
   * Queue (in order): fix workflow YAML + paste failing test names -> CI-2
     (pnlDashboardModel test off Firestore, anonymised APR sample) -> review
-    UnmatchedSkusPanel -> 2e-fix-b -> 2d-fix -> 5R-4b-1 -> 5R-4b-2 -> 5R-4c ->
-    8R-2a-3f-b -> uploads + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
+    UnmatchedSkusPanel -> 2e-fix-b -> 2d-fix -> 5R-4b-2a (read-only audit, issued) ->
+    5R-4b-2b (hook summary rebuild into upload commits + admin Rebuild button + backfill
+    + pnl_summaries rules block) -> 5R-4c (screens read summaries) -> 8R-2a-3f-b ->
+    uploads + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
+    AGREED 13 Nov: a month's summary is rebuilt whenever an upload touches it (incl.
+    Orders uploads changing the cancelled rule); rebuild reads that month's raw rows
+    once, only on upload.
 - Not approved: 4c, 6, 8.
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
@@ -310,6 +315,19 @@
     Tracking keeps delivered-unpaid items (isOpen flag); screens read summaries
     (5R-4c). Stages: 5R-4b-1 builder + test (issued), 5R-4b-2 hook into upload
     commits, 5R-4c screens. Watch 1 MiB doc limit.
+79. 5R-4b-1 ACCEPTED as builder (13 Nov): src/ledger/summaryStore.ts (buildSummaryDocs,
+    writeSummaries, writeBatch merge, BATCH 400), summaryStore.test.ts (5 tests), types.
+    Collection name is pnl_summaries (agent's choice, accepted), doc IDs
+    "{Platform}_{YYYY-MM}" capitalised (Flipkart_2026-09). Sep docs equal CURRENT ledger
+    Sep (26,224.46 / 2,303.90 / 18,049.44), size 1.8 to 3.4 KB. Open: typed-number grep
+    for summaryStore.test.ts; pnl_summaries needs a firestore.rules block (read: listed
+    users, write: admin) in repo, owner publishes (5R-4b-2b); deviation of collection
+    name was not declared by the agent.
+80. Latest agent run (13 Nov): 21 files / 293 tests, 1 failing (APR_2026 sample missing).
+    CI itself still unverified after the YAML fix.
+81. Usage screenshot in defect 73 is from project ai-builder-project (database
+    ai-studio-6160...), but owner says the app uses continual-medium-b61jg. Usage
+    figures may belong to another project; owner to send Usage of continual-medium-b61jg.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -348,8 +366,7 @@ ms_batches, ms_uploads. (sku_variants unused.)
   before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
 
 ## Last result (13 Nov 2026)
-- 5R-4a accepted; summary-doc design agreed; workflow YAML corrected.
-- Owner: replace test.yml, paste failing test names, say which Firebase project
-  the app uses. No uploads until 2d-fix and the quota reset (12:00 noon Dubai).
-- Next: CI-2 prompt after the failing names arrive; 5R-4b-1 may run in
-  parallel (no screen or Firestore access).
+- 5R-4b-1 accepted (builder only, not yet used by any screen or upload).
+- Owner: app uses Firebase project continual-medium-b61jg. Needs: corrected test.yml,
+  failing test names, Usage of continual-medium-b61jg, no uploads until 2d-fix.
+- Next: 5R-4b-2a audit prompt (issued), CI-2, 2d-fix.
