@@ -139,11 +139,12 @@
   * 2d-fix (fk_order_items upload verification, read-only diagnosis): issued
     earlier, not run.
   * 5R-4a (read-only audit of Firestore read cost) drafted; then 5R-4.
-  * Queue (in order): 2d-fix (read-only diagnosis, re-sent 13 Nov) -> 5R-4b-2a-c
-    (read-only audit, re-sent) -> review UnmatchedSkusPanel -> 5R-4b-2b (hook
-    summary rebuild + mark-stale + admin Rebuild + backfill + pnl_summaries rules)
-    -> 5R-4c (screens read summaries) -> implement 2d-fix, then Jul/Aug/Oct Orders
-    uploads -> 8R-2a-3f-b -> Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
+  * Queue (in order): 2d-fix diagnosis (SUMMARY still pending) -> 5R-4b-2b (issued) ->
+    wire markSummariesStale to the cost/alias/settings/purchases/opening-stock writes +
+    admin Rebuild button + manual backfill -> pnl_summaries rules block published by
+    owner -> 5R-4c (screens read summaries, remove whole-collection listeners) ->
+    UnmatchedSkusPanel audit -> implement 2d-fix, then Jul/Aug/Oct Orders uploads ->
+    8R-2a-3f-b -> Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
 - Not approved: 4c, 6, 8.
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
@@ -322,24 +323,26 @@
 80. Latest agent run (13 Nov): 21 files / 293 tests, 1 failing (APR_2026 sample missing).
     CI itself still unverified after the YAML fix.
 81. (closed, see 73).
-82. 5R-4b-2a received PARTIAL (13 Nov): only item 1 (month fields) delivered.
-    fk_settlement_rows and ms_payments have paymentMonth; fk_adjustments (paymentDate)
-    and ms_ads (deductionDate) need date ranges; az_transactions "orderMonth" is really
-    posted month; fk_order_items and az_mtr_rows have no settlement date (fetch by
-    orderItemId / orderId in chunks of 30). Rebuild of Sep about 2,500 reads (reviewer
-    estimate). Items 2 to 6 missing. 5R-4b-2a-b issued. summaryStore.test.ts typed-number
-    grep: empty (5R-4b-1 condition closed).
+82. CLOSED 13 Nov: 5R-4b-2a-c complete and accepted. Sep rebuild about 2,288 reads
+    (2,627 max) vs about 29k per screen open today. Project and database IDs match
+    console (continual-medium-b61jg / ai-studio-6160b2e9-...), source file
+    /firebase-applet-config.json.
 83. (closed, see 73).
 84. CLOSED 13 Nov: CI green at run #119 (commit 30163d5), 21 files / 293 tests.
     Cause of last failure: analyzeRawBankSheet in bankStorage.test.ts used fixed
     column positions (anonymised APR file has 8 columns); fixed by header-name
     lookup. Low-priority Stage 10 check: APR test asserts raw-sheet-computed values.
-85. 5R-4b-2a-b PARTIAL again (only commit-function table). Hook points: Flipkart
-    commitFlipkartImport (fk_uploads 739-751, serves Orders/Settled/Returns),
-    Amazon commitAmazonImport (az_uploads 693-697), Meesho commitMeeshoImport
-    (ms_uploads 1144-1148). Summary also goes STALE when cost_master, purchases,
-    opening_stock, sku_aliases or settings change (not only uploads); needs
-    mark-stale + admin Rebuild. 5R-4b-2a-c issued (short, no cat -n).
+85. Design for 5R-4b-2b (issued 13 Nov): hook refreshSummariesAfterUpload after the
+    complete record in commitFlipkartImport / commitAmazonImport / commitMeeshoImport
+    (skip Flipkart Returns, Meesho Orders, Meesho Returns). Touched months: in memory
+    for Flipkart Settled, Amazon Unified, Meesho Payments (+ads); Flipkart Orders via
+    fk_settlement_rows by orderItemId (chunks of 30); Amazon MTR via az_transactions
+    by orderId (chunks of 30). Failure = upload stays complete, summary stale.
+    Stale triggers (flag only, no auto rebuild) at: CostMasterScreen 195/247/287/323,
+    UploadCentreScreen 1438/1376/1136/630, PurchasesScreen 266/311/429,
+    OpeningStockScreen 295/399, UnmatchedSkusPanel 229/246, SettingsScreen 55/187/205
+    (wired in a later stage). Backfill manual, one month at a time (about 28k reads for
+    12 months: spread over 2 days).
 86. CLOSED 13 Nov: CI-2 accepted; grep proof for pnlDashboardModel.test.ts still
     unseen (CI green supports it).
 87. Screen 13 Nov: Bank slot shows APR_2026.xlsx uploaded "0 of 0 rows" (zero-credit
@@ -385,5 +388,5 @@ ms_batches, ms_uploads. (sku_variants unused.)
   before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
 
 ## Last result (13 Nov 2026)
-- CI green (#119). CI-3 accepted. Next: 2d-fix diagnosis and 5R-4b-2a-c (both
-  re-sent). No large Orders uploads until the 2d-fix is implemented.
+- 5R-4b-2a-c accepted. 5R-4b-2b issued. 2d-fix SUMMARY not yet received.
+- Owner: run 5R-4b-2b in a new chat; send the 2d-fix SUMMARY.
