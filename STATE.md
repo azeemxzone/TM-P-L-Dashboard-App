@@ -139,15 +139,13 @@
   * 2d-fix (fk_order_items upload verification, read-only diagnosis): issued
     earlier, not run.
   * 5R-4a (read-only audit of Firestore read cost) drafted; then 5R-4.
-  * Queue (in order): fix workflow YAML + paste failing test names -> CI-2
-    (pnlDashboardModel test off Firestore, anonymised APR sample) -> review
-    UnmatchedSkusPanel -> 2e-fix-b -> 2d-fix -> 5R-4b-2a (read-only audit, issued) ->
-    5R-4b-2b (hook summary rebuild into upload commits + admin Rebuild button + backfill
-    + pnl_summaries rules block) -> 5R-4c (screens read summaries) -> 8R-2a-3f-b ->
-    uploads + Sep screenshots -> 8R-1f -> 8R-3 -> close Stage 8.
-    AGREED 13 Nov: a month's summary is rebuilt whenever an upload touches it (incl.
-    Orders uploads changing the cancelled rule); rebuild reads that month's raw rows
-    once, only on upload.
+  * Queue (in order): owner adds anonymised APR sample -> CI-2 -> 2d-fix
+    (read-only diagnosis, issued) -> 5R-4b-2a-c (issued) -> review
+    UnmatchedSkusPanel -> 2e-fix-b re-review -> 5R-4b-2b (hook summary rebuild
+    into 3 commit functions + mark-stale on cost/alias/settings writes + admin
+    Rebuild button + backfill + pnl_summaries rules block) -> 5R-4c (screens
+    read summaries) -> 8R-2a-3f-b -> uploads + Sep screenshots -> 8R-1f ->
+    8R-3 -> close Stage 8. No uploads until 2d-fix is done.
 - Not approved: 4c, 6, 8.
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
@@ -290,9 +288,11 @@
     records store unmatchedSkus, admin panel maps to master SKU via sku_aliases,
     resolved flag, no deletes. Run after quota reset and 5R-4a.
 73. Usage 13 Nov (last 24h): reads 47K / 50K, writes 23K / 20K (over limit),
-    real-time reads 8.7K. Banner: database under "AI shared quota limits".
-    Console shows project ai-builder-project (database ai-studio-6160...),
-    STATE says continual-medium-b61jg: confirm which one the app uses.
+    real-time reads 8.7K. Database ai-studio-6160b2e9-... is under "AI shared
+    quota limits" (Enterprise, europe-west2, Firestore Native, scheduled backups
+    DISABLED, realtime updates enabled). RESOLVED 13 Nov: Firebase project name
+    ai-builder-project = Project ID continual-medium-b61jg (project number
+    116053236246); same project the app uses. Backups needed (Stage 10).
 74. Delivered orders: hiding on screen saves no reads. Savings come from
     monthly summary docs, status-filtered queries, isOpen flag, getDocs once,
     shared provider (5R-4). Ledger needs only CANCELLED items + order-record
@@ -305,8 +305,10 @@
     writes ms_returns_in_transit but MeeshoTrackingScreen reads
     ms_returns_intransit; AuthContext onSnapshot not cleaned on unmount;
     FlipkartTrackingScreen:281 reads all fk_returns.
-76. pnlDashboardModel.test.ts:369-370 reads cost_master and sku_aliases from
-    LIVE Firestore (defect 70 CONFIRMED). Fix in CI-2: read from /samples CSVs.
+76. pnlDashboardModel.test.ts live Firestore calls removed in CI-2 (13 Nov):
+    test 5 now reads sku_master_v3.csv and sku_aliases_v2.csv via
+    findRealSampleFile. Proof pending: grep output (SUMMARY Key numbers truncated).
+    Lost check: live Firestore vs CSV sync; add as a manual Stage 10 check.
 77. .github/workflows/test.yml (13 Nov) had duplicate "on:" key and a stray
     comma; replaced with the corrected file (node 22, paths-ignore **.md).
 78. DESIGN AGREED 13 Nov: pre-computed ledger_summaries/{platform}_{YYYY-MM}
@@ -325,9 +327,7 @@
     name was not declared by the agent.
 80. Latest agent run (13 Nov): 21 files / 293 tests, 1 failing (APR_2026 sample missing).
     CI itself still unverified after the YAML fix.
-81. Usage screenshot in defect 73 is from project ai-builder-project (database
-    ai-studio-6160...), but owner says the app uses continual-medium-b61jg. Usage
-    figures may belong to another project; owner to send Usage of continual-medium-b61jg.
+81. (closed, see 73).
 82. 5R-4b-2a received PARTIAL (13 Nov): only item 1 (month fields) delivered.
     fk_settlement_rows and ms_payments have paymentMonth; fk_adjustments (paymentDate)
     and ms_ads (deductionDate) need date ranges; az_transactions "orderMonth" is really
@@ -335,9 +335,24 @@
     orderItemId / orderId in chunks of 30). Rebuild of Sep about 2,500 reads (reviewer
     estimate). Items 2 to 6 missing. 5R-4b-2a-b issued. summaryStore.test.ts typed-number
     grep: empty (5R-4b-1 condition closed).
-83. Usage screenshot sent again is still ai-builder-project (database ai-studio-6160...);
-    owner says app uses continual-medium-b61jg. 5R-4b-2a-b item 7 prints the app config
-    projectId/databaseId to settle it.
+83. (closed, see 73).
+84. CI 13 Nov (commit f7915c6, Node 22 fix worked): 18 files passed, 1 failed;
+    282 / 283 tests. Only failure: bankStorage.test.ts APR_2026.xlsx missing in
+    repo. Node 20 deprecation annotation = GitHub actions runtime, ignore. Owner
+    adds anonymised APR_2026.xlsx to /samples (GitHub and AI Studio).
+85. 5R-4b-2a-b PARTIAL again (only commit-function table). Hook points: Flipkart
+    commitFlipkartImport (fk_uploads 739-751, serves Orders/Settled/Returns),
+    Amazon commitAmazonImport (az_uploads 693-697), Meesho commitMeeshoImport
+    (ms_uploads 1144-1148). Summary also goes STALE when cost_master, purchases,
+    opening_stock, sku_aliases or settings change (not only uploads); needs
+    mark-stale + admin Rebuild. 5R-4b-2a-c issued (short, no cat -n).
+86. Stage CI-2 issued: remove live Firestore from pnlDashboardModel.test.ts
+    (defect 76), read CSVs from /samples.
+87. Screen 13 Nov: Bank slot shows APR_2026.xlsx uploaded "0 of 0 rows" (zero-credit
+    complete record works in the app; 2e-fix behaviour confirmed). April Flipkart
+    Orders 9 of 9 rows and Returns 0 of 0, no partial import (small files). Open:
+    APR_2026.xlsx anonymised copy must be in GitHub samples/ (agent container
+    has it only if added in AI Studio); CI red until then (defect 84).
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -376,6 +391,7 @@ ms_batches, ms_uploads. (sku_variants unused.)
   before Stage 10 (removes AI shared quota limits; verify pricing). Owner task.
 
 ## Last result (13 Nov 2026)
-- 5R-4b-2a partial; 5R-4b-2a-b issued. Quota reported reset, still no uploads until 2d-fix.
-- test.yml: keep file name, replace contents with corrected YAML; failing test names pending.
-- Next: CI-2, 2d-fix, then 5R-4b-2b after the audit is complete.
+- CI-2 accepted (code); grep proof pending. April bank upload works (0 rows).
+- Owner: confirm APR_2026.xlsx in GitHub samples/, check CI is green.
+- Next: 2d-fix diagnosis, 5R-4b-2a-c, UnmatchedSkusPanel review, then 5R-4b-2b.
+  No large Orders uploads until 2d-fix.
