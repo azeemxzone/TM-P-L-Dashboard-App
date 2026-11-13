@@ -161,9 +161,12 @@
     run (prompt in "Prompts to send next").
   * 4d-1 UnmatchedSkusPanel exists already (unreviewed, 4 duplicate listeners).
 - Not approved: 4c, 6, 8.
-- Queue REPLACE first item: "owner checks rules (see defect 91) and publishes 
-  pnl_summaries block -> Jul Orders upload (one month per day, after 12:00 noon
-  Dubai quota reset; screenshot) -> Aug -> Oct -> ..."
+- Queue REPLACE first item: "R-1 run and reviewed -> owner publishes rules 
+  (steps from Claude) -> Jul Orders upload (one month per day, after 12:00 
+  noon Dubai quota reset; screenshot of the duplicate-merged banner and passed
+  verification) -> Aug -> Oct -> ..."
+- Queue ADD after Stage 10 items: "R-2 remove bypass (see defect 91)" before 
+  any viewer user goes live; at the latest in Stage 10.
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
   0.7 factor and fallback cost 100; legacy keys) -> defect 33 cleanup -> 4c ->
@@ -174,6 +177,8 @@
 - Stage 9 files deleted from AI Studio and GitHub (recoverable from history).
   Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS
   (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024.
+- Rules R-1 prompt issued 13 Nov (firestore.rules only, add pnl_summaries 
+  block, keep bypass, print whole file). Not run yet.
 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
@@ -314,12 +319,16 @@
     (0 duplicates); Jul/Aug duplicates inferred, not proven. fk_order_items
     currently holds PARTIAL Jul/Aug data from failed attempts.
 90. Amazon/Meesho upload verification not audited for the same duplicate-ID bug.
-91. Repo firestore.rules as pasted 13 Nov has NO pnl_summaries block and contains
-    "TEMPORARY MIGRATION BYPASS" match /{document=**} allow read, write: if true 
-    (opens whole DB, overrides role rules). Live console rules unseen; owner to paste
-    (database ai-studio-6160b2e9-..., Rules tab). Do not publish until placement checked. 
-    Bypass removal only after owner confirms no Apps Script still needs it. Then agent 
-    prompt: edit firestore.rules only, print it.
+91. firestore.rules (repo AND live console, last published 4 Nov 2026 12:15 PM, 
+    database ai-studio-6160b2e9-0c6b-4a7e-80a1-9f528402bf56) contain "TEMPORARY
+    MIGRATION BYPASS" match /{document=**} allow read, write: if true. This opens
+    the whole database and overrides every role rule. NO pnl_summaries block exists 
+    in repo or live (owner checked 13 Nov). While the bypass exists pnl_summaries 
+    works anyway. Plan: Step 1 (prompt R-1) adds the pnl_summaries block only and
+    keeps the bypass; owner publishes. Step 2 (later, separate stage) removes the
+    bypass, only after (a) owner confirms no Apps Script writes to Firestore 
+    (check script.google.com) and (b) rules tested in the Rules Playground for admin
+    and viewer on every collection the app writes, with rollback via console version history. Risk: the role rules have never been exercised, for example cost_master update allows only the "active" key.
 92. 2d-fix-b verification now reads each unique doc (about 2.5k reads per Orders 
     upload + about 1k summary rebuild). One upload month per day.
 
@@ -361,7 +370,28 @@ ms_batches, ms_uploads, pnl_summaries (NEW). (sku_variants unused.)
   manual backfill one month at a time; delivered-unpaid orders remain visible in
   Tracking; all raw rows still written fully).
 
-## Prompts to send next (full text, ready to paste into a NEW AI Studio chat)
+## Prompts to send next  (REPLACE entire section)
+### Stage R-1
+Stage R-1 (rules text only). Allowed file ONLY: firestore.rules. Everything else 
+READ-ONLY. Do not deploy anything. Do not touch auth or Firebase config. No git.
+1. Add this block INSIDE the "match /databases/{database}/documents" block, after 
+the ms_uploads block:
+match /pnl_summaries/{docId} {
+  allow read: if isAllowedUser();
+  allow create, update: if isAdmin();
+  allow delete: if false;
+}
+2. Do NOT remove or change anything else, including the "TEMPORARY MIGRATION BYPASS" block.
+3. Print the COMPLETE firestore.rules inside the SUMMARY Key numbers and the output of: grep -n "pnl_summaries" firestore.rules
+Stop after this task.
+(then append the standard SUMMARY template)
+
+### Read-only evidence prompt (hook try/catch)
+Read-only. Print (no edits): (a) grep -n -B2 -A4 "refreshSummariesAfterUpload" over src/flipkart/storage.ts src/amazon/storage.ts src/meesho/storage.ts src/components/UploadCentreScreen.tsx; (b) the full text of test (c) in src/ledger/summaryRefresh.test.ts (max 25 lines). Max 60 lines total. Stop after this task.
+(then append the standard SUMMARY template)
+
+### SUMMARY template (keep as is)
+(unchanged)
 
 ### Stage 2d-fix-b
 Stage 2d-fix-b. Allowed files ONLY: src/flipkart/storage.ts, src/flipkart/storage.test.ts, src/components/UploadCentreScreen.tsx (ONLY the currentUploadId reset, around line 1660 and where slot/month/file change). Everything else READ-ONLY; if a fix needs another file, STOP and report its name. Do not touch auth, Firebase config or rules. No git. Do not apply to Amazon or Meesho.
@@ -385,13 +415,11 @@ tsc:
 Key numbers: <pasted tables, lines and grep output>
 Deviations from prompt:
 
-## Last result (13 Nov 2026, evening)
-- 5R-4b-2b accepted (22 files / 297 tests in agent run; CI after push unseen).
-  2d-fix diagnosis accepted; 2d-fix-b issued, not run.
-- Owner TODO now: push/check CI green; publish the pnl_summaries rules block in
-  the Firebase console (inside the documents block; paste firestore.rules to the
-  new Claude for a placement check first); run 2d-fix-b in a new AI Studio chat.
-  NO Orders uploads (Jul/Aug/Oct) until 2d-fix-b is accepted.
-- Pending questions to owner: paste firestore.rules for placement check; paste the
-  try/catch assertion from summaryRefresh.test.ts test (c); say which slot the
-  Settled_Transaction_May2026.xlsx was meant for.
+## Last result  (REPLACE)
+- 13 Nov late evening: owner confirmed pnl_summaries NOT in repo rules; live console 
+rules identical to repo and contain the bypass; owner believes nothing else writes to
+Firestore (to be confirmed at script.google.com before bypass removal).
+- Owner TODO: run prompt R-1 and paste SUMMARY; run the read-only evidence prompt and 
+paste SUMMARY; check script.google.com for Firestore scripts; NO Orders uploads until 
+rules are published and the quota has reset. Settled_Transaction_May2026.xlsx parked 
+until May upload (send header row only then).
