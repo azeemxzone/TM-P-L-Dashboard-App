@@ -429,16 +429,6 @@ tsc:
 Key numbers: <pasted tables, lines and grep output>
 Deviations from prompt:
 
-## Last result (13 Nov 2026, late night)
-- 2d-fix-b accepted with conditions. CI #119-#121 green. 5R-4b-2b try/catch
-  condition met. R-1 report unreliable; R-1b accepted (agent copy = repo +
-  block, bypass kept). Rules do not block uploads (bypass).
-- Owner TODO: (1) add the pnl_summaries block in the console rules editor
-  (steps given), Publish, send a screenshot of the bottom of the editor; (2) 14
-  Nov after 12:00 noon Dubai: Jul Flipkart Orders upload ONLY, send screenshots
-  (duplicates banner and passed verification); (3) check script.google.com for
-  Firestore scripts before R-2; (4) Settled_Transaction_May2026.xlsx parked
-  until the May upload (send sheet names and header row only then).
-- 14 Nov: owner asked for a file check. The uploaded STATE__1_.md was stale and
-  contradictory (patch labels pasted as text, old queue, old prompts, "R-1 not run"). 
-- 14 Nov: owner pasted the console editor text with the pnl_summaries block placed AFTER the closing "  }" of the documents block (red syntax error, not published). Fix given: move the block above that "  }". Awaiting screenshot of the published editor bottom.
+## Last result (14 Nov 2026)
+- pnl_summaries rules block published in the live console (screenshot accepted). Bypass kept. Repo copy not yet synced. 2d-fix-b accepted with conditions, CI #119-#121 green.
+- Owner TODO: (1) 14 Nov after 12:00 noon Dubai: Jul Flipkart Orders.xlsx upload ONLY; do not open P&L/SKU/Return screens first; send screenshot 1 (preview with the duplicates banner) and screenshot 2 (slot status / verification), plus file name and preview row count; (2) check script.google.com for Firestore scripts before R-2; (3) Settled_Transaction_May2026.xlsx parked until the May upload (send sheet names and header row only then).
