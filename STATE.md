@@ -1,4 +1,4 @@
-# TM-P&L STATE (updated 13 Nov 2026, evening; handover to a new Claude account)
+# TM-P&L STATE (updated 13 Nov 2026, late night; handover to a new Claude account)
 
 ## Rules (frozen)
 - Indian FY April-March. Marketplaces: Flipkart, Amazon India, Meesho.
@@ -61,8 +61,9 @@
   0 parseable lines or unreadable header. Ignored lines never stored or
   logged. SHA-256 guard stays.
 - Upload verification: expected count = UNIQUE document IDs of the file;
-  verify by reading those IDs, never row counts or whole-collection counts.
-  (Flipkart fix = Stage 2d-fix-b, issued; Amazon/Meesho not yet audited.)
+  verify by reading those IDs (chunks of 30, documentId() in), never row
+  counts or whole-collection counts. Flipkart DONE (2d-fix-b, accepted with
+  conditions). Amazon/Meesho not yet audited (defect 90).
 - Tests never read live Firestore and never need files missing from the repo.
   Samples in the repo hold no personal data (bank files anonymised).
 - Warning display: amber only for real data gaps (settledRowsWithoutOrderRecord
@@ -75,6 +76,8 @@
   each upload "complete" record for the settlement months it touched; stale flag
   (flag only, no auto rebuild) when cost_master, purchases, opening_stock,
   sku_aliases or settings change; admin Rebuild + manual backfill.
+  refreshSummariesAfterUpload returns errorCode and never throws (stale flag +
+  lastError code only).
 
 ## Roles in this project
 - Claude (PM and financial-logic reviewer): writes short scoped prompts for the
@@ -99,18 +102,18 @@
 - Every requested table, grep output and assertion goes INSIDE the SUMMARY block
   under Key numbers. Reply = SUMMARY block ONLY, all header fields filled. Owner
   pastes the WHOLE block. The agent often TRUNCATES long Key numbers (cat -n
-  lost in 2e-fix, 3d, 5R-4b-2a, CI-3, CI-2): ask for SHORT replies (max 40-60
-  lines, max 15 lines per cat -n). "Pasted" without content not accepted.
-  "Deviations: none" checked against the allowed list (agent once renamed a
-  collection undeclared).
+  lost in 2e-fix, 3d, 5R-4b-2a, CI-3, CI-2, 2d-fix-b, R-1): ask for SHORT
+  replies (max 40-60 lines, max 15 lines per cat -n). "Pasted" without content
+  not accepted. "Deviations: none" checked against the allowed list (agent once
+  renamed a collection undeclared; R-1 omitted the field).
 - The owner has pasted stale/old reports before: check the Stage name matches
   the current prompt.
 - Agent container has NO .git: git proof comes from the owner via GitHub web
   (Actions -> run -> Summary / failed step).
-- Agent numbers and signs have been wrong (8R-2a, 8R-2a-2, 8R-2a-3 "dispatched
-  680", 8R-2a-3d cost 32,042 / profit 27,473.33). Require raw output; tests
-  compute; recompute arithmetic in every summary. Audits have contradicted each
-  other (defect 52).
+- Agent numbers, signs and file-state claims have been wrong (8R-2a, 8R-2a-2,
+  8R-2a-3 "dispatched 680", 8R-2a-3d cost 32,042 / profit 27,473.33, R-1 "bypass
+  not present"). Require raw output; tests compute; recompute arithmetic in
+  every summary. Audits have contradicted each other (defect 52).
 - Tests use REAL samples; a missing sample FAILS the test. No typed financial
   numbers. Reference values come from workbook cells or raw columns, never
   ledger output.
@@ -121,65 +124,82 @@
   tests passing" is not proof (3d: agent green, CI red).
 - Repo private. No customer/supplier personal data, GSTIN, city, postal code.
 - Reviewer error log: Claude has mis-flagged things before (425 sign, 688 vs
-  863 lines, 595 vs 680 units; all withdrawn). Cross-check before rejecting.
+  863 lines, 595 vs 680 units; all withdrawn). 13 Nov: Claude called the agent's
+  firestore.rules a "third version" from an estimated line count (about 230 vs
+  318); R-1b showed it is the repo file plus the pnl_summaries block. Withdrawn.
+  Do not infer file differences from line counts. Cross-check before rejecting.
 
 ## Stage status
 - Verified: 1, 1.1, 1.2, 1.3, 2, 2b, 2c, 3a, 3b, 3c, 4a, 4b, 5R, 7R.
 - Prompt A, 5R-1, 5R-3, 5R-3g APPROVED. 7R family ACCEPTED 11 Nov.
-- CI GREEN since run #119 (13 Nov, commit 30163d5, 21 files / 293 tests). Earlier
-  red runs #109-#118: Node version (Map.groupBy; fixed by node-version 22 in
+- CI GREEN since run #119 (13 Nov, commit 30163d5). Runs #119, #120 (5R-4b-2b
+  push, a189ca5), #121 (2d-fix-b push, 8faf784) green on 13 Nov; #121 test
+  count unseen (agent run: 22 files / 301 tests). Earlier red runs #109-#118:
+  Node version (Map.groupBy; fixed by node-version 22 in
   .github/workflows/test.yml, plus paths-ignore '**.md'), missing APR sample,
-  bank test column positions. Latest agent run after 5R-4b-2b: 22 files / 297
-  tests (CI after that push UNSEEN).
-- CI GREEN runs #119, #120 (5R-4b-2b push), #121 (2d-fix-b push, commit 8faf784), 
-  13 Nov. #121 test count unseen.
-- 2d-fix-b: ACCEPTED with conditions 13 Nov (22 files / 301 tests in agent run; table sums).
-  Conditions: first real Jul Orders upload must show "N duplicate order items merged" + pass 
-  verification (screenshot); "reset after complete/cancelled" not seen in summary. Preview 
-  banner in UploadCentreScreen accepted (prompt task 1 asked for it).
+  bank test column positions.
 - Stage 8 (return performance on the ledger): IN PROGRESS, NOT CLOSED.
   * 8R-1 to 8R-1e reviewed. 8R-1c code accepted.
   * 8R-2 family APPROVED 12 Nov (return loss on landed cost).
   * 8R-2a-3 (cancelled rule, orderRecords from fk_order_items, warnings):
-    BEHAVIOUR APPROVED 12 Nov; CI condition now met. Pending: warning
-    screenshots on SKU/Return screens (8R-2a-3f-b).
+    BEHAVIOUR APPROVED 12 Nov; CI condition met. Pending: warning screenshots
+    on SKU/Return screens (8R-2a-3f-b).
   * 8R-2a-3d added warnings and removed typed 425.00 (its SUMMARY tables were
     wrong; code/tests sound). 8R-2a-3e dropped.
   * Reviewer bridge ledger -> reference is explained (see Verified targets).
 - Side stages:
-  * 2e-fix / 2e-fix-b (bank zero-credit): behaviour confirmed on screen and CI.
-    CLOSED. (Low priority Stage 10 check: APR test asserts raw-sheet values.)
+  * 2e-fix / 2e-fix-b (bank zero-credit): CLOSED. (Low priority Stage 10 check:
+    APR test asserts raw-sheet values.)
   * CI-2 (pnlDashboardModel.test off Firestore): accepted; grep proof unseen.
   * CI-3 (bank test header-name columns): accepted, CI green.
   * 5R-4a (read-cost audit): accepted. 5R-4b-1 (summary builder, pnl_summaries):
     accepted. 5R-4b-2a, 2a-b, 2a-c (hook audit): accepted/complete.
   * 5R-4b-2b (hook refreshSummariesAfterUpload after complete record in
-    commitFlipkartImport / commitAmazonImport / commitMeeshoImport; markSummariesStale;
-    pnl_summaries rules block in repo firestore.rules): ACCEPTED with conditions
-    (try/catch at call sites unseen, CI after push unseen, owner must publish rules).
-  * 2d-fix diagnosis: accepted (defect 89). 2d-fix-b (implementation) ISSUED, not
-    run (prompt in "Prompts to send next").
+    commitFlipkartImport / commitAmazonImport / commitMeeshoImport;
+    markSummariesStale; pnl_summaries rules block): ACCEPTED. Try/catch
+    condition MET 13 Nov (function returns errorCode, never throws; test c
+    lines 613-626 seen; call sites have no try/catch; body unseen, low risk).
+    CI green (#120). Rules block still to be published by the owner (defect 91).
+  * 2d-fix diagnosis: accepted (defect 89). 2d-fix-b (Flipkart dedupe by unique
+    ID, verification by reading expected IDs in chunks of 30, retry writes only
+    missing IDs, currentUploadId reset, preview banner "N duplicate order items
+    merged"): ACCEPTED with conditions 13 Nov (22 files / 301 tests in agent
+    run; per-file table sums to 301). Conditions: (1) first real Jul Orders
+    upload must show the duplicates banner and pass verification (screenshots);
+    (2) "reset after complete or cancelled" not seen in summary (the Jul upload
+    will show whether it matters). Preview banner in UploadCentreScreen accepted
+    (prompt task 1 asked for it). Dedupe lines 448-449 missing from paste
+    (formatting loss, probable).
+  * Rules R-1 (13 Nov): report unreliable (see defects 91, 93). R-1b read-only
+    diagnosis: ACCEPTED. Agent copy of firestore.rules = repo copy + pnl_summaries
+    block (28 "match /" lines vs 27; block at lines 309-313; bypass still at line
+    6; 317 lines). Do NOT paste the agent's whole file into the console.
   * 4d-1 UnmatchedSkusPanel exists already (unreviewed, 4 duplicate listeners).
 - Not approved: 4c, 6, 8.
-- Queue REPLACE first item: "R-1 run and reviewed -> owner publishes rules 
-  (steps from Claude) -> Jul Orders upload (one month per day, after 12:00 
-  noon Dubai quota reset; screenshot of the duplicate-merged banner and passed
-  verification) -> Aug -> Oct -> ..."
-- Queue ADD after Stage 10 items: "R-2 remove bypass (see defect 91)" before 
-  any viewer user goes live; at the latest in Stage 10.
+- Queue (in order): owner adds the pnl_summaries block in the console rules
+  editor and publishes (bypass kept; screenshot of editor bottom) -> Jul Orders
+  upload (one month per day, after 12:00 noon Dubai quota reset; screenshots of
+  the duplicates banner and passed verification) -> Aug Orders -> Oct Orders ->
+  wire markSummariesStale to cost/alias/settings/purchases/opening-stock writes
+  + admin Rebuild button + manual backfill (one month at a time, spread over 2
+  days) -> 5R-4c (screens read summaries, remove whole-collection listeners) ->
+  UnmatchedSkusPanel audit -> 8R-2a-3f-b -> Sep screenshots vs CURRENT ledger
+  Sep -> 8R-1f (Amazon MTR Cancel evidence, read-only) -> 8R-3 (Non-SKU split
+  by marketplace/type, tested vs raw sums) -> close Stage 8 with full STATE.md.
+  Rules work (console publish, repo sync, R-2 bypass removal) runs in parallel
+  and does NOT block uploads, because the bypass keeps the database open.
 - Remaining after Stage 8: GST decision with CA (changes all golden numbers;
   also ask CA why Flipkart TDS ~10x TCS) -> 6 (pipeline carry-forward; remove
   0.7 factor and fallback cost 100; legacy keys) -> defect 33 cleanup -> 4c ->
   9 (GST/TDS/TCS as CA reconciliation report) -> 10 (hardening, backup,
-  deploy, split UploadCentreScreen, publish firestore.rules incl. ms_* and
-  pnl_summaries, enable Firestore scheduled backups, manual live-vs-CSV
-  cost_master/alias check).
+  deploy, split UploadCentreScreen, rules R-2 bypass removal (defect 91; before
+  any viewer goes live, at the latest here), publish firestore.rules incl. ms_*
+  and pnl_summaries, enable Firestore scheduled backups, Amazon/Meesho
+  verification audit (defect 90), manual live-vs-CSV cost_master/alias check).
 - Stage 9 files deleted from AI Studio and GitHub (recoverable from history).
   Rates: Sec 194-O TDS 0.1% of gross sales (5% without PAN/Aadhaar); GST TCS
   (Sec 52) 0.5% of net taxable supplies since 10 Jul 2024.
-- Rules R-1 prompt issued 13 Nov (firestore.rules only, add pnl_summaries 
-  block, keep bypass, print whole file). Not run yet.
-
+ 
 ## Verified targets (Sep 2026, regression)
 - Bank credits: Flipkart 61,423.79 (18); Meesho 105,394.44 (17); Amazon
   5,781.57 (8). SEP_2026.xlsx: 48 lines, 43 marketplace credits.
@@ -277,25 +297,28 @@
 61. settledRowsWithoutOrderRecord 394 (356 Aug, 38 Jul) until Jul/Aug Orders
     uploads complete. Re-check Sep screens after.
 63. Rejected uploads: Settled_Transaction_May2026.xlsx ("could not detect a valid
-    Flipkart report format"; owner to say which slot), and May2026_structured.xlsx
-    in Bank slot. Not needed for Sep.
-64. fk_order_items upload verification: see 89 (diagnosed).
+    Flipkart report format"), and May2026_structured.xlsx in Bank slot. Not
+    needed for Sep. PARKED until the May upload (Stage 10): owner then sends
+    sheet names and header row text only (no data rows).
+64. fk_order_items upload verification: see 89 (diagnosed, fixed in 2d-fix-b).
 66. Banner generic/alert-styled: fix in 8R-2a-3f-b (grey footnote; amber only for
     missing order records). Never reaches 0 while cancelled orders exist.
 67. Reviewer error log: flags "425 sign wrong", "688 vs 863", "595 vs 680" were
-    mistaken and withdrawn.
+    mistaken and withdrawn (see Agent rules, reviewer error log).
 68. Firestore free quota was exhausted 13 Nov (reads 47K/50K, writes 23K/20K).
     Quota reset daily 12:00 noon Dubai. Do NOT delete data. Fix = pnl_summaries
     design (5R-4b/5R-4c). Each upload now adds about 1,000 reads (summary
     rebuild): do not upload 12 months in one day.
-69. CI cause was Node version, not STATE.md (see Stage status). CLOSED.
+69. CI cause was Node version, not STATE.md. CLOSED.
 70/76. pnlDashboardModel.test live Firestore removed in CI-2 (grep proof unseen).
     Lost check live-vs-CSV: Stage 10 manual check.
 71. APR_2026.xlsx anonymised copy now in GitHub samples/ (CLOSED).
 73. Firebase: project name ai-builder-project = Project ID continual-medium-b61jg
     (number 116053236246); database ai-studio-6160b2e9-0c6b-4a7e-80a1-9f528402bf56
     (Enterprise, europe-west2, Firestore Native, under "AI shared quota limits",
-    scheduled backups DISABLED, realtime updates enabled). App config file:
+    scheduled backups DISABLED, realtime updates enabled). Console shows plan
+    Blaze in the sidebar, but this database still shows "AI shared quota limits"
+    and "Upgrade database" (owner task before Stage 10). App config file:
     /firebase-applet-config.json. Backups needed (Stage 10).
 75. 5R-4a audit: all ledger screens use whole-collection onSnapshot, independent
     copies (P&L open about 29,154 reads; P&L + SKU + Return about 87,462).
@@ -311,26 +334,43 @@
     55/187/205.
 87. Screen 13 Nov: Bank slot shows APR_2026.xlsx uploaded "0 of 0 rows"; April
     Flipkart Orders 9 of 9, Returns 0 of 0 (no partial import on small files).
-88. 5R-4b-2b accepted with conditions (see Stage status).
+88. 5R-4b-2b accepted (conditions met, see Stage status). Owner still to publish
+    the pnl_summaries rules block (defect 91).
 89. 2d-fix diagnosis: (a) expected = parsed rows not unique IDs (duplicate
     orderItemIds collapse, explains Aug 558/559); (b) actual = getCountFromServer
     filtered by lastUploadId; (c) reused currentUploadId (UploadCentreScreen.tsx:
     1660) after a failed attempt explains Jul 2541/1984. Samples hold only Sep
     (0 duplicates); Jul/Aug duplicates inferred, not proven. fk_order_items
-    currently holds PARTIAL Jul/Aug data from failed attempts.
+    currently holds PARTIAL Jul/Aug data from failed attempts. Fixed in
+    2d-fix-b (conditions pending the Jul upload).
 90. Amazon/Meesho upload verification not audited for the same duplicate-ID bug.
-91. firestore.rules (repo AND live console, last published 4 Nov 2026 12:15 PM, 
-    database ai-studio-6160b2e9-0c6b-4a7e-80a1-9f528402bf56) contain "TEMPORARY
-    MIGRATION BYPASS" match /{document=**} allow read, write: if true. This opens
-    the whole database and overrides every role rule. NO pnl_summaries block exists 
-    in repo or live (owner checked 13 Nov). While the bypass exists pnl_summaries 
-    works anyway. Plan: Step 1 (prompt R-1) adds the pnl_summaries block only and
-    keeps the bypass; owner publishes. Step 2 (later, separate stage) removes the
-    bypass, only after (a) owner confirms no Apps Script writes to Firestore 
-    (check script.google.com) and (b) rules tested in the Rules Playground for admin
-    and viewer on every collection the app writes, with rollback via console version history. Risk: the role rules have never been exercised, for example cost_master update allows only the "active" key.
-92. 2d-fix-b verification now reads each unique doc (about 2.5k reads per Orders 
+91. firestore.rules: live console (last published 4 Nov 2026 12:15 PM, database
+    ai-studio-6160b2e9-0c6b-4a7e-80a1-9f528402bf56) and the GitHub copy contain
+    "TEMPORARY MIGRATION BYPASS" match /{document=**} allow read, write: if true
+    (opens the whole database, overrides every role rule; breaks the spec).
+    Neither has a pnl_summaries block. AI Studio agent copy (317 lines, R-1b) =
+    repo copy + pnl_summaries block (lines 309-313), bypass still at line 6; the
+    block is not on GitHub, so an agent edit never reached the repo. While the
+    bypass exists, pnl_summaries works anyway. Plan: (1) owner adds the
+    pnl_summaries block in the console editor, bypass kept, screenshot of the
+    editor bottom; (2) repo and AI Studio copy synced to the live text (owner
+    pastes live text into the prompt); (3) R-2 removes the bypass only after the
+    owner confirms no Apps Script writes to Firestore (owner believes none; check
+    script.google.com) and the rules are tested in the Rules Playground for admin
+    and viewer on every collection the app writes (role rules never exercised;
+    for example cost_master update allows only the "active" key), with rollback
+    via console version history. R-2 before any viewer user goes live, at the
+    latest in Stage 10.
+92. 2d-fix-b verification reads each unique doc (about 2.5k reads per Orders
     upload + about 1k summary rebuild). One upload month per day.
+93. Agent SUMMARYs keep reporting file states that disagree with each other or
+    with GitHub (R-1: block "existing", bypass "absent", complete file not
+    printed). Treat any agent statement about repo content as unproven until raw
+    grep or cat output is shown or the owner shows the GitHub file.
+94. Hooks: Flipkart call passes parsedRows by slot (bank_statement slot falls to
+    data.returns); Meesho passes parsedRows only for the payments slot
+    (undefined for orders/returns slots). How touched settlement months are
+    derived in those cases is unseen. Check in 5R-4c or Stage 10.
 
 ## Collections
 allowedUsers, settings, cost_master, opening_stock, purchases,
@@ -364,44 +404,18 @@ ms_batches, ms_uploads, pnl_summaries (NEW). (sku_variants unused.)
   RTO = packing only. Settlement month = headline basis.
 - DECIDED 13 Nov: stay on Firebase for now. Option: Blaze/pay-as-you-go with
   budget alert (same free allowance; verify pricing) to lift "AI shared quota"
-  limits; owner task before Stage 10. Revisit Postgres/Supabase at Stage 10 only.
+  limits; owner task before Stage 10 ("Upgrade database" on the database page).
+  Revisit Postgres/Supabase at Stage 10 only.
 - DECIDED 13 Nov: pnl_summaries design (rebuild on touched months incl. Orders
   uploads; flag-only stale; failure = upload stays complete, summary stale;
   manual backfill one month at a time; delivered-unpaid orders remain visible in
   Tracking; all raw rows still written fully).
+- DECIDED 13 Nov: rules in two steps: add pnl_summaries block now (bypass kept),
+  remove bypass later in R-2 after tests (defect 91).
 
-## Prompts to send next  (REPLACE entire section)
-### Stage R-1
-Stage R-1 (rules text only). Allowed file ONLY: firestore.rules. Everything else 
-READ-ONLY. Do not deploy anything. Do not touch auth or Firebase config. No git.
-1. Add this block INSIDE the "match /databases/{database}/documents" block, after 
-the ms_uploads block:
-match /pnl_summaries/{docId} {
-  allow read: if isAllowedUser();
-  allow create, update: if isAdmin();
-  allow delete: if false;
-}
-2. Do NOT remove or change anything else, including the "TEMPORARY MIGRATION BYPASS" block.
-3. Print the COMPLETE firestore.rules inside the SUMMARY Key numbers and the output of: grep -n "pnl_summaries" firestore.rules
-Stop after this task.
-(then append the standard SUMMARY template)
-
-### Read-only evidence prompt (hook try/catch)
-Read-only. Print (no edits): (a) grep -n -B2 -A4 "refreshSummariesAfterUpload" over src/flipkart/storage.ts src/amazon/storage.ts src/meesho/storage.ts src/components/UploadCentreScreen.tsx; (b) the full text of test (c) in src/ledger/summaryRefresh.test.ts (max 25 lines). Max 60 lines total. Stop after this task.
-(then append the standard SUMMARY template)
-
-### SUMMARY template (keep as is)
-(unchanged)
-
-### Stage 2d-fix-b
-Stage 2d-fix-b. Allowed files ONLY: src/flipkart/storage.ts, src/flipkart/storage.test.ts, src/components/UploadCentreScreen.tsx (ONLY the currentUploadId reset, around line 1660 and where slot/month/file change). Everything else READ-ONLY; if a fix needs another file, STOP and report its name. Do not touch auth, Firebase config or rules. No git. Do not apply to Amazon or Meesho.
-1. buildFlipkartImportPayloads: deduplicate ops by (collectionName, id); last row wins; expectedCounts = unique IDs. Return also duplicatesDropped per collection (count only, with the orderItemIds list max 10, no customer data). Show this number in the upload preview as "N duplicate order items merged".
-2. Post-write verification in commitFlipkartImport and verifySlotUploadCounts: for each collection, read the expected IDs in chunks of 30 (getDocs where documentId() in chunk), count found docs; stored must equal unique expected. Remove the lastUploadId count as the pass criterion. Write the "complete" record only when counts match; a retry rewrites only missing IDs.
-3. UploadCentreScreen: reset currentUploadId when slot, month or file changes, and after a complete or cancelled upload. A retry of the SAME file in the same slot may reuse it.
-4. Tests with the REAL Sep samples and a mocked Firestore: (a) 493 rows, 0 duplicates -> expected 493; (b) a test input made by reading the real Orders sample and re-adding one real row (derived, not typed) -> 494 rows, expected 493, duplicatesDropped 1; (c) verification passes when all unique IDs exist; (d) fails and retry writes only the missing ID. Missing sample must fail.
-5. Key numbers, SHORT (max 40 lines): changed lines of the dedupe, the verification and the reset (max 15 lines each), per-file vitest table with totals, tsc.
-Stop after this task.
-(then append the standard SUMMARY template)
+## Prompts to send next
+- None queued for the agent. Next agent prompt only if the Jul upload fails or
+  at the next queue item (wiring markSummariesStale / Rebuild button).
 
 ### SUMMARY template (append to every agent prompt)
 End your reply with exactly this block, every requested table INSIDE it under Key numbers:
@@ -415,11 +429,15 @@ tsc:
 Key numbers: <pasted tables, lines and grep output>
 Deviations from prompt:
 
-## Last result  (REPLACE)
-- 13 Nov late evening: owner confirmed pnl_summaries NOT in repo rules; live console 
-rules identical to repo and contain the bypass; owner believes nothing else writes to
-Firestore (to be confirmed at script.google.com before bypass removal).
-- Owner TODO: run prompt R-1 and paste SUMMARY; run the read-only evidence prompt and 
-paste SUMMARY; check script.google.com for Firestore scripts; NO Orders uploads until 
-rules are published and the quota has reset. Settled_Transaction_May2026.xlsx parked 
-until May upload (send header row only then).
+## Last result (13 Nov 2026, late night)
+- 2d-fix-b accepted with conditions. CI #119-#121 green. 5R-4b-2b try/catch
+  condition met. R-1 report unreliable; R-1b accepted (agent copy = repo +
+  block, bypass kept). Rules do not block uploads (bypass).
+- Owner TODO: (1) add the pnl_summaries block in the console rules editor
+  (steps given), Publish, send a screenshot of the bottom of the editor; (2) 14
+  Nov after 12:00 noon Dubai: Jul Flipkart Orders upload ONLY, send screenshots
+  (duplicates banner and passed verification); (3) check script.google.com for
+  Firestore scripts before R-2; (4) Settled_Transaction_May2026.xlsx parked
+  until the May upload (send sheet names and header row only then).
+- 14 Nov: owner asked for a file check. The uploaded STATE__1_.md was stale and
+  contradictory (patch labels pasted as text, old queue, old prompts, "R-1 not run"). 
