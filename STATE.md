@@ -441,3 +441,4 @@ Deviations from prompt:
   until the May upload (send sheet names and header row only then).
 - 14 Nov: owner asked for a file check. The uploaded STATE__1_.md was stale and
   contradictory (patch labels pasted as text, old queue, old prompts, "R-1 not run"). 
+- 14 Nov: owner pasted the console editor text with the pnl_summaries block placed AFTER the closing "  }" of the documents block (red syntax error, not published). Fix given: move the block above that "  }". Awaiting screenshot of the published editor bottom.
