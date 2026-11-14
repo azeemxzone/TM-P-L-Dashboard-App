@@ -24,7 +24,7 @@ export const PNL_SUMMARIES_COLLECTION = 'pnl_summaries';
 export const LEDGER_SUMMARY_SCHEMA_VERSION = 1;
 export const SUMMARY_BATCH_SIZE = 400;
 
-const ALL_PLATFORMS: Marketplace[] = ['Flipkart', 'Amazon', 'Meesho'];
+export const ALL_PLATFORMS: Marketplace[] = ['Flipkart', 'Amazon', 'Meesho'];
 
 function round2(val: number): number {
   if (isNaN(val) || !isFinite(val)) return 0;
@@ -33,6 +33,21 @@ function round2(val: number): number {
 
 export function getSummaryDocId(platform: Marketplace, settlementMonth: string): string {
   return `${platform}_${settlementMonth.trim()}`;
+}
+
+export function getSummaryDocIdsForMonths(
+  months: string[],
+  platforms: Marketplace[] = ALL_PLATFORMS
+): string[] {
+  const ids: string[] = [];
+  for (const month of months) {
+    const trimmed = month.trim();
+    if (!trimmed) continue;
+    for (const platform of platforms) {
+      ids.push(getSummaryDocId(platform, trimmed));
+    }
+  }
+  return ids;
 }
 
 function extractMonthsFromInput(input: BuildSummaryDocsInput): string[] {
