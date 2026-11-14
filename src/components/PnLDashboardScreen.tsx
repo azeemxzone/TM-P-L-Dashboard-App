@@ -8,6 +8,7 @@ import {
   getSessionReadCount,
   loadSummariesByIds,
 } from '../ledger/summaryCache';
+import { PlatformRebuildResult, rebuildSummaryForMonth } from '../ledger/summaryRebuild';
 import { formatINR } from '../utils/costCalculator';
 import { PipelineTrackerScreen } from './PipelineTrackerScreen';
 import { SkuPerformanceScreen } from './SkuPerformanceScreen';
@@ -150,6 +151,12 @@ export const PnLDashboardScreen: React.FC = () => {
   const [sessionReads, setSessionReads] = useState<number>(() => getSessionReadCount());
   const [queryError, setQueryError] = useState<QueryErrorState | null>(null);
   const [refreshNonce, setRefreshNonce] = useState<number>(0);
+  const [confirmRebuildOpen, setConfirmRebuildOpen] = useState<boolean>(false);
+  const [rebuilding, setRebuilding] = useState<boolean>(false);
+  const [rebuildResults, setRebuildResults] = useState<{
+    month: string;
+    items: PlatformRebuildResult[];
+  } | null>(null);
   const forceRefreshRef = useRef<boolean>(false);
 
   const monthsInFY = useMemo(() => getMonthsForFY(selectedFY), [selectedFY]);
@@ -193,9 +200,41 @@ export const PnLDashboardScreen: React.FC = () => {
     };
   }, [fyDocIds, user?.uid, user?.email, refreshNonce]);
 
+  useEffect(() => {
+    setConfirmRebuildOpen(false);
+  }, [selectedMonth]);
+
   const handleRefresh = () => {
     forceRefreshRef.current = true;
     setRefreshNonce((prev) => prev + 1);
+  };
+
+  const handleConfirmRebuild = async () => {
+    if (!isAdmin || rebuilding) return;
+    setConfirmRebuildOpen(false);
+    setRebuilding(true);
+    const targetMonth = selectedMonth;
+    try {
+      const items = await rebuildSummaryForMonth(db, targetMonth);
+      setRebuildResults({ month: targetMonth, items });
+      try {
+        const monthDocIds = getSummaryDocIdsForMonths([targetMonth]);
+        const refreshed = await loadSummariesByIds(db, monthDocIds, {
+          forceRefresh: true,
+          userKey: user?.uid || user?.email || null,
+        });
+        setSummariesById((prev) => ({ ...prev, ...refreshed.summaries }));
+        setSessionReads(refreshed.sessionReads);
+      } catch (err: any) {
+        setQueryError({
+          code: err?.code || 'unknown',
+          collection: 'pnl_summaries',
+        });
+        setSessionReads(getSessionReadCount());
+      }
+    } finally {
+      setRebuilding(false);
+    }
   };
 
   const fkDoc = summariesById[getSummaryDocId('Flipkart', selectedMonth)] ?? null;
@@ -348,15 +387,62 @@ export const PnLDashboardScreen: React.FC = () => {
           {/* Refresh Button */}
           <button
             onClick={handleRefresh}
-            disabled={loadingSummaries}
+            disabled={loadingSummaries || rebuilding}
             className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer disabled:opacity-60"
             title="Refetch pre-computed summaries from Firestore"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loadingSummaries ? 'animate-spin' : ''}`} />
             Refresh
           </button>
+
+          {isAdmin && (
+            <button
+              onClick={() => setConfirmRebuildOpen(true)}
+              disabled={rebuilding || loadingSummaries}
+              className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${rebuilding ? 'animate-spin' : ''}`} />
+              {rebuilding ? `Rebuilding ${selectedMonth}...` : `Rebuild summary for ${selectedMonth}`}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Admin Rebuild Confirm Dialog */}
+      {isAdmin && confirmRebuildOpen && (
+        <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-100">
+          <span className="font-semibold">About 2,300 reads for one month. Continue?</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setConfirmRebuildOpen(false)}
+              className="px-3 py-1 rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 font-bold cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmRebuild}
+              className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Rebuild Result Line */}
+      {isAdmin && rebuildResults && (
+        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-2.5 text-xs font-mono text-slate-700 dark:text-slate-200 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="font-bold">Rebuild {rebuildResults.month}:</span>
+          {rebuildResults.items.map((r) => (
+            <span key={r.platform} className={r.errorCode ? 'text-red-600 dark:text-red-400 font-bold' : ''}>
+              {r.platform}: {r.docsRead} reads{r.errorCode ? ` (Error: ${r.errorCode})` : r.written ? ' (written)' : ''}
+            </span>
+          ))}
+          <span className="font-bold">
+            Total: {rebuildResults.items.reduce((sum, r) => sum + r.docsRead, 0)} reads
+          </span>
+        </div>
+      )}
 
       {/* Stale Summary Warning Label */}
       {viewMode === 'overview' && staleVisibleDocs.length > 0 && (

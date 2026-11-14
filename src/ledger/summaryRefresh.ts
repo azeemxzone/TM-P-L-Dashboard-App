@@ -357,7 +357,7 @@ async function loadSharedSummaryInputs(db: Firestore): Promise<SharedSummaryInpu
   };
 }
 
-async function fetchPlatformMonthSummaryDoc(
+export async function fetchPlatformMonthSummaryDoc(
   db: Firestore,
   platform: Marketplace,
   month: string,
